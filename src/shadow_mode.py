@@ -256,10 +256,10 @@ class WebSocketServer:
 
         # Initialize model manager
         self.model_mgr = ModelManager()
-        model_name = config.get('model', {}).get('name', 'carla_pilotnet')
+        self.model_name = config.get('model', {}).get('name', 'carla_pilotnet')
         weights_path = config.get('model', {}).get('weights_path', 'models/pilotnet_carla.pth')
-        print(f"Loading model: {model_name}")
-        self.model_mgr.load_model(model_name, weights=weights_path)
+        print(f"Loading model: {self.model_name}")
+        self.model_mgr.load_model(self.model_name, weights=weights_path)
 
         self.frame_count = 0
         self.start_time = None
@@ -323,7 +323,7 @@ class WebSocketServer:
                 'type': 'prediction',
                 'steering': ai_steer,
                 'confidence': 0.85 + 0.1 * np.random.random(),
-                'model': self.model_mgr.current_model_name or 'unknown',
+                'model': self.model_name,
                 'frame_count': self.frame_count,
                 'uptime': elapsed
             }
@@ -332,6 +332,7 @@ class WebSocketServer:
             model_name = data.get('model', 'carla_pilotnet')
             try:
                 self.model_mgr.load_model(model_name)
+                self.model_name = model_name
                 return {
                     'type': 'model_switched',
                     'model': model_name,
@@ -350,7 +351,7 @@ class WebSocketServer:
             return {
                 'type': 'status',
                 'connected_clients': len(self.clients),
-                'model': self.model_mgr.current_model_name or 'unknown',
+                'model': self.model_name,
                 'frame_count': self.frame_count,
                 'uptime': elapsed,
                 'fps': self.frame_count / elapsed if elapsed > 0 else 0
@@ -382,7 +383,7 @@ class WebSocketServer:
         print("SHADOW MODE - WEBSOCKET SERVER")
         print("=" * 50)
         print(f"\nListening on ws://{self.host}:{self.port}")
-        print(f"Model: {self.model_mgr.current_model_name}")
+        print(f"Model: {self.model_name}")
         print("\nConnect from browser demo using:")
         print(f"  Host: <your-ip>")
         print(f"  Port: {self.port}")
