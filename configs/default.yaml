@@ -1,0 +1,60 @@
+# CARLA Shadow Driver Configuration
+
+# CARLA Server Connection
+carla:
+  host: "localhost"  # Use localhost with SSH tunnel
+  port: 2000
+  timeout: 10.0
+
+# Vehicle settings
+vehicle:
+  model: "vehicle.tesla.model3"  # Default car model
+  spawn_point: null  # null = random spawn
+
+# Camera settings
+camera:
+  width: 640
+  height: 480
+  fov: 90
+  fps: 30
+  # Camera position relative to vehicle
+  position:
+    x: 1.5   # Forward from center
+    y: 0.0   # Centered
+    z: 1.4   # Height (dashboard level)
+
+# Recording settings
+recording:
+  enabled: true
+  output_dir: "data/recordings"
+  save_images: true
+  save_telemetry: true
+  image_format: "jpg"  # jpg or png
+  jpeg_quality: 85
+
+# PilotNet model settings
+model:
+  name: "carla_pilotnet"  # Options: 'carla_pilotnet', 'pilotnet'
+  weights_path: "models/pilotnet_carla.pth"
+  device: "mps"  # Use Apple Metal on M1/M2, or "cuda", "cpu", "auto"
+
+# Shadow mode settings
+shadow_mode:
+  # Visualization
+  show_camera: true
+  show_trajectory: true
+  show_steering_wheel: true
+
+  # Overlay colors (BGR)
+  human_color: [0, 255, 0]      # Green for human input
+  ai_color: [255, 100, 0]       # Blue for AI suggestion
+
+  # Confidence threshold for AI suggestions
+  confidence_threshold: 0.5
+
+# Control settings (for optional Phase 6)
+control:
+  max_steering_rate: 0.1      # Max change per frame
+  max_throttle: 0.5           # Safety limit
+  max_brake: 1.0
+  emergency_stop_key: "space"

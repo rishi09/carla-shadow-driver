@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enhanced Shadow Mode - CARLA Shadow Driver</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: linear-gradient(135deg, #1a1a2e 0%, #2e1a1a 100%);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            color: white;
+            overflow-x: hidden;
+        }
+        h1 {
+            margin: 20px 0 5px;
+            font-size: 1.8rem;
+            text-shadow: 0 2px 10px rgba(0,0,0,0.5);
+        }
+        .subtitle {
+            color: #888;
+            margin-bottom: 15px;
+            font-size: 0.9rem;
+        }
+        #game-container {
+            position: relative;
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 30px 80px rgba(0,0,0,0.6);
+        }
+        canvas {
+            display: block;
+        }
+        .controls {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            margin-top: 20px;
+            padding: 15px 25px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 10px;
+            max-width: 900px;
+        }
+        .control-group {
+            text-align: center;
+            min-width: 120px;
+        }
+        .control-group h3 {
+            font-size: 0.7rem;
+            color: #888;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .key {
+            display: inline-block;
+            padding: 10px 16px;
+            background: #333;
+            border-radius: 8px;
+            font-weight: bold;
+            margin: 3px;
+            min-width: 45px;
+            border: 2px solid #555;
+            transition: all 0.1s;
+        }
+        .key.active {
+            background: #4CAF50;
+            border-color: #4CAF50;
+            transform: scale(0.95);
+        }
+        .stats {
+            display: flex;
+            gap: 30px;
+            margin-top: 15px;
+            padding: 12px 20px;
+            background: rgba(0,0,0,0.3);
+            border-radius: 8px;
+            font-size: 0.85rem;
+            flex-wrap: wrap;
+            max-width: 900px;
+            justify-content: center;
+        }
+        .stat {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .stat-label {
+            color: #888;
+            font-size: 0.7rem;
+            margin-bottom: 3px;
+        }
+        .stat-value {
+            color: #4CAF50;
+            font-weight: bold;
+            font-size: 1.1rem;
+        }
+        .legend {
+            display: flex;
+            gap: 25px;
+            margin-top: 12px;
+            font-size: 0.8rem;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .legend-dot {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+        }
+        .weather-controls {
+            display: flex;
+            gap: 10px;
+            margin-top: 12px;
+        }
+        .weather-btn {
+            padding: 8px 16px;
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 6px;
+            color: white;
+            cursor: pointer;
+            font-size: 0.8rem;
+            transition: all 0.2s;
+        }
+        .weather-btn:hover {
+            background: rgba(255,255,255,0.2);
+        }
+        .weather-btn.active {
+            background: #4CAF50;
+            border-color: #4CAF50;
+        }
+    </style>
+</head>
+<body>
+    <h1>🚗 Enhanced Shadow Mode Demo</h1>
+    <p class="subtitle">Real-time AI Driving Simulation with Weather & Obstacles</p>
+
+    <div id="game-container">
+        <canvas id="canvas" width="900" height="600"></canvas>
+    </div>
+
+    <div class="controls">
+        <div class="control-group">
+            <h3>Drive</h3>
+            <div><span class="key" id="key-w">W</span></div>
+            <div>
+                <span class="key" id="key-a">A</span>
+                <span class="key" id="key-s">S</span>
+                <span class="key" id="key-d">D</span>
+            </div>
+        </div>
+        <div class="control-group">
+            <h3>Or Arrows</h3>
+            <div><span class="key" id="key-up">↑</span></div>
+            <div>
+                <span class="key" id="key-left">←</span>
+                <span class="key" id="key-down">↓</span>
+                <span class="key" id="key-right">→</span>
+            </div>
+        </div>
+        <div class="control-group">
+            <h3>Emergency</h3>
+            <div><span class="key" id="key-space">SPACE</span></div>
+        </div>
+    </div>
+
+    <div class="weather-controls">
+        <button class="weather-btn active" onclick="setWeather('clear')">☀️ Clear</button>
+        <button class="weather-btn" onclick="setWeather('rain')">🌧️ Rain</button>
+        <button class="weather-btn" onclick="setWeather('fog')">🌫️ Fog</button>
+        <button class="weather-btn" onclick="setWeather('night')">🌙 Night</button>
+    </div>
+
+    <div class="legend">
+        <div class="legend-item">
+            <div class="legend-dot" style="background: #4CAF50;"></div>
+            <span>Human (You)</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-dot" style="background: #2196F3;"></div>
+            <span>AI Prediction</span>
+        </div>
+    </div>
+
+    <div class="stats">
+        <div class="stat">
+            <div class="stat-label">SPEED</div>
+            <div class="stat-value" id="stat-speed">0</div>
+        </div>
+        <div class="stat">
+            <div class="stat-label">STEERING</div>
+            <div class="stat-value" id="stat-steer">0.00</div>
+        </div>
+        <div class="stat">
+            <div class="stat-label">AI STEER</div>
+            <div class="stat-value" id="stat-ai">0.00</div>
+        </div>
+        <div class="stat">
+            <div class="stat-label">DIVERGENCE</div>
+            <div class="stat-value" id="stat-divergence">0%</div>
+        </div>
+        <div class="stat">
+            <div class="stat-label">ROAD CURVE</div>
+            <div class="stat-value" id="stat-curve">0.00</div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const W = canvas.width;
+        const H = canvas.height;
+
+        // Game state
+        let state = {
+            throttle: 0,
+            brake: 0,
+            steer: 0,
+            speed: 0,
+            position: 0,  // Lateral position
+            roadOffset: 0,
+            aiSteer: 0,
+            keys: {},
+            weather: 'clear',
+            time: 0,
+            roadCurvature: 0,  // Current road curve
+            targetCurvature: 0,  // Target curvature for smooth transitions
+            obstacles: [],
+            particles: []  // For rain/snow
+        };
+
+        // Road curve waypoints (for interesting roads)
+        const curveWaypoints = [
+            {pos: 0, curve: 0},
+            {pos: 200, curve: 0.3},
+            {pos: 400, curve: -0.2},
+            {pos: 600, curve: 0.5},
+            {pos: 800, curve: 0},
+            {pos: 1000, curve: -0.4},
+            {pos: 1200, curve: 0}
+        ];
+
+        // Obstacle class
+        class Obstacle {
+            constructor(type, distance, lane) {
+                this.type = type;  // 'car', 'pedestrian', 'cone'
+                this.distance = distance;
+                this.lane = lane;  // -1 (left), 0 (center), 1 (right)
+                this.width = type === 'car' ? 40 : 20;
+                this.height = type === 'car' ? 60 : 30;
+            }
+
+            update(speed) {
+                this.distance -= speed * 0.5;
+            }
+
+            draw(ctx, roadCenterX, horizon, roadOffset) {
+                const progress = Math.max(0, Math.min(1, this.distance / 500));
+                const y = horizon + (H - horizon) * (1 - progress);
+
+                if (y < horizon || y > H) return;
+
+                const scale = 0.2 + (1 - progress) * 0.8;
+                const laneOffset = this.lane * 80 * scale;
+                const x = roadCenterX + laneOffset;
+
+                // Draw obstacle
+                ctx.save();
+                ctx.translate(x, y);
+                ctx.scale(scale, scale);
+
+                if (this.type === 'car') {
+                    // Simple car shape
+                    ctx.fillStyle = `rgba(${Math.random() * 100 + 100}, 50, 50, 0.9)`;
+                    ctx.fillRect(-this.width/2, -this.height, this.width, this.height);
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+                    ctx.fillRect(-this.width/2 + 5, -this.height + 5, this.width - 10, 20);
+                } else if (this.type === 'pedestrian') {
+                    // Simple person
+                    ctx.fillStyle = 'rgba(200, 200, 50, 0.9)';
+                    ctx.beginPath();
+                    ctx.arc(0, -this.height + 10, 8, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.fillRect(-6, -this.height + 18, 12, 15);
+                }
+
+                ctx.restore();
+            }
+        }
+
+        // Initialize obstacles
+        function spawnObstacle() {
+            if (Math.random() < 0.02 && state.obstacles.length < 5) {
+                const types = ['car', 'pedestrian'];
+                const type = types[Math.floor(Math.random() * types.length)];
+                const lane = Math.floor(Math.random() * 3) - 1;
+                state.obstacles.push(new Obstacle(type, 500 + Math.random() * 200, lane));
+            }
+        }
+
+        // Weather effects
+        function setWeather(weather) {
+            state.weather = weather;
+            state.particles = [];
+
+            // Update button states
+            document.querySelectorAll('.weather-btn').forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+
+            // Initialize weather particles
+            if (weather === 'rain') {
+                for (let i = 0; i < 100; i++) {
+                    state.particles.push({
+                        x: Math.random() * W,
+                        y: Math.random() * H,
+                        speed: 10 + Math.random() * 10
+                    });
+                }
+            }
+        }
+
+        // Input handling
+        document.addEventListener('keydown', (e) => {
+            state.keys[e.key.toLowerCase()] = true;
+            state.keys[e.code] = true;
+            updateKeyDisplay();
+        });
+        document.addEventListener('keyup', (e) => {
+            state.keys[e.key.toLowerCase()] = false;
+            state.keys[e.code] = false;
+            updateKeyDisplay();
+        });
+
+        function updateKeyDisplay() {
+            document.getElementById('key-w').classList.toggle('active', state.keys['w'] || state.keys['ArrowUp']);
+            document.getElementById('key-a').classList.toggle('active', state.keys['a'] || state.keys['ArrowLeft']);
+            document.getElementById('key-s').classList.toggle('active', state.keys['s'] || state.keys['ArrowDown']);
+            document.getElementById('key-d').classList.toggle('active', state.keys['d'] || state.keys['ArrowRight']);
+            document.getElementById('key-up').classList.toggle('active', state.keys['ArrowUp']);
+            document.getElementById('key-left').classList.toggle('active', state.keys['ArrowLeft']);
+            document.getElementById('key-down').classList.toggle('active', state.keys['ArrowDown']);
+            document.getElementById('key-right').classList.toggle('active', state.keys['ArrowRight']);
+            document.getElementById('key-space').classList.toggle('active', state.keys[' ']);
+        }
+
+        // Enhanced AI that considers road curvature
+        function simulateAI(position, curvature, speed) {
+            // AI tries to: 1) center the car, 2) follow road curve, 3) avoid obstacles
+            let correction = -position * 0.9;  // Lane centering
+            correction += curvature * 0.7;      // Follow curve
+
+            // Add realistic "thinking" delay based on speed
+            correction += Math.sin(state.time * 0.1) * 0.03;
+
+            // Obstacle avoidance (simple)
+            for (const obs of state.obstacles) {
+                if (obs.distance < 150 && obs.distance > 50 && Math.abs(obs.lane * 0.3 - position) < 0.2) {
+                    correction += (obs.lane > 0 ? -0.4 : 0.4);
+                }
+            }
+
+            return Math.max(-1, Math.min(1, correction));
+        }
+
+        // Update physics
+        function update() {
+            state.time++;
+
+            // Process input
+            if (state.keys['w'] || state.keys['ArrowUp']) {
+                state.throttle = Math.min(1, state.throttle + 0.05);
+                state.brake = 0;
+            } else if (state.keys['s'] || state.keys['ArrowDown']) {
+                state.throttle = 0;
+                state.brake = Math.min(1, state.brake + 0.08);
+            } else {
+                state.throttle = Math.max(0, state.throttle - 0.02);
+                state.brake = Math.max(0, state.brake - 0.04);
+            }
+
+            if (state.keys[' ']) {
+                state.brake = 1;
+                state.throttle = 0;
+            }
+
+            // Steering
+            if (state.keys['a'] || state.keys['ArrowLeft']) {
+                state.steer = Math.max(-1, state.steer - 0.06);
+            } else if (state.keys['d'] || state.keys['ArrowRight']) {
+                state.steer = Math.min(1, state.steer + 0.06);
+            } else {
+                state.steer *= 0.9;
+                if (Math.abs(state.steer) < 0.01) state.steer = 0;
+            }
+
+            // Update speed (affected by weather)
+            const weatherMultiplier = state.weather === 'rain' ? 0.8 : state.weather === 'fog' ? 0.9 : 1.0;
+            state.speed += (state.throttle * 3 * weatherMultiplier - state.brake * 5 - state.speed * 0.01);
+            state.speed = Math.max(0, Math.min(150, state.speed));
+
+            // Road curvature (dynamic)
+            const roadProgress = (state.roadOffset / 100) % 1200;
+            let targetCurve = 0;
+            for (let i = 0; i < curveWaypoints.length - 1; i++) {
+                const wp1 = curveWaypoints[i];
+                const wp2 = curveWaypoints[i + 1];
+                if (roadProgress >= wp1.pos && roadProgress < wp2.pos) {
+                    const t = (roadProgress - wp1.pos) / (wp2.pos - wp1.pos);
+                    targetCurve = wp1.curve + (wp2.curve - wp1.curve) * t;
+                    break;
+                }
+            }
+            state.roadCurvature += (targetCurve - state.roadCurvature) * 0.02;
+
+            // Update position (affected by steering and road curve)
+            state.position += (state.steer - state.roadCurvature * 0.5) * state.speed * 0.0003;
+            state.position = Math.max(-0.9, Math.min(0.9, state.position));
+
+            // Slight drift to center
+            state.position *= 0.998;
+
+            // Road animation
+            state.roadOffset += state.speed * 0.5;
+
+            // Obstacles
+            spawnObstacle();
+            state.obstacles = state.obstacles.filter(obs => {
+                obs.update(state.speed);
+                return obs.distance > -50;
+            });
+
+            // Weather particles
+            if (state.weather === 'rain') {
+                for (const p of state.particles) {
+                    p.y += p.speed;
+                    if (p.y > H) {
+                        p.y = 0;
+                        p.x = Math.random() * W;
+                    }
+                }
+            }
+
+            // AI prediction
+            state.aiSteer = simulateAI(state.position, state.roadCurvature, state.speed);
+
+            // Update stats
+            document.getElementById('stat-speed').textContent = Math.round(state.speed);
+            document.getElementById('stat-steer').textContent = state.steer.toFixed(2);
+            document.getElementById('stat-ai').textContent = state.aiSteer.toFixed(2);
+            const divergence = Math.abs(state.steer - state.aiSteer) * 100;
+            document.getElementById('stat-divergence').textContent = Math.round(divergence) + '%';
+            document.getElementById('stat-curve').textContent = state.roadCurvature.toFixed(2);
+        }
+
+        // Drawing
+        function draw() {
+            // Clear
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, W, H);
+
+            // Sky
+            const horizon = H * 0.40;
+            let skyColor1, skyColor2;
+
+            if (state.weather === 'night') {
+                skyColor1 = '#0a0a1a';
+                skyColor2 = '#1a1a2a';
+            } else if (state.weather === 'fog') {
+                skyColor1 = '#888';
+                skyColor2 = '#ccc';
+            } else if (state.weather === 'rain') {
+                skyColor1 = '#334';
+                skyColor2 = '#556';
+            } else {
+                skyColor1 = '#1e3a5f';
+                skyColor2 = '#87CEEB';
+            }
+
+            const skyGrad = ctx.createLinearGradient(0, 0, 0, horizon);
+            skyGrad.addColorStop(0, skyColor1);
+            skyGrad.addColorStop(1, skyColor2);
+            ctx.fillStyle = skyGrad;
+            ctx.fillRect(0, 0, W, horizon);
+
+            // Sun/Moon
+            if (state.weather !== 'fog') {
+                ctx.beginPath();
+                ctx.arc(W * 0.8, H * 0.15, state.weather === 'night' ? 30 : 45, 0, Math.PI * 2);
+                ctx.fillStyle = state.weather === 'night' ? '#ddd' : '#FFD700';
+                ctx.fill();
+            }
+
+            // Ground
+            const groundColor = state.weather === 'night' ? '#1a2a1a' : '#2d5016';
+            ctx.fillStyle = groundColor;
+            ctx.fillRect(0, horizon, W, H - horizon);
+
+            // Road with curvature
+            const roadCenterX = W / 2 + state.position * 250 + state.roadCurvature * 150;
+
+            ctx.beginPath();
+            ctx.moveTo(roadCenterX - 60, horizon);
+            ctx.lineTo(roadCenterX + 60, horizon);
+
+            // Create curved road
+            const segments = 20;
+            for (let i = 0; i <= segments; i++) {
+                const t = i / segments;
+                const y = horizon + (H - horizon) * t;
+                const curveInfluence = Math.sin(t * Math.PI) * 2;
+                const offset = state.roadCurvature * 200 * t + Math.sin((state.roadOffset * 0.01 + t * 5)) * 30 * t;
+                const x = W / 2 + state.position * (250 - 200 * t) + offset;
+                const width = 60 + 350 * t;
+
+                if (i === 0) {
+                    ctx.lineTo(x + width, y);
+                } else {
+                    ctx.lineTo(x + width, y);
+                }
+            }
+
+            for (let i = segments; i >= 0; i--) {
+                const t = i / segments;
+                const y = horizon + (H - horizon) * t;
+                const offset = state.roadCurvature * 200 * t + Math.sin((state.roadOffset * 0.01 + t * 5)) * 30 * t;
+                const x = W / 2 + state.position * (250 - 200 * t) + offset;
+                const width = 60 + 350 * t;
+                ctx.lineTo(x - width, y);
+            }
+
+            ctx.closePath();
+            ctx.fillStyle = '#333';
+            ctx.fill();
+
+            // Road markings (dashed center line)
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 3;
+            ctx.setLineDash([30, 30]);
+            ctx.lineDashOffset = -state.roadOffset % 60;
+            ctx.beginPath();
+            for (let i = 0; i <= 20; i++) {
+                const t = i / 20;
+                const y = horizon + (H - horizon) * t;
+                const offset = state.roadCurvature * 200 * t + Math.sin((state.roadOffset * 0.01 + t * 5)) * 30 * t;
+                const x = W / 2 + state.position * (250 - 200 * t) + offset;
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Draw obstacles
+            for (const obs of state.obstacles) {
+                obs.draw(ctx, roadCenterX, horizon, state.roadOffset);
+            }
+
+            // Weather effects
+            if (state.weather === 'rain') {
+                ctx.strokeStyle = 'rgba(200, 200, 255, 0.3)';
+                ctx.lineWidth = 1;
+                for (const p of state.particles) {
+                    ctx.beginPath();
+                    ctx.moveTo(p.x, p.y);
+                    ctx.lineTo(p.x - 2, p.y + 10);
+                    ctx.stroke();
+                }
+            } else if (state.weather === 'fog') {
+                ctx.fillStyle = 'rgba(200, 200, 200, 0.3)';
+                ctx.fillRect(0, 0, W, H);
+            }
+
+            // Draw HUD
+            drawHUD();
+        }
+
+        function drawHUD() {
+            // Steering wheel indicator (bottom center)
+            const wheelX = W / 2;
+            const wheelY = H - 80;
+            const wheelR = 55;
+
+            ctx.beginPath();
+            ctx.arc(wheelX, wheelY, wheelR + 5, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(20, 20, 20, 0.85)';
+            ctx.fill();
+
+            ctx.beginPath();
+            ctx.arc(wheelX, wheelY, wheelR, 0, Math.PI * 2);
+            ctx.strokeStyle = '#555';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            // AI steering (blue)
+            const aiAngle = state.aiSteer * Math.PI / 4 - Math.PI / 2;
+            ctx.beginPath();
+            ctx.moveTo(wheelX, wheelY);
+            ctx.lineTo(wheelX + Math.cos(aiAngle) * wheelR * 0.85, wheelY + Math.sin(aiAngle) * wheelR * 0.85);
+            ctx.strokeStyle = '#2196F3';
+            ctx.lineWidth = 9;
+            ctx.lineCap = 'round';
+            ctx.stroke();
+
+            // Human steering (green)
+            const humanAngle = state.steer * Math.PI / 4 - Math.PI / 2;
+            ctx.beginPath();
+            ctx.moveTo(wheelX, wheelY);
+            ctx.lineTo(wheelX + Math.cos(humanAngle) * wheelR * 0.85, wheelY + Math.sin(humanAngle) * wheelR * 0.85);
+            ctx.strokeStyle = '#4CAF50';
+            ctx.lineWidth = 5;
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.arc(wheelX, wheelY, 5, 0, Math.PI * 2);
+            ctx.fillStyle = '#888';
+            ctx.fill();
+
+            // Speedometer (bottom right)
+            const speedX = W - 90;
+            const speedY = H - 70;
+            ctx.fillStyle = 'rgba(20, 20, 20, 0.85)';
+            ctx.fillRect(speedX - 45, speedY - 35, 90, 60);
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 28px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText(Math.round(state.speed), speedX, speedY + 5);
+            ctx.font = '12px Arial';
+            ctx.fillStyle = '#888';
+            ctx.fillText('km/h', speedX, speedY + 20);
+
+            // Throttle/Brake bars (bottom left)
+            const barX = 70;
+            const barY = H - 120;
+            const barH = 90;
+
+            ctx.fillStyle = 'rgba(20, 20, 20, 0.85)';
+            ctx.fillRect(barX - 35, barY - 10, 70, barH + 35);
+
+            // Throttle (green)
+            ctx.fillStyle = '#222';
+            ctx.fillRect(barX - 25, barY, 18, barH);
+            ctx.fillStyle = '#4CAF50';
+            ctx.fillRect(barX - 25, barY + barH - state.throttle * barH, 18, state.throttle * barH);
+
+            // Brake (red)
+            ctx.fillStyle = '#222';
+            ctx.fillRect(barX + 7, barY, 18, barH);
+            ctx.fillStyle = '#f44336';
+            ctx.fillRect(barX + 7, barY + barH - state.brake * barH, 18, state.brake * barH);
+
+            ctx.fillStyle = '#888';
+            ctx.font = '11px Arial';
+            ctx.fillText('T', barX - 16, barY + barH + 18);
+            ctx.fillText('B', barX + 16, barY + barH + 18);
+
+            // Divergence warning
+            const divergence = Math.abs(state.steer - state.aiSteer);
+            if (divergence > 0.25) {
+                const alpha = Math.min(0.7, divergence * 0.8);
+                ctx.fillStyle = `rgba(255, 165, 0, ${alpha})`;
+                ctx.fillRect(0, 0, W, 45);
+                ctx.fillStyle = '#000';
+                ctx.font = '16px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(`⚠️ AI suggests different steering: ${state.aiSteer > 0 ? '+' : ''}${state.aiSteer.toFixed(2)}`, W/2, 28);
+            }
+
+            // Status indicators (top left)
+            ctx.fillStyle = '#ff0';
+            ctx.font = '13px Arial';
+            ctx.textAlign = 'left';
+            const weatherIcon = {clear: '☀️', rain: '🌧️', fog: '🌫️', night: '🌙'}[state.weather];
+            ctx.fillText(`${weatherIcon} ${state.weather.toUpperCase()} | DEMO MODE`, 12, 22);
+        }
+
+        // Game loop
+        function gameLoop() {
+            update();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Start
+        gameLoop();
+        canvas.focus();
+    </script>
+</body>
+</html>

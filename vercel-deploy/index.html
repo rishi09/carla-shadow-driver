@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shadow Mode - With Car Visualization</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: linear-gradient(135deg, #1a1a2e 0%, #2e1a1a 100%);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            color: white;
+        }
+        h1 {
+            margin: 20px 0 5px;
+            font-size: 1.8rem;
+            text-shadow: 0 2px 10px rgba(0,0,0,0.5);
+        }
+        .subtitle {
+            color: #888;
+            margin-bottom: 15px;
+            font-size: 0.9rem;
+        }
+        canvas {
+            display: block;
+            border-radius: 16px;
+            box-shadow: 0 30px 80px rgba(0,0,0,0.6);
+        }
+        .controls {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            margin-top: 20px;
+            padding: 15px 25px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 10px;
+        }
+        .control-group {
+            text-align: center;
+            min-width: 120px;
+        }
+        .control-group h3 {
+            font-size: 0.7rem;
+            color: #888;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+        }
+        .key {
+            display: inline-block;
+            padding: 10px 16px;
+            background: #333;
+            border-radius: 8px;
+            font-weight: bold;
+            margin: 3px;
+            min-width: 45px;
+            border: 2px solid #555;
+            transition: all 0.1s;
+        }
+        .key.active {
+            background: #4CAF50;
+            border-color: #4CAF50;
+            transform: scale(0.95);
+        }
+        .stats {
+            display: flex;
+            gap: 30px;
+            margin-top: 15px;
+            padding: 12px 20px;
+            background: rgba(0,0,0,0.3);
+            border-radius: 8px;
+            font-size: 0.85rem;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .stat {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .stat-label {
+            color: #888;
+            font-size: 0.7rem;
+            margin-bottom: 3px;
+        }
+        .stat-value {
+            color: #4CAF50;
+            font-weight: bold;
+            font-size: 1.1rem;
+        }
+        .legend {
+            display: flex;
+            gap: 25px;
+            margin-top: 12px;
+            font-size: 0.85rem;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .legend-dot {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+        }
+        .weather-controls {
+            display: flex;
+            gap: 10px;
+            margin-top: 12px;
+        }
+        .weather-btn {
+            padding: 8px 16px;
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 6px;
+            color: white;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .weather-btn:hover {
+            background: rgba(255,255,255,0.2);
+        }
+        .weather-btn.active {
+            background: #4CAF50;
+            border-color: #4CAF50;
+        }
+    </style>
+</head>
+<body>
+    <h1>🚗 Shadow Mode - Visual Car Demo</h1>
+    <p class="subtitle">Watch the car steer in real-time!</p>
+
+    <canvas id="canvas" width="900" height="600"></canvas>
+
+    <div class="controls">
+        <div class="control-group">
+            <h3>Drive</h3>
+            <div><span class="key" id="key-w">W</span></div>
+            <div>
+                <span class="key" id="key-a">A</span>
+                <span class="key" id="key-s">S</span>
+                <span class="key" id="key-d">D</span>
+            </div>
+        </div>
+        <div class="control-group">
+            <h3>Or Arrows</h3>
+            <div><span class="key" id="key-up">↑</span></div>
+            <div>
+                <span class="key" id="key-left">←</span>
+                <span class="key" id="key-down">↓</span>
+                <span class="key" id="key-right">→</span>
+            </div>
+        </div>
+        <div class="control-group">
+            <h3>Emergency</h3>
+            <div><span class="key" id="key-space">SPACE</span></div>
+        </div>
+    </div>
+
+    <div class="weather-controls">
+        <button class="weather-btn active" onclick="setWeather('clear')">☀️ Clear</button>
+        <button class="weather-btn" onclick="setWeather('rain')">🌧️ Rain</button>
+        <button class="weather-btn" onclick="setWeather('fog')">🌫️ Fog</button>
+        <button class="weather-btn" onclick="setWeather('night')">🌙 Night</button>
+    </div>
+
+    <div class="legend">
+        <div class="legend-item">
+            <div class="legend-dot" style="background: #4CAF50;"></div>
+            <span>Your Input</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-dot" style="background: #2196F3;"></div>
+            <span>AI Suggestion</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-dot" style="background: #FFD700;"></div>
+            <span>Car Direction</span>
+        </div>
+    </div>
+
+    <div class="stats">
+        <div class="stat">
+            <div class="stat-label">SPEED</div>
+            <div class="stat-value" id="stat-speed">0</div>
+        </div>
+        <div class="stat">
+            <div class="stat-label">YOUR STEERING</div>
+            <div class="stat-value" id="stat-steer">0.00</div>
+        </div>
+        <div class="stat">
+            <div class="stat-label">AI STEERING</div>
+            <div class="stat-value" id="stat-ai">0.00</div>
+        </div>
+        <div class="stat">
+            <div class="stat-label">DIVERGENCE</div>
+            <div class="stat-value" id="stat-divergence">0%</div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const W = canvas.width;
+        const H = canvas.height;
+
+        let state = {
+            throttle: 0,
+            brake: 0,
+            steer: 0,
+            speed: 0,
+            position: 0,
+            roadOffset: 0,
+            aiSteer: 0,
+            keys: {},
+            weather: 'clear',
+            time: 0,
+            roadCurvature: 0,
+            obstacles: [],
+            particles: [],
+            carAngle: 0  // Car visual rotation
+        };
+
+        const curveWaypoints = [
+            {pos: 0, curve: 0},
+            {pos: 200, curve: 0.3},
+            {pos: 400, curve: -0.2},
+            {pos: 600, curve: 0.5},
+            {pos: 800, curve: 0},
+            {pos: 1000, curve: -0.4},
+            {pos: 1200, curve: 0}
+        ];
+
+        class Obstacle {
+            constructor(type, distance, lane) {
+                this.type = type;
+                this.distance = distance;
+                this.lane = lane;
+            }
+            update(speed) {
+                this.distance -= speed * 0.5;
+            }
+            draw(ctx, roadCenterX, horizon) {
+                const progress = Math.max(0, Math.min(1, this.distance / 500));
+                const y = horizon + (H - horizon) * (1 - progress);
+                if (y < horizon || y > H) return;
+                const scale = 0.2 + (1 - progress) * 0.8;
+                const laneOffset = this.lane * 80 * scale;
+                const x = roadCenterX + laneOffset;
+                ctx.save();
+                ctx.translate(x, y);
+                ctx.scale(scale, scale);
+                if (this.type === 'car') {
+                    ctx.fillStyle = 'rgba(150, 50, 50, 0.9)';
+                    ctx.fillRect(-20, -30, 40, 60);
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+                    ctx.fillRect(-15, -25, 30, 15);
+                }
+                ctx.restore();
+            }
+        }
+
+        function spawnObstacle() {
+            if (Math.random() < 0.015 && state.obstacles.length < 5) {
+                const lane = Math.floor(Math.random() * 3) - 1;
+                state.obstacles.push(new Obstacle('car', 500 + Math.random() * 200, lane));
+            }
+        }
+
+        function setWeather(weather) {
+            state.weather = weather;
+            state.particles = [];
+            document.querySelectorAll('.weather-btn').forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+            if (weather === 'rain') {
+                for (let i = 0; i < 100; i++) {
+                    state.particles.push({
+                        x: Math.random() * W,
+                        y: Math.random() * H,
+                        speed: 10 + Math.random() * 10
+                    });
+                }
+            }
+        }
+
+        document.addEventListener('keydown', (e) => {
+            state.keys[e.key.toLowerCase()] = true;
+            state.keys[e.code] = true;
+            updateKeyDisplay();
+        });
+        document.addEventListener('keyup', (e) => {
+            state.keys[e.key.toLowerCase()] = false;
+            state.keys[e.code] = false;
+            updateKeyDisplay();
+        });
+
+        function updateKeyDisplay() {
+            document.getElementById('key-w').classList.toggle('active', state.keys['w'] || state.keys['ArrowUp']);
+            document.getElementById('key-a').classList.toggle('active', state.keys['a'] || state.keys['ArrowLeft']);
+            document.getElementById('key-s').classList.toggle('active', state.keys['s'] || state.keys['ArrowDown']);
+            document.getElementById('key-d').classList.toggle('active', state.keys['d'] || state.keys['ArrowRight']);
+            document.getElementById('key-up').classList.toggle('active', state.keys['ArrowUp']);
+            document.getElementById('key-left').classList.toggle('active', state.keys['ArrowLeft']);
+            document.getElementById('key-down').classList.toggle('active', state.keys['ArrowDown']);
+            document.getElementById('key-right').classList.toggle('active', state.keys['ArrowRight']);
+            document.getElementById('key-space').classList.toggle('active', state.keys[' ']);
+        }
+
+        function simulateAI(position, curvature, speed) {
+            let correction = -position * 0.9;
+            correction += curvature * 0.7;
+            correction += Math.sin(state.time * 0.1) * 0.03;
+            for (const obs of state.obstacles) {
+                if (obs.distance < 150 && obs.distance > 50 && Math.abs(obs.lane * 0.3 - position) < 0.2) {
+                    correction += (obs.lane > 0 ? -0.4 : 0.4);
+                }
+            }
+            return Math.max(-1, Math.min(1, correction));
+        }
+
+        function update() {
+            state.time++;
+
+            if (state.keys['w'] || state.keys['ArrowUp']) {
+                state.throttle = Math.min(1, state.throttle + 0.05);
+                state.brake = 0;
+            } else if (state.keys['s'] || state.keys['ArrowDown']) {
+                state.throttle = 0;
+                state.brake = Math.min(1, state.brake + 0.08);
+            } else {
+                state.throttle = Math.max(0, state.throttle - 0.02);
+                state.brake = Math.max(0, state.brake - 0.04);
+            }
+
+            if (state.keys[' ']) {
+                state.brake = 1;
+                state.throttle = 0;
+            }
+
+            if (state.keys['a'] || state.keys['ArrowLeft']) {
+                state.steer = Math.max(-1, state.steer - 0.06);
+            } else if (state.keys['d'] || state.keys['ArrowRight']) {
+                state.steer = Math.min(1, state.steer + 0.06);
+            } else {
+                state.steer *= 0.9;
+                if (Math.abs(state.steer) < 0.01) state.steer = 0;
+            }
+
+            const weatherMultiplier = state.weather === 'rain' ? 0.8 : state.weather === 'fog' ? 0.9 : 1.0;
+            state.speed += (state.throttle * 3 * weatherMultiplier - state.brake * 5 - state.speed * 0.01);
+            state.speed = Math.max(0, Math.min(150, state.speed));
+
+            const roadProgress = (state.roadOffset / 100) % 1200;
+            let targetCurve = 0;
+            for (let i = 0; i < curveWaypoints.length - 1; i++) {
+                const wp1 = curveWaypoints[i];
+                const wp2 = curveWaypoints[i + 1];
+                if (roadProgress >= wp1.pos && roadProgress < wp2.pos) {
+                    const t = (roadProgress - wp1.pos) / (wp2.pos - wp1.pos);
+                    targetCurve = wp1.curve + (wp2.curve - wp1.curve) * t;
+                    break;
+                }
+            }
+            state.roadCurvature += (targetCurve - state.roadCurvature) * 0.02;
+
+            state.position += (state.steer - state.roadCurvature * 0.5) * state.speed * 0.0003;
+            state.position = Math.max(-0.9, Math.min(0.9, state.position));
+            state.position *= 0.998;
+
+            // Update car visual angle
+            state.carAngle += (state.steer * 25 - state.carAngle) * 0.15;
+
+            state.roadOffset += state.speed * 0.5;
+
+            spawnObstacle();
+            state.obstacles = state.obstacles.filter(obs => {
+                obs.update(state.speed);
+                return obs.distance > -50;
+            });
+
+            if (state.weather === 'rain') {
+                for (const p of state.particles) {
+                    p.y += p.speed;
+                    if (p.y > H) {
+                        p.y = 0;
+                        p.x = Math.random() * W;
+                    }
+                }
+            }
+
+            state.aiSteer = simulateAI(state.position, state.roadCurvature, state.speed);
+
+            document.getElementById('stat-speed').textContent = Math.round(state.speed);
+            document.getElementById('stat-steer').textContent = state.steer.toFixed(2);
+            document.getElementById('stat-ai').textContent = state.aiSteer.toFixed(2);
+            const divergence = Math.abs(state.steer - state.aiSteer) * 100;
+            document.getElementById('stat-divergence').textContent = Math.round(divergence) + '%';
+        }
+
+        function drawCar(x, y, angle, color, label) {
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.rotate((angle * Math.PI) / 180);
+
+            // Car body
+            ctx.fillStyle = color;
+            ctx.fillRect(-15, -25, 30, 50);
+
+            // Windshield
+            ctx.fillStyle = 'rgba(100, 150, 200, 0.6)';
+            ctx.fillRect(-12, -15, 24, 15);
+
+            // Headlights
+            ctx.fillStyle = '#FFD700';
+            ctx.fillRect(-12, -27, 8, 3);
+            ctx.fillRect(4, -27, 8, 3);
+
+            // Wheels
+            ctx.fillStyle = '#222';
+            ctx.fillRect(-18, -15, 5, 10);
+            ctx.fillRect(13, -15, 5, 10);
+            ctx.fillRect(-18, 5, 5, 10);
+            ctx.fillRect(13, 5, 5, 10);
+
+            // Label
+            if (label) {
+                ctx.fillStyle = color;
+                ctx.font = 'bold 12px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(label, 0, 50);
+            }
+
+            ctx.restore();
+        }
+
+        function draw() {
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, W, H);
+
+            const horizon = H * 0.40;
+            let skyColor1, skyColor2;
+
+            if (state.weather === 'night') {
+                skyColor1 = '#0a0a1a';
+                skyColor2 = '#1a1a2a';
+            } else if (state.weather === 'fog') {
+                skyColor1 = '#888';
+                skyColor2 = '#ccc';
+            } else if (state.weather === 'rain') {
+                skyColor1 = '#334';
+                skyColor2 = '#556';
+            } else {
+                skyColor1 = '#1e3a5f';
+                skyColor2 = '#87CEEB';
+            }
+
+            const skyGrad = ctx.createLinearGradient(0, 0, 0, horizon);
+            skyGrad.addColorStop(0, skyColor1);
+            skyGrad.addColorStop(1, skyColor2);
+            ctx.fillStyle = skyGrad;
+            ctx.fillRect(0, 0, W, horizon);
+
+            if (state.weather !== 'fog') {
+                ctx.beginPath();
+                ctx.arc(W * 0.8, H * 0.15, state.weather === 'night' ? 30 : 45, 0, Math.PI * 2);
+                ctx.fillStyle = state.weather === 'night' ? '#ddd' : '#FFD700';
+                ctx.fill();
+            }
+
+            const groundColor = state.weather === 'night' ? '#1a2a1a' : '#2d5016';
+            ctx.fillStyle = groundColor;
+            ctx.fillRect(0, horizon, W, H - horizon);
+
+            // Draw road
+            const roadCenterX = W / 2 + state.position * 250 + state.roadCurvature * 150;
+
+            ctx.beginPath();
+            ctx.moveTo(roadCenterX - 60, horizon);
+            ctx.lineTo(roadCenterX + 60, horizon);
+
+            const segments = 20;
+            for (let i = 0; i <= segments; i++) {
+                const t = i / segments;
+                const y = horizon + (H - horizon) * t;
+                const offset = state.roadCurvature * 200 * t + Math.sin((state.roadOffset * 0.01 + t * 5)) * 30 * t;
+                const x = W / 2 + state.position * (250 - 200 * t) + offset;
+                const width = 60 + 350 * t;
+                ctx.lineTo(x + width, y);
+            }
+
+            for (let i = segments; i >= 0; i--) {
+                const t = i / segments;
+                const y = horizon + (H - horizon) * t;
+                const offset = state.roadCurvature * 200 * t + Math.sin((state.roadOffset * 0.01 + t * 5)) * 30 * t;
+                const x = W / 2 + state.position * (250 - 200 * t) + offset;
+                const width = 60 + 350 * t;
+                ctx.lineTo(x - width, y);
+            }
+
+            ctx.closePath();
+            ctx.fillStyle = '#333';
+            ctx.fill();
+
+            // Road markings
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 3;
+            ctx.setLineDash([30, 30]);
+            ctx.lineDashOffset = -state.roadOffset % 60;
+            ctx.beginPath();
+            for (let i = 0; i <= 20; i++) {
+                const t = i / 20;
+                const y = horizon + (H - horizon) * t;
+                const offset = state.roadCurvature * 200 * t + Math.sin((state.roadOffset * 0.01 + t * 5)) * 30 * t;
+                const x = W / 2 + state.position * (250 - 200 * t) + offset;
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Draw obstacles
+            for (const obs of state.obstacles) {
+                obs.draw(ctx, roadCenterX, horizon);
+            }
+
+            // Weather effects
+            if (state.weather === 'rain') {
+                ctx.strokeStyle = 'rgba(200, 200, 255, 0.3)';
+                ctx.lineWidth = 1;
+                for (const p of state.particles) {
+                    ctx.beginPath();
+                    ctx.moveTo(p.x, p.y);
+                    ctx.lineTo(p.x - 2, p.y + 10);
+                    ctx.stroke();
+                }
+            } else if (state.weather === 'fog') {
+                ctx.fillStyle = 'rgba(200, 200, 200, 0.3)';
+                ctx.fillRect(0, 0, W, H);
+            }
+
+            // Draw YOUR car (large, in foreground)
+            const carX = W / 2 + state.position * 100;
+            const carY = H - 150;
+            drawCar(carX, carY, state.carAngle, '#4CAF50', 'YOU');
+
+            // Draw AI suggested car (ghost, slightly offset)
+            const aiOffset = (state.aiSteer - state.steer) * 50;
+            const aiCarX = carX + aiOffset;
+            drawCar(aiCarX, carY, state.aiSteer * 25, 'rgba(33, 150, 243, 0.5)', 'AI');
+
+            // Divergence warning
+            const divergence = Math.abs(state.steer - state.aiSteer);
+            if (divergence > 0.25) {
+                const alpha = Math.min(0.7, divergence * 0.8);
+                ctx.fillStyle = `rgba(255, 165, 0, ${alpha})`;
+                ctx.fillRect(0, 0, W, 45);
+                ctx.fillStyle = '#000';
+                ctx.font = '16px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(`⚠️ AI suggests steering ${state.aiSteer > state.steer ? 'RIGHT' : 'LEFT'} more`, W/2, 28);
+            }
+
+            // Status
+            ctx.fillStyle = '#ff0';
+            ctx.font = '13px Arial';
+            ctx.textAlign = 'left';
+            const weatherIcon = {clear: '☀️', rain: '🌧️', fog: '🌫️', night: '🌙'}[state.weather];
+            ctx.fillText(`${weatherIcon} ${state.weather.toUpperCase()} | VISUAL CAR DEMO`, 12, 22);
+        }
+
+        function gameLoop() {
+            update();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        gameLoop();
+    </script>
+</body>
+</html>

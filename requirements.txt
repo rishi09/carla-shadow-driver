@@ -1,0 +1,21 @@
+# CARLA client (runs locally, connects to remote server)
+carla==0.9.16
+
+# Core dependencies
+numpy>=1.24.0
+opencv-python>=4.8.0
+pygame>=2.5.0
+Pillow>=10.0.0
+
+# Deep learning (for PilotNet)
+torch>=2.0.0
+torchvision>=0.15.0
+
+# Configuration
+pyyaml>=6.0
+
+# Visualization
+matplotlib>=3.7.0
+
+# Utilities
+tqdm>=4.65.0

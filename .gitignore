@@ -1,0 +1,44 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+venv/
+env/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Recordings (large data files)
+data/recordings/*/images/
+*.mp4
+*.avi
+
+# Model weights (download separately)
+models/*.pt
+models/*.pth
+models/*.onnx
+
+# Logs
+*.log
+logs/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Temporary files
+*.tmp
+*.temp
+
+# Keep directory structure
+!data/recordings/.gitkeep
+!models/.gitkeep

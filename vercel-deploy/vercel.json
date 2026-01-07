@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "name": "carla-shadow-driver",
+  "builds": [
+    {
+      "src": "index.html",
+      "use": "@vercel/static"
+    }
+  ]
+}

@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shadow Mode Demo - CARLA Shadow Driver</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background: #1a1a2e;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            color: white;
+        }
+        h1 {
+            margin-bottom: 10px;
+            font-size: 1.5rem;
+        }
+        .subtitle {
+            color: #888;
+            margin-bottom: 20px;
+            font-size: 0.9rem;
+        }
+        #game-container {
+            position: relative;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+        }
+        canvas {
+            display: block;
+        }
+        .controls {
+            display: flex;
+            gap: 30px;
+            margin-top: 20px;
+            padding: 15px 25px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 8px;
+        }
+        .control-group {
+            text-align: center;
+        }
+        .key {
+            display: inline-block;
+            padding: 8px 14px;
+            background: #333;
+            border-radius: 6px;
+            font-weight: bold;
+            margin: 3px;
+            min-width: 40px;
+            border: 1px solid #555;
+        }
+        .key.active {
+            background: #4CAF50;
+            border-color: #4CAF50;
+        }
+        .control-label {
+            font-size: 0.75rem;
+            color: #888;
+            margin-top: 5px;
+        }
+        .stats {
+            display: flex;
+            gap: 40px;
+            margin-top: 15px;
+            font-size: 0.85rem;
+            color: #aaa;
+        }
+        .stat-value {
+            color: #4CAF50;
+            font-weight: bold;
+        }
+        .legend {
+            display: flex;
+            gap: 20px;
+            margin-top: 10px;
+            font-size: 0.8rem;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .legend-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+        .legend-human { background: #4CAF50; }
+        .legend-ai { background: #2196F3; }
+    </style>
+</head>
+<body>
+    <h1>Shadow Mode Demo</h1>
+    <p class="subtitle">CARLA Shadow Driver - Interactive Visualization</p>
+
+    <div id="game-container">
+        <canvas id="canvas" width="800" height="500"></canvas>
+    </div>
+
+    <div class="controls">
+        <div class="control-group">
+            <div><span class="key" id="key-w">W</span></div>
+            <div><span class="key" id="key-a">A</span><span class="key" id="key-s">S</span><span class="key" id="key-d">D</span></div>
+            <div class="control-label">Drive</div>
+        </div>
+        <div class="control-group">
+            <div><span class="key" id="key-up">↑</span></div>
+            <div><span class="key" id="key-left">←</span><span class="key" id="key-down">↓</span><span class="key" id="key-right">→</span></div>
+            <div class="control-label">or Arrows</div>
+        </div>
+        <div class="control-group">
+            <div><span class="key" id="key-space">SPACE</span></div>
+            <div class="control-label">E-Brake</div>
+        </div>
+    </div>
+
+    <div class="legend">
+        <div class="legend-item">
+            <div class="legend-dot legend-human"></div>
+            <span>Human (You)</span>
+        </div>
+        <div class="legend-item">
+            <div class="legend-dot legend-ai"></div>
+            <span>AI Suggestion</span>
+        </div>
+    </div>
+
+    <div class="stats">
+        <div>Speed: <span class="stat-value" id="stat-speed">0</span> km/h</div>
+        <div>Steering: <span class="stat-value" id="stat-steer">0.00</span></div>
+        <div>AI Steer: <span class="stat-value" id="stat-ai">0.00</span></div>
+        <div>Divergence: <span class="stat-value" id="stat-divergence">0%</span></div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const W = canvas.width;
+        const H = canvas.height;
+
+        // State
+        let state = {
+            throttle: 0,
+            brake: 0,
+            steer: 0,
+            speed: 0,
+            position: 0,  // Lateral position
+            roadOffset: 0,  // For road animation
+            aiSteer: 0,
+            keys: {}
+        };
+
+        // PilotNet simulation (simple lane-centering heuristic)
+        function simulateAI(position, speed) {
+            // AI tries to center the car
+            let correction = -position * 0.8;
+            // Add some "neural network noise"
+            correction += (Math.sin(Date.now() / 500) * 0.05);
+            return Math.max(-1, Math.min(1, correction));
+        }
+
+        // Input handling
+        document.addEventListener('keydown', (e) => {
+            state.keys[e.key.toLowerCase()] = true;
+            state.keys[e.code] = true;
+            updateKeyDisplay();
+        });
+        document.addEventListener('keyup', (e) => {
+            state.keys[e.key.toLowerCase()] = false;
+            state.keys[e.code] = false;
+            updateKeyDisplay();
+        });
+
+        function updateKeyDisplay() {
+            document.getElementById('key-w').classList.toggle('active', state.keys['w'] || state.keys['ArrowUp']);
+            document.getElementById('key-a').classList.toggle('active', state.keys['a'] || state.keys['ArrowLeft']);
+            document.getElementById('key-s').classList.toggle('active', state.keys['s'] || state.keys['ArrowDown']);
+            document.getElementById('key-d').classList.toggle('active', state.keys['d'] || state.keys['ArrowRight']);
+            document.getElementById('key-up').classList.toggle('active', state.keys['ArrowUp']);
+            document.getElementById('key-left').classList.toggle('active', state.keys['ArrowLeft']);
+            document.getElementById('key-down').classList.toggle('active', state.keys['ArrowDown']);
+            document.getElementById('key-right').classList.toggle('active', state.keys['ArrowRight']);
+            document.getElementById('key-space').classList.toggle('active', state.keys[' ']);
+        }
+
+        function update() {
+            // Process input
+            if (state.keys['w'] || state.keys['ArrowUp']) {
+                state.throttle = Math.min(1, state.throttle + 0.05);
+                state.brake = 0;
+            } else if (state.keys['s'] || state.keys['ArrowDown']) {
+                state.throttle = 0;
+                state.brake = Math.min(1, state.brake + 0.08);
+            } else {
+                state.throttle = Math.max(0, state.throttle - 0.02);
+                state.brake = Math.max(0, state.brake - 0.04);
+            }
+
+            // Emergency brake
+            if (state.keys[' ']) {
+                state.brake = 1;
+                state.throttle = 0;
+            }
+
+            // Steering
+            if (state.keys['a'] || state.keys['ArrowLeft']) {
+                state.steer = Math.max(-1, state.steer - 0.06);
+            } else if (state.keys['d'] || state.keys['ArrowRight']) {
+                state.steer = Math.min(1, state.steer + 0.06);
+            } else {
+                state.steer *= 0.9;
+                if (Math.abs(state.steer) < 0.01) state.steer = 0;
+            }
+
+            // Update speed
+            state.speed += (state.throttle * 3 - state.brake * 5 - state.speed * 0.01);
+            state.speed = Math.max(0, Math.min(150, state.speed));
+
+            // Update position (lateral)
+            state.position += state.steer * state.speed * 0.0003;
+            state.position = Math.max(-0.8, Math.min(0.8, state.position));
+
+            // Natural drift to center (simulates road curve)
+            state.position *= 0.995;
+
+            // Road animation
+            state.roadOffset += state.speed * 0.5;
+
+            // AI prediction
+            state.aiSteer = simulateAI(state.position, state.speed);
+
+            // Update stats
+            document.getElementById('stat-speed').textContent = Math.round(state.speed);
+            document.getElementById('stat-steer').textContent = state.steer.toFixed(2);
+            document.getElementById('stat-ai').textContent = state.aiSteer.toFixed(2);
+            const divergence = Math.abs(state.steer - state.aiSteer) * 100;
+            document.getElementById('stat-divergence').textContent = Math.round(divergence) + '%';
+        }
+
+        function draw() {
+            // Sky gradient
+            const skyGrad = ctx.createLinearGradient(0, 0, 0, H * 0.45);
+            skyGrad.addColorStop(0, '#1e3a5f');
+            skyGrad.addColorStop(1, '#87CEEB');
+            ctx.fillStyle = skyGrad;
+            ctx.fillRect(0, 0, W, H * 0.45);
+
+            // Sun
+            ctx.beginPath();
+            ctx.arc(W * 0.8, H * 0.15, 40, 0, Math.PI * 2);
+            ctx.fillStyle = '#FFD700';
+            ctx.fill();
+
+            // Ground
+            ctx.fillStyle = '#2d5016';
+            ctx.fillRect(0, H * 0.45, W, H * 0.55);
+
+            // Road
+            const horizon = H * 0.45;
+            const roadCenterX = W / 2 + state.position * 200;
+
+            ctx.beginPath();
+            ctx.moveTo(roadCenterX - 50, horizon);
+            ctx.lineTo(roadCenterX + 50, horizon);
+            ctx.lineTo(W / 2 + 350 + state.position * 50, H);
+            ctx.lineTo(W / 2 - 350 + state.position * 50, H);
+            ctx.closePath();
+            ctx.fillStyle = '#333';
+            ctx.fill();
+
+            // Road markings (dashed center line)
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 3;
+            ctx.setLineDash([30, 30]);
+            ctx.lineDashOffset = -state.roadOffset % 60;
+            ctx.beginPath();
+            for (let y = horizon; y < H; y += 2) {
+                const progress = (y - horizon) / (H - horizon);
+                const x = roadCenterX + (W/2 - roadCenterX) * progress;
+                if (y === horizon) {
+                    ctx.moveTo(x, y);
+                } else {
+                    ctx.lineTo(x, y);
+                }
+            }
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Edge lines
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(roadCenterX - 50, horizon);
+            ctx.lineTo(W / 2 - 350 + state.position * 50, H);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(roadCenterX + 50, horizon);
+            ctx.lineTo(W / 2 + 350 + state.position * 50, H);
+            ctx.stroke();
+
+            // Draw HUD
+            drawHUD();
+        }
+
+        function drawHUD() {
+            // Steering wheel indicator
+            const wheelX = W / 2;
+            const wheelY = H - 70;
+            const wheelR = 50;
+
+            // Background
+            ctx.beginPath();
+            ctx.arc(wheelX, wheelY, wheelR + 5, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(30, 30, 30, 0.8)';
+            ctx.fill();
+
+            // Wheel outline
+            ctx.beginPath();
+            ctx.arc(wheelX, wheelY, wheelR, 0, Math.PI * 2);
+            ctx.strokeStyle = '#555';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            // AI steering indicator (blue)
+            const aiAngle = state.aiSteer * Math.PI / 4 - Math.PI / 2;
+            ctx.beginPath();
+            ctx.moveTo(wheelX, wheelY);
+            ctx.lineTo(
+                wheelX + Math.cos(aiAngle) * wheelR * 0.85,
+                wheelY + Math.sin(aiAngle) * wheelR * 0.85
+            );
+            ctx.strokeStyle = '#2196F3';
+            ctx.lineWidth = 8;
+            ctx.lineCap = 'round';
+            ctx.stroke();
+
+            // Human steering indicator (green)
+            const humanAngle = state.steer * Math.PI / 4 - Math.PI / 2;
+            ctx.beginPath();
+            ctx.moveTo(wheelX, wheelY);
+            ctx.lineTo(
+                wheelX + Math.cos(humanAngle) * wheelR * 0.85,
+                wheelY + Math.sin(humanAngle) * wheelR * 0.85
+            );
+            ctx.strokeStyle = '#4CAF50';
+            ctx.lineWidth = 5;
+            ctx.stroke();
+
+            // Center dot
+            ctx.beginPath();
+            ctx.arc(wheelX, wheelY, 5, 0, Math.PI * 2);
+            ctx.fillStyle = '#888';
+            ctx.fill();
+
+            // Speedometer
+            const speedX = W - 80;
+            const speedY = H - 50;
+            ctx.fillStyle = 'rgba(30, 30, 30, 0.8)';
+            ctx.fillRect(speedX - 40, speedY - 30, 80, 50);
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 24px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText(Math.round(state.speed), speedX, speedY + 5);
+            ctx.font = '10px Arial';
+            ctx.fillStyle = '#888';
+            ctx.fillText('km/h', speedX, speedY + 18);
+
+            // Throttle/Brake bars
+            const barX = 60;
+            const barY = H - 100;
+            const barH = 80;
+
+            // Background
+            ctx.fillStyle = 'rgba(30, 30, 30, 0.8)';
+            ctx.fillRect(barX - 30, barY - 10, 60, barH + 30);
+
+            // Throttle bar (green)
+            ctx.fillStyle = '#333';
+            ctx.fillRect(barX - 20, barY, 15, barH);
+            ctx.fillStyle = '#4CAF50';
+            ctx.fillRect(barX - 20, barY + barH - state.throttle * barH, 15, state.throttle * barH);
+
+            // Brake bar (red)
+            ctx.fillStyle = '#333';
+            ctx.fillRect(barX + 5, barY, 15, barH);
+            ctx.fillStyle = '#f44336';
+            ctx.fillRect(barX + 5, barY + barH - state.brake * barH, 15, state.brake * barH);
+
+            // Labels
+            ctx.fillStyle = '#888';
+            ctx.font = '10px Arial';
+            ctx.fillText('T', barX - 12, barY + barH + 15);
+            ctx.fillText('B', barX + 12, barY + barH + 15);
+
+            // Divergence warning
+            const divergence = Math.abs(state.steer - state.aiSteer);
+            if (divergence > 0.3) {
+                ctx.fillStyle = `rgba(255, 165, 0, ${Math.min(0.7, divergence)})`;
+                ctx.fillRect(0, 0, W, 40);
+                ctx.fillStyle = '#000';
+                ctx.font = '14px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(`AI suggests different steering (${state.aiSteer > 0 ? '+' : ''}${state.aiSteer.toFixed(2)})`, W/2, 25);
+            }
+
+            // FPS and mode indicator
+            ctx.fillStyle = '#ff0';
+            ctx.font = '12px Arial';
+            ctx.textAlign = 'left';
+            ctx.fillText('DEMO MODE - Press keys to drive', 10, 20);
+        }
+
+        function gameLoop() {
+            update();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Start
+        gameLoop();
+        canvas.focus();
+    </script>
+</body>
+</html>
