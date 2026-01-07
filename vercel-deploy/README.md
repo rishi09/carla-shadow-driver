@@ -1,18 +1,15 @@
-# CARLA Shadow Driver - Interactive Demo
+# CARLA Shadow Driver
 
-🚗 **[Live Demo](https://carla-shadow-driver.vercel.app)** (after deployment)
+Interactive autonomous driving simulator with real-time AI predictions.
 
-An interactive autonomous driving simulator that lets you drive while seeing AI predictions in real-time.
+## Features
 
-## ✨ Features
+- **3 Game Modes**: Simulator, Shadow, AI Only
+- **5 AI Behaviors**: PilotNet, Alpamayo, Aggressive, Cautious, Drunk
+- **Weather Effects**: Clear, Rain, Fog, Night
+- **GPU Connection**: Connect to real AI models on cloud GPU
 
-- **Real-time AI steering** - See what the AI would do (blue) vs what you're doing (green)
-- **Weather system** - Rain, fog, night mode, clear skies
-- **Dynamic obstacles** - Cars and pedestrians appear on the road
-- **Curved roads** - Realistic winding paths
-- **Live statistics** - Speed, steering angle, divergence percentage
-
-## 🎮 Controls
+## Controls
 
 | Key | Action |
 |-----|--------|
@@ -22,51 +19,26 @@ An interactive autonomous driving simulator that lets you drive while seeing AI 
 | D / → | Steer right |
 | SPACE | Emergency brake |
 
-## 🌦️ Weather Modes
+## How It Works
 
-Click the weather buttons to experience:
-- ☀️ **Clear** - Perfect visibility
-- 🌧️ **Rain** - Reduced traction, rain particles
-- 🌫️ **Fog** - Limited visibility
-- 🌙 **Night** - Dark conditions
+Shadow mode is how Tesla, Waymo, and Cruise validate their AI:
+1. You drive (green car)
+2. AI predicts what it would do (blue car)
+3. System measures divergence
 
-## 🤖 How It Works
+## Connect Real GPU AI
 
-This demo simulates the "shadow mode" used by real self-driving car companies like Tesla and Waymo:
+Click "Connect Real AI" and follow the instructions to connect to a cloud GPU running the actual neural network.
 
-1. **You drive** (green steering indicator)
-2. **AI watches and predicts** what it would do (blue indicator)
-3. **System compares** - When do you and AI disagree?
+## Tech Stack
 
-The AI uses lane-centering, curve-following, and obstacle-avoidance logic - similar to real autonomous driving systems!
-
-## 🧠 Technology
-
-- **Pure HTML/CSS/JavaScript** - No framework bloat
-- **Canvas rendering** - Smooth 60fps graphics
-- **Real-time physics** - Speed, momentum, steering dynamics
-- **Autonomous AI** - Makes decisions based on road position and obstacles
-
-## 📊 What You'll Learn
-
-- How autonomous driving perception works
-- Why lane-centering is crucial
-- How AI handles curved roads
-- Where human and AI driving differ
-- The importance of shadow mode testing
-
-## 🚀 Try It Yourself
-
-Just visit the link and start driving! No installation, no login, works on any modern browser.
-
-Perfect for:
-- 🎓 Learning about autonomous driving
-- 🎮 Having fun with realistic physics
-- 🤖 Understanding AI decision-making
-- 👥 Showing friends how self-driving works
+- Pure HTML/CSS/JavaScript (no frameworks)
+- Canvas API for rendering
+- WebSocket for GPU connection
+- NVIDIA PilotNet / Alpamayo models
 
 ---
 
-**Built with ❤️ to make autonomous driving concepts accessible to everyone**
+Built to make autonomous driving concepts accessible to everyone.
 
-For the full CARLA simulator experience with real 3D graphics and neural networks, check out the [full project](https://github.com/YOUR_USERNAME/carla-shadow-driver).
+[Full Project](https://github.com/rishi09/carla-shadow-driver)
