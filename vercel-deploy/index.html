@@ -130,6 +130,54 @@
             background: #4CAF50;
             border-color: #4CAF50;
         }
+        .mode-controls {
+            display: flex;
+            gap: 10px;
+            margin-top: 12px;
+        }
+        .mode-btn {
+            padding: 10px 18px;
+            background: rgba(255,255,255,0.1);
+            border: 2px solid rgba(255,255,255,0.2);
+            border-radius: 8px;
+            color: white;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: all 0.2s;
+        }
+        .mode-btn:hover {
+            background: rgba(255,255,255,0.2);
+        }
+        .mode-btn.active {
+            background: #2196F3;
+            border-color: #2196F3;
+        }
+        .ai-model-controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 12px;
+            padding: 10px 15px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 8px;
+        }
+        .ai-model-controls label {
+            color: #888;
+            font-size: 0.85rem;
+        }
+        .ai-model-controls select {
+            padding: 8px 12px;
+            background: #333;
+            border: 1px solid #555;
+            border-radius: 6px;
+            color: white;
+            cursor: pointer;
+        }
+        .model-desc {
+            color: #888;
+            font-size: 0.75rem;
+            font-style: italic;
+        }
     </style>
 </head>
 <body>
@@ -163,6 +211,12 @@
         </div>
     </div>
 
+    <div class="mode-controls">
+        <button class="mode-btn" onclick="setMode('simulator')">🎮 Simulator</button>
+        <button class="mode-btn active" onclick="setMode('shadow')">👤🤖 Shadow</button>
+        <button class="mode-btn" onclick="setMode('ai_only')">🤖 AI Only</button>
+    </div>
+
     <div class="weather-controls">
         <button class="weather-btn active" onclick="setWeather('clear')">☀️ Clear</button>
         <button class="weather-btn" onclick="setWeather('rain')">🌧️ Rain</button>
@@ -170,7 +224,19 @@
         <button class="weather-btn" onclick="setWeather('night')">🌙 Night</button>
     </div>
 
-    <div class="legend">
+    <div class="ai-model-controls">
+        <label for="ai-model">AI Model:</label>
+        <select id="ai-model" onchange="setAIModel(this.value)">
+            <option value="pilotnet">PilotNet (NVIDIA)</option>
+            <option value="alpamayo">Alpamayo Style</option>
+            <option value="aggressive">Aggressive Driver</option>
+            <option value="cautious">Cautious Driver</option>
+            <option value="drunk">Drunk Driver 🍺</option>
+        </select>
+        <span id="model-desc" class="model-desc">End-to-end CNN, smooth steering</span>
+    </div>
+
+    <div class="legend" id="legend">
         <div class="legend-item">
             <div class="legend-dot" style="background: #4CAF50;"></div>
             <span>Your Input</span>
@@ -210,6 +276,89 @@
         const W = canvas.width;
         const H = canvas.height;
 
+        // AI Models with different driving behaviors
+        const AI_MODELS = {
+            pilotnet: {
+                name: 'PilotNet (NVIDIA)',
+                desc: 'End-to-end CNN, smooth steering',
+                simulate: (position, curvature, speed, obstacles, time) => {
+                    let correction = -position * 0.9;
+                    correction += curvature * 0.7;
+                    correction += Math.sin(time * 0.1) * 0.03;
+                    for (const obs of obstacles) {
+                        if (obs.distance < 150 && obs.distance > 50 && Math.abs(obs.lane * 0.3 - position) < 0.2) {
+                            correction += (obs.lane > 0 ? -0.4 : 0.4);
+                        }
+                    }
+                    return Math.max(-1, Math.min(1, correction));
+                }
+            },
+            alpamayo: {
+                name: 'Alpamayo Style',
+                desc: 'VLA model with trajectory planning',
+                simulate: (position, curvature, speed, obstacles, time) => {
+                    // Smoother, more anticipatory - predicts curves ahead
+                    let correction = -position * 0.7;
+                    correction += curvature * 1.2; // Stronger curve following
+                    correction += Math.sin(time * 0.05) * 0.01; // Less noise
+                    // Earlier obstacle avoidance
+                    for (const obs of obstacles) {
+                        if (obs.distance < 250 && obs.distance > 30) {
+                            const urgency = 1 - (obs.distance / 250);
+                            correction += (obs.lane > 0 ? -0.5 : 0.5) * urgency;
+                        }
+                    }
+                    return Math.max(-1, Math.min(1, correction * 0.85)); // Smoother output
+                }
+            },
+            aggressive: {
+                name: 'Aggressive Driver',
+                desc: 'Tight corners, late braking',
+                simulate: (position, curvature, speed, obstacles, time) => {
+                    let correction = -position * 1.3;
+                    correction += curvature * 0.9;
+                    for (const obs of obstacles) {
+                        if (obs.distance < 100 && obs.distance > 30) {
+                            correction += (obs.lane > 0 ? -0.7 : 0.7);
+                        }
+                    }
+                    return Math.max(-1, Math.min(1, correction));
+                }
+            },
+            cautious: {
+                name: 'Cautious Driver',
+                desc: 'Wide margins, early reactions',
+                simulate: (position, curvature, speed, obstacles, time) => {
+                    let correction = -position * 0.5;
+                    correction += curvature * 0.4;
+                    for (const obs of obstacles) {
+                        if (obs.distance < 300 && obs.distance > 50) {
+                            correction += (obs.lane > 0 ? -0.3 : 0.3);
+                        }
+                    }
+                    return Math.max(-1, Math.min(1, correction));
+                }
+            },
+            drunk: {
+                name: 'Drunk Driver',
+                desc: 'Unpredictable, wobbly steering',
+                simulate: (position, curvature, speed, obstacles, time) => {
+                    let correction = -position * 0.4;
+                    correction += curvature * 0.3;
+                    // Random wobble
+                    correction += Math.sin(time * 0.3) * 0.4;
+                    correction += Math.sin(time * 0.17) * 0.3;
+                    // Delayed obstacle reaction
+                    for (const obs of obstacles) {
+                        if (obs.distance < 80 && obs.distance > 20) {
+                            correction += (obs.lane > 0 ? -0.6 : 0.6);
+                        }
+                    }
+                    return Math.max(-1, Math.min(1, correction));
+                }
+            }
+        };
+
         let state = {
             throttle: 0,
             brake: 0,
@@ -224,7 +373,9 @@
             roadCurvature: 0,
             obstacles: [],
             particles: [],
-            carAngle: 0  // Car visual rotation
+            carAngle: 0,
+            gameMode: 'shadow',  // 'simulator', 'shadow', 'ai_only'
+            aiModel: 'pilotnet'
         };
 
         const curveWaypoints = [
@@ -312,44 +463,119 @@
             document.getElementById('key-space').classList.toggle('active', state.keys[' ']);
         }
 
-        function simulateAI(position, curvature, speed) {
-            let correction = -position * 0.9;
-            correction += curvature * 0.7;
-            correction += Math.sin(state.time * 0.1) * 0.03;
-            for (const obs of state.obstacles) {
-                if (obs.distance < 150 && obs.distance > 50 && Math.abs(obs.lane * 0.3 - position) < 0.2) {
-                    correction += (obs.lane > 0 ? -0.4 : 0.4);
-                }
+        function setMode(mode) {
+            state.gameMode = mode;
+            document.querySelectorAll('.mode-btn').forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+            updateLegend();
+
+            // Reset controls when switching to AI mode
+            if (mode === 'ai_only') {
+                state.throttle = 0.5;
+                state.steer = 0;
             }
-            return Math.max(-1, Math.min(1, correction));
+        }
+
+        function setAIModel(model) {
+            state.aiModel = model;
+            document.getElementById('model-desc').textContent = AI_MODELS[model].desc;
+        }
+
+        function updateLegend() {
+            const legend = document.getElementById('legend');
+            if (state.gameMode === 'simulator') {
+                legend.innerHTML = `
+                    <div class="legend-item">
+                        <div class="legend-dot" style="background: #4CAF50;"></div>
+                        <span>Your Car</span>
+                    </div>
+                `;
+            } else if (state.gameMode === 'ai_only') {
+                legend.innerHTML = `
+                    <div class="legend-item">
+                        <div class="legend-dot" style="background: #2196F3;"></div>
+                        <span>AI Driving</span>
+                    </div>
+                `;
+            } else {
+                legend.innerHTML = `
+                    <div class="legend-item">
+                        <div class="legend-dot" style="background: #4CAF50;"></div>
+                        <span>Your Input</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-dot" style="background: #2196F3;"></div>
+                        <span>AI Suggestion</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-dot" style="background: #FFD700;"></div>
+                        <span>Car Direction</span>
+                    </div>
+                `;
+            }
+        }
+
+        function simulateAI(position, curvature, speed) {
+            return AI_MODELS[state.aiModel].simulate(position, curvature, speed, state.obstacles, state.time);
         }
 
         function update() {
             state.time++;
 
-            if (state.keys['w'] || state.keys['ArrowUp']) {
-                state.throttle = Math.min(1, state.throttle + 0.05);
-                state.brake = 0;
-            } else if (state.keys['s'] || state.keys['ArrowDown']) {
-                state.throttle = 0;
-                state.brake = Math.min(1, state.brake + 0.08);
-            } else {
-                state.throttle = Math.max(0, state.throttle - 0.02);
-                state.brake = Math.max(0, state.brake - 0.04);
-            }
+            // Calculate AI steering first (needed for AI Only mode and stats)
+            state.aiSteer = simulateAI(state.position, state.roadCurvature, state.speed);
 
-            if (state.keys[' ']) {
-                state.brake = 1;
-                state.throttle = 0;
-            }
+            // Handle input based on game mode
+            if (state.gameMode === 'ai_only') {
+                // AI controls steering
+                state.steer += (state.aiSteer - state.steer) * 0.15;
 
-            if (state.keys['a'] || state.keys['ArrowLeft']) {
-                state.steer = Math.max(-1, state.steer - 0.06);
-            } else if (state.keys['d'] || state.keys['ArrowRight']) {
-                state.steer = Math.min(1, state.steer + 0.06);
+                // AI auto-throttle: maintain cruising speed
+                const targetSpeed = 60;
+                if (state.speed < targetSpeed - 5) {
+                    state.throttle = Math.min(0.7, state.throttle + 0.03);
+                    state.brake = 0;
+                } else if (state.speed > targetSpeed + 5) {
+                    state.throttle = 0;
+                    state.brake = Math.min(0.3, (state.speed - targetSpeed) / 100);
+                } else {
+                    state.throttle = 0.3;
+                    state.brake = 0;
+                }
+
+                // Obstacle braking
+                for (const obs of state.obstacles) {
+                    if (obs.distance < 120 && obs.distance > 20) {
+                        state.brake = Math.max(state.brake, 0.5);
+                        state.throttle = 0;
+                    }
+                }
             } else {
-                state.steer *= 0.9;
-                if (Math.abs(state.steer) < 0.01) state.steer = 0;
+                // User controls (simulator or shadow mode)
+                if (state.keys['w'] || state.keys['ArrowUp']) {
+                    state.throttle = Math.min(1, state.throttle + 0.05);
+                    state.brake = 0;
+                } else if (state.keys['s'] || state.keys['ArrowDown']) {
+                    state.throttle = 0;
+                    state.brake = Math.min(1, state.brake + 0.08);
+                } else {
+                    state.throttle = Math.max(0, state.throttle - 0.02);
+                    state.brake = Math.max(0, state.brake - 0.04);
+                }
+
+                if (state.keys[' ']) {
+                    state.brake = 1;
+                    state.throttle = 0;
+                }
+
+                if (state.keys['a'] || state.keys['ArrowLeft']) {
+                    state.steer = Math.max(-1, state.steer - 0.06);
+                } else if (state.keys['d'] || state.keys['ArrowRight']) {
+                    state.steer = Math.min(1, state.steer + 0.06);
+                } else {
+                    state.steer *= 0.9;
+                    if (Math.abs(state.steer) < 0.01) state.steer = 0;
+                }
             }
 
             const weatherMultiplier = state.weather === 'rain' ? 0.8 : state.weather === 'fog' ? 0.9 : 1.0;
@@ -394,13 +620,13 @@
                 }
             }
 
-            state.aiSteer = simulateAI(state.position, state.roadCurvature, state.speed);
-
+            // Update stats display based on mode
             document.getElementById('stat-speed').textContent = Math.round(state.speed);
             document.getElementById('stat-steer').textContent = state.steer.toFixed(2);
             document.getElementById('stat-ai').textContent = state.aiSteer.toFixed(2);
             const divergence = Math.abs(state.steer - state.aiSteer) * 100;
-            document.getElementById('stat-divergence').textContent = Math.round(divergence) + '%';
+            document.getElementById('stat-divergence').textContent =
+                state.gameMode === 'simulator' ? 'N/A' : Math.round(divergence) + '%';
         }
 
         function drawCar(x, y, angle, color, label) {
@@ -544,35 +770,55 @@
                 ctx.fillRect(0, 0, W, H);
             }
 
-            // Draw YOUR car (large, in foreground)
+            // Draw cars based on game mode
             const carX = W / 2 + state.position * 100;
             const carY = H - 150;
-            drawCar(carX, carY, state.carAngle, '#4CAF50', 'YOU');
 
-            // Draw AI suggested car (ghost, slightly offset)
-            const aiOffset = (state.aiSteer - state.steer) * 50;
-            const aiCarX = carX + aiOffset;
-            drawCar(aiCarX, carY, state.aiSteer * 25, 'rgba(33, 150, 243, 0.5)', 'AI');
-
-            // Divergence warning
-            const divergence = Math.abs(state.steer - state.aiSteer);
-            if (divergence > 0.25) {
-                const alpha = Math.min(0.7, divergence * 0.8);
-                ctx.fillStyle = `rgba(255, 165, 0, ${alpha})`;
-                ctx.fillRect(0, 0, W, 45);
-                ctx.fillStyle = '#000';
-                ctx.font = '16px Arial';
-                ctx.textAlign = 'center';
-                ctx.fillText(`⚠️ AI suggests steering ${state.aiSteer > state.steer ? 'RIGHT' : 'LEFT'} more`, W/2, 28);
+            if (state.gameMode === 'simulator') {
+                // Simulator only: just your car
+                drawCar(carX, carY, state.carAngle, '#4CAF50', 'YOU');
+            } else if (state.gameMode === 'ai_only') {
+                // AI only: just the AI car (blue)
+                drawCar(carX, carY, state.carAngle, '#2196F3', 'AI');
+            } else {
+                // Shadow mode: both cars
+                drawCar(carX, carY, state.carAngle, '#4CAF50', 'YOU');
+                const aiOffset = (state.aiSteer - state.steer) * 50;
+                const aiCarX = carX + aiOffset;
+                drawCar(aiCarX, carY, state.aiSteer * 25, 'rgba(33, 150, 243, 0.5)', 'AI');
             }
+
+            // Divergence warning (only in shadow mode)
+            if (state.gameMode === 'shadow') {
+                const divergence = Math.abs(state.steer - state.aiSteer);
+                if (divergence > 0.25) {
+                    const alpha = Math.min(0.7, divergence * 0.8);
+                    ctx.fillStyle = `rgba(255, 165, 0, ${alpha})`;
+                    ctx.fillRect(0, 0, W, 45);
+                    ctx.fillStyle = '#000';
+                    ctx.font = '16px Arial';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(`⚠️ AI suggests steering ${state.aiSteer > state.steer ? 'RIGHT' : 'LEFT'} more`, W/2, 28);
+                }
+            }
+
+            // Mode indicator
+            const modeLabels = {
+                simulator: '🎮 SIMULATOR',
+                shadow: '👤🤖 SHADOW MODE',
+                ai_only: '🤖 AI DRIVING'
+            };
 
             // Status
             ctx.fillStyle = '#ff0';
             ctx.font = '13px Arial';
             ctx.textAlign = 'left';
             const weatherIcon = {clear: '☀️', rain: '🌧️', fog: '🌫️', night: '🌙'}[state.weather];
-            ctx.fillText(`${weatherIcon} ${state.weather.toUpperCase()} | VISUAL CAR DEMO`, 12, 22);
+            ctx.fillText(`${weatherIcon} ${state.weather.toUpperCase()} | ${modeLabels[state.gameMode]} | ${AI_MODELS[state.aiModel].name}`, 12, 22);
         }
+
+        // Initialize legend on load
+        updateLegend();
 
         function gameLoop() {
             update();

@@ -1,123 +1,127 @@
 # CARLA Shadow Driver
 
-A self-driving car learning project using CARLA simulator and NVIDIA's PilotNet model.
+[![Live Demo](https://img.shields.io/badge/demo-live-brightgreen)](https://carla-shadow-driver.vercel.app)
+[![GitHub](https://img.shields.io/github/stars/rishi09/carla-shadow-driver?style=social)](https://github.com/rishi09/carla-shadow-driver)
 
-**Goal:** Understand how autonomous driving works through shadow mode - where an AI watches and suggests, but doesn't control.
+**An interactive autonomous driving simulator with shadow mode** - compare your driving to AI in real-time.
+
+## Live Demo
+
+**[Try it now](https://carla-shadow-driver.vercel.app)** - No installation required!
+
+## Features
+
+### Game Modes
+- **Simulator Only** - Pure driving, no AI
+- **Shadow Mode** - Drive while AI suggests (industry standard for AV validation)
+- **AI Only** - Watch different AI models drive autonomously
+
+### AI Models
+- **PilotNet (NVIDIA)** - End-to-end CNN, smooth steering
+- **Alpamayo Style** - VLA model with trajectory planning
+- **Aggressive Driver** - Tight corners, late braking
+- **Cautious Driver** - Wide margins, early reactions
+- **Drunk Driver** - Unpredictable, wobbly (for fun!)
+
+### Weather & Environment
+- Clear, Rain, Fog, Night conditions
+- Dynamic obstacles (other cars)
+- Curved roads with realistic physics
+
+## How It Works
+
+Shadow mode is how real autonomous vehicle companies (Tesla, Waymo, Cruise) validate their AI:
+
+1. **You drive** (green car)
+2. **AI watches and predicts** what it would do (blue ghost car)
+3. **System compares** - When do you and AI disagree?
+
+This divergence data is invaluable for finding edge cases and improving AI models.
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│                        YOUR MAC (Local)                              │
+│                        Browser (Client)                              │
 │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────────┐  │
-│  │  CARLA Client   │  │   PilotNet      │  │  Shadow Mode UI     │  │
-│  │  (sensors.py)   │──│   (model.py)    │──│  (visualizer.py)    │  │
-│  └────────┬────────┘  └─────────────────┘  └─────────────────────┘  │
-│           │                                                          │
-└───────────┼──────────────────────────────────────────────────────────┘
-            │ TCP/IP (port 2000)
-            │
-┌───────────┼──────────────────────────────────────────────────────────┐
-│           ▼              VAST.AI CLOUD (Remote GPU)                  │
-│  ┌─────────────────────────────────────────────────────────────────┐ │
-│  │                    CARLA Server (Docker)                         │ │
-│  │   • Physics simulation    • Weather/lighting                     │ │
-│  │   • Vehicle dynamics      • Sensor rendering                     │ │
-│  └─────────────────────────────────────────────────────────────────┘ │
-└──────────────────────────────────────────────────────────────────────┘
+│  │  User Input     │  │   AI Models     │  │  Canvas Renderer    │  │
+│  │  (keyboard)     │──│   (JavaScript)  │──│  (60 FPS)           │  │
+│  └─────────────────┘  └─────────────────┘  └─────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────┘
+                              ▼ Optional: Real AI Mode
+┌─────────────────────────────────────────────────────────────────────┐
+│                        VAST.AI Cloud (GPU)                          │
+│  ┌─────────────────────────────────────────────────────────────────┐│
+│  │  CARLA Simulator  +  NVIDIA Alpamayo-R1-10B (10B params)        ││
+│  │  Real 3D graphics    Real neural network inference              ││
+│  └─────────────────────────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
-## Quick Start
-
-### Phase 1: Set up Vast.ai + CARLA Server
-
-1. **Create Vast.ai account:** https://cloud.vast.ai/
-2. **Add credits:** Start with $5-10 (that's 20-40 hours of usage)
-3. **Rent a GPU instance:**
-   - Search for: T4 or RTX 3080+
-   - Min 16GB GPU VRAM, 32GB RAM
-   - Select Ubuntu with Docker
-   - Use the template in `scripts/vastai-template.json`
-4. **SSH into your instance and run CARLA:**
-   ```bash
-   # On the Vast.ai instance
-   docker run --gpus all --net=host -d \
-     carlasim/carla:0.9.16 \
-     bash CarlaUE4.sh -RenderOffScreen -nosound
-   ```
-
-### Phase 2: Connect from your Mac
-
-1. **Set up SSH tunnel:**
-   ```bash
-   # Replace with your Vast.ai instance IP
-   ssh -L 2000:localhost:2000 -L 2001:localhost:2001 root@<VAST_IP> -p <PORT>
-   ```
-
-2. **Install local dependencies:**
-   ```bash
-   cd carla-shadow-driver
-   pip install -r requirements.txt
-   ```
-
-3. **Test connection:**
-   ```bash
-   python src/test_connection.py
-   ```
-
-### Phase 3: Drive manually and see AI suggestions
+## Run Locally
 
 ```bash
-python src/shadow_mode.py
+# Clone the repo
+git clone https://github.com/rishi09/carla-shadow-driver.git
+cd carla-shadow-driver
+
+# Start local server
+python3 -m http.server 8080
+
+# Open http://localhost:8080/demo_visual_car.html
 ```
+
+## Real AI Mode (Optional)
+
+To run the actual NVIDIA Alpamayo model (10B parameters):
+
+1. **Rent GPU on Vast.ai** (~$0.40/hr for RTX 4090 with 24GB VRAM)
+2. **Install CARLA and model**
+3. **Connect via WebSocket**
+
+See `VASTAI_SETUP.md` for detailed instructions.
 
 ## Project Structure
 
 ```
 carla-shadow-driver/
-├── README.md
-├── requirements.txt
-├── configs/
-│   └── default.yaml          # Configuration settings
-├── scripts/
-│   ├── setup_vastai.sh       # Vast.ai setup script
-│   └── vastai-template.json  # Vast.ai instance template
+├── demo_visual_car.html      # Main interactive demo
+├── vercel-deploy/            # Deployment files
 ├── src/
-│   ├── carla_client.py       # CARLA connection and control
-│   ├── sensors.py            # Camera and telemetry capture
-│   ├── recorder.py           # Data recording to disk
-│   ├── model.py              # PilotNet inference
-│   ├── visualizer.py         # Shadow mode overlay UI
-│   ├── shadow_mode.py        # Main application
-│   └── test_connection.py    # Connection tester
-├── models/
-│   └── pilotnet.pt           # Trained model weights
-└── data/
-    └── recordings/           # Saved driving sessions
+│   ├── shadow_mode.py        # CARLA integration
+│   ├── model_manager.py      # AI model registry
+│   └── ...
+├── models/                   # Pre-trained weights
+└── configs/                  # Configuration
 ```
 
-## Phases
+## Technologies
 
-- [x] Phase 0: Environment research
-- [ ] Phase 1: CARLA running on cloud
-- [ ] Phase 2: Camera streaming working
-- [ ] Phase 3: Data recording pipeline
-- [ ] Phase 4: PilotNet inference (offline)
-- [ ] Phase 5: Shadow mode (live AI suggestions)
-- [ ] Phase 6: Optional limited AI control
+- **Frontend**: Pure HTML/CSS/JavaScript, Canvas API
+- **AI Models**: NVIDIA PilotNet, Alpamayo-R1-10B
+- **Simulator**: CARLA 0.9.16
+- **Deployment**: Vercel
+- **GPU Cloud**: Vast.ai
 
-## Cost Estimate
+## Cost Estimates
 
-| Activity | Time | Cost (Vast.ai T4) |
-|----------|------|-------------------|
-| Initial setup & testing | 2 hours | ~$0.50 |
-| Manual driving + recording | 4 hours | ~$1.00 |
-| Shadow mode experiments | 10 hours | ~$2.50 |
-| **Total for full project** | ~16 hours | **~$4.00** |
+| Activity | Cost |
+|----------|------|
+| Browser demo | FREE |
+| Vast.ai (PilotNet) | ~$0.10/hr |
+| Vast.ai (Alpamayo) | ~$0.40/hr |
 
-## Resources
+## Learning Resources
 
+- [NVIDIA PilotNet Paper](https://arxiv.org/abs/1604.07316)
+- [NVIDIA Alpamayo](https://huggingface.co/nvidia/Alpamayo-R1-10B)
 - [CARLA Documentation](https://carla.readthedocs.io/)
-- [CARLA Python API](https://carla.readthedocs.io/en/latest/python_api/)
-- [NVIDIA PilotNet Paper](https://arxiv.org/abs/1704.07911)
-- [Vast.ai Docs](https://docs.vast.ai/)
+- [Shadow Mode Explained](https://www.tesla.com/autopilot)
+
+## License
+
+MIT License - feel free to use, modify, and share!
+
+---
+
+Built with care to make autonomous driving concepts accessible to everyone.
