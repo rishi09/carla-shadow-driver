@@ -302,9 +302,9 @@ class WebSocketServer:
         if msg_type == 'ping':
             return {'type': 'pong', 'timestamp': time.time()}
 
-        if msg_type == 'state_update':
-            # Extract state from browser
-            state = data.get('state', {})
+        if msg_type in ('state_update', 'state'):
+            # Extract state from browser - support both nested and flat formats
+            state = data.get('state', data)
 
             # For now, simulate prediction based on state
             # In full implementation, this would use camera frame from CARLA
