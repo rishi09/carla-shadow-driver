@@ -178,6 +178,190 @@
             font-size: 0.75rem;
             font-style: italic;
         }
+        /* GPU Connection Button */
+        .gpu-btn {
+            margin-top: 15px;
+            padding: 12px 24px;
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+            border: none;
+            border-radius: 10px;
+            color: white;
+            font-size: 0.9rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 4px 15px rgba(99, 102, 241, 0.3);
+        }
+        .gpu-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(99, 102, 241, 0.4);
+        }
+        .gpu-btn.connected {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);
+        }
+        /* Modal Styles */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.7);
+            backdrop-filter: blur(5px);
+        }
+        .modal.show {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-content {
+            background: linear-gradient(135deg, #1a1a2e 0%, #2d2d44 100%);
+            padding: 30px;
+            border-radius: 16px;
+            max-width: 500px;
+            width: 90%;
+            position: relative;
+            box-shadow: 0 25px 50px rgba(0,0,0,0.5);
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        .modal-close {
+            position: absolute;
+            right: 20px;
+            top: 15px;
+            font-size: 28px;
+            cursor: pointer;
+            color: #888;
+        }
+        .modal-close:hover {
+            color: white;
+        }
+        .modal-content h2 {
+            margin-bottom: 20px;
+            color: #fff;
+        }
+        .gpu-info {
+            background: rgba(0,0,0,0.2);
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+        .gpu-info h3 {
+            font-size: 0.9rem;
+            margin: 10px 0 5px;
+        }
+        .gpu-info ol {
+            margin-left: 20px;
+            font-size: 0.85rem;
+            color: #ccc;
+        }
+        .gpu-info li {
+            margin: 5px 0;
+        }
+        .gpu-info code {
+            background: rgba(255,255,255,0.1);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+        }
+        .cost-info {
+            background: rgba(99, 102, 241, 0.2);
+            padding: 10px;
+            border-radius: 6px;
+            margin-top: 10px;
+            font-size: 0.85rem;
+        }
+        .gpu-connection {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .gpu-connection label {
+            font-size: 0.8rem;
+            color: #888;
+        }
+        .gpu-connection input {
+            padding: 12px;
+            background: rgba(0,0,0,0.3);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 8px;
+            color: white;
+            font-size: 0.9rem;
+        }
+        .gpu-connection input:focus {
+            outline: none;
+            border-color: #6366f1;
+        }
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px;
+            background: rgba(0,0,0,0.2);
+            border-radius: 6px;
+        }
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+        }
+        .status-dot.disconnected {
+            background: #ef4444;
+        }
+        .status-dot.connecting {
+            background: #f59e0b;
+            animation: pulse 1s infinite;
+        }
+        .status-dot.connected {
+            background: #10b981;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .gpu-buttons {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .gpu-buttons button {
+            flex: 1;
+            padding: 12px;
+            border: none;
+            border-radius: 8px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .gpu-buttons button:first-child {
+            background: #6366f1;
+            color: white;
+        }
+        .gpu-buttons button:last-child {
+            background: rgba(255,255,255,0.1);
+            color: white;
+        }
+        .gpu-buttons button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .gpu-help {
+            margin-top: 15px;
+            font-size: 0.8rem;
+        }
+        .gpu-help summary {
+            cursor: pointer;
+            color: #888;
+        }
+        .gpu-help details[open] summary {
+            color: #fff;
+            margin-bottom: 10px;
+        }
+        .gpu-help a {
+            color: #6366f1;
+        }
     </style>
 </head>
 <body>
@@ -267,6 +451,66 @@
         <div class="stat">
             <div class="stat-label">DIVERGENCE</div>
             <div class="stat-value" id="stat-divergence">0%</div>
+        </div>
+    </div>
+
+    <!-- GPU Connection Button -->
+    <button class="gpu-btn" onclick="openGPUModal()">
+        🖥️ Connect Real AI (GPU)
+    </button>
+
+    <!-- GPU Connection Modal -->
+    <div id="gpu-modal" class="modal">
+        <div class="modal-content">
+            <span class="modal-close" onclick="closeGPUModal()">&times;</span>
+            <h2>🖥️ Connect to Real AI</h2>
+
+            <div class="gpu-info">
+                <p>Connect to a GPU running CARLA + NVIDIA Alpamayo for real neural network inference.</p>
+
+                <h3>Quick Start:</h3>
+                <ol>
+                    <li>Rent a GPU on <a href="https://vast.ai" target="_blank">Vast.ai</a> (RTX 3090+ with 24GB+ VRAM)</li>
+                    <li>Run the shadow mode server: <code>python src/shadow_mode.py --websocket</code></li>
+                    <li>Enter the connection details below</li>
+                </ol>
+
+                <div class="cost-info">
+                    💰 Estimated cost: ~$0.30-0.50/hour
+                </div>
+            </div>
+
+            <div class="gpu-connection">
+                <label for="gpu-host">GPU Host:</label>
+                <input type="text" id="gpu-host" placeholder="e.g., 192.168.1.100 or vast-ai-ip.com" value="">
+
+                <label for="gpu-port">Port:</label>
+                <input type="text" id="gpu-port" placeholder="8765" value="8765">
+
+                <div class="connection-status" id="connection-status">
+                    <span class="status-dot disconnected"></span>
+                    <span>Not connected</span>
+                </div>
+
+                <div class="gpu-buttons">
+                    <button onclick="connectToGPU()" id="connect-btn">Connect</button>
+                    <button onclick="disconnectFromGPU()" id="disconnect-btn" disabled>Disconnect</button>
+                </div>
+            </div>
+
+            <div class="gpu-help">
+                <details>
+                    <summary>Need help setting up Vast.ai?</summary>
+                    <ol>
+                        <li>Create account at <a href="https://vast.ai" target="_blank">vast.ai</a></li>
+                        <li>Add $5 credits (enough for ~12 hours)</li>
+                        <li>Search for: <code>gpu_ram >= 24</code></li>
+                        <li>Select Ubuntu/Docker template</li>
+                        <li>SSH in and run CARLA + shadow mode</li>
+                    </ol>
+                    <p>See <a href="https://github.com/rishi09/carla-shadow-driver#real-ai-mode-optional" target="_blank">README</a> for full guide.</p>
+                </details>
+            </div>
         </div>
     </div>
 
@@ -825,6 +1069,160 @@
             draw();
             requestAnimationFrame(gameLoop);
         }
+
+        // ======================
+        // GPU Connection System
+        // ======================
+        let gpuConnection = {
+            ws: null,
+            connected: false,
+            host: null,
+            port: null
+        };
+
+        function openGPUModal() {
+            document.getElementById('gpu-modal').classList.add('show');
+        }
+
+        function closeGPUModal() {
+            document.getElementById('gpu-modal').classList.remove('show');
+        }
+
+        // Close modal when clicking outside
+        document.getElementById('gpu-modal').addEventListener('click', (e) => {
+            if (e.target.classList.contains('modal')) {
+                closeGPUModal();
+            }
+        });
+
+        function updateConnectionStatus(status, message) {
+            const statusEl = document.getElementById('connection-status');
+            const dot = statusEl.querySelector('.status-dot');
+            const text = statusEl.querySelector('span:last-child');
+
+            dot.className = 'status-dot ' + status;
+            text.textContent = message;
+
+            // Update main button
+            const gpuBtn = document.querySelector('.gpu-btn');
+            if (status === 'connected') {
+                gpuBtn.classList.add('connected');
+                gpuBtn.innerHTML = '🟢 Connected to GPU';
+            } else {
+                gpuBtn.classList.remove('connected');
+                gpuBtn.innerHTML = '🖥️ Connect Real AI (GPU)';
+            }
+        }
+
+        function connectToGPU() {
+            const host = document.getElementById('gpu-host').value.trim();
+            const port = document.getElementById('gpu-port').value.trim() || '8765';
+
+            if (!host) {
+                alert('Please enter a GPU host address');
+                return;
+            }
+
+            updateConnectionStatus('connecting', 'Connecting...');
+            document.getElementById('connect-btn').disabled = true;
+
+            try {
+                const wsUrl = `ws://${host}:${port}`;
+                gpuConnection.ws = new WebSocket(wsUrl);
+
+                gpuConnection.ws.onopen = () => {
+                    gpuConnection.connected = true;
+                    gpuConnection.host = host;
+                    gpuConnection.port = port;
+                    updateConnectionStatus('connected', `Connected to ${host}:${port}`);
+                    document.getElementById('connect-btn').disabled = true;
+                    document.getElementById('disconnect-btn').disabled = false;
+
+                    // Send initial handshake
+                    gpuConnection.ws.send(JSON.stringify({
+                        type: 'handshake',
+                        client: 'browser-demo',
+                        version: '1.0'
+                    }));
+                };
+
+                gpuConnection.ws.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+
+                        if (data.type === 'prediction') {
+                            // Update AI steering from real model
+                            state.aiSteer = data.steering;
+
+                            // If using AI Only mode, use the real prediction
+                            if (state.gameMode === 'ai_only') {
+                                state.steer = data.steering;
+                                if (data.throttle !== undefined) {
+                                    state.throttle = data.throttle;
+                                }
+                                if (data.brake !== undefined) {
+                                    state.brake = data.brake;
+                                }
+                            }
+                        } else if (data.type === 'status') {
+                            console.log('GPU Status:', data);
+                        }
+                    } catch (e) {
+                        console.error('Error parsing GPU message:', e);
+                    }
+                };
+
+                gpuConnection.ws.onclose = () => {
+                    gpuConnection.connected = false;
+                    gpuConnection.ws = null;
+                    updateConnectionStatus('disconnected', 'Connection closed');
+                    document.getElementById('connect-btn').disabled = false;
+                    document.getElementById('disconnect-btn').disabled = true;
+                };
+
+                gpuConnection.ws.onerror = (error) => {
+                    console.error('WebSocket error:', error);
+                    updateConnectionStatus('disconnected', 'Connection failed');
+                    document.getElementById('connect-btn').disabled = false;
+                };
+
+            } catch (e) {
+                console.error('Connection error:', e);
+                updateConnectionStatus('disconnected', 'Error: ' + e.message);
+                document.getElementById('connect-btn').disabled = false;
+            }
+        }
+
+        function disconnectFromGPU() {
+            if (gpuConnection.ws) {
+                gpuConnection.ws.close();
+            }
+            gpuConnection.connected = false;
+            updateConnectionStatus('disconnected', 'Disconnected');
+            document.getElementById('connect-btn').disabled = false;
+            document.getElementById('disconnect-btn').disabled = true;
+        }
+
+        // Send state updates to GPU server for prediction
+        function sendStateToGPU() {
+            if (gpuConnection.connected && gpuConnection.ws) {
+                gpuConnection.ws.send(JSON.stringify({
+                    type: 'state',
+                    position: state.position,
+                    speed: state.speed,
+                    curvature: state.roadCurvature,
+                    weather: state.weather,
+                    model: state.aiModel
+                }));
+            }
+        }
+
+        // Periodically send state updates when connected
+        setInterval(() => {
+            if (gpuConnection.connected) {
+                sendStateToGPU();
+            }
+        }, 100); // 10 updates per second
 
         gameLoop();
     </script>

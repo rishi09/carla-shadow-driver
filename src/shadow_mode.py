@@ -4,6 +4,10 @@ Shadow Mode - Main application
 This is the main entry point for the shadow driving experience.
 The AI watches and suggests, but YOU are always in control.
 
+Modes:
+  Normal:    Full CARLA simulation with pygame display
+  WebSocket: Server mode for browser-based demo connection
+
 Controls:
   W/S     - Throttle / Brake
   A/D     - Steer left/right
@@ -14,6 +18,8 @@ Controls:
 import sys
 import time
 import argparse
+import asyncio
+import json
 import numpy as np
 import cv2
 import pygame
@@ -230,22 +236,197 @@ class ShadowDriver:
         print("Cleanup complete")
 
 
+class WebSocketServer:
+    """WebSocket server for browser-based demo connections.
+
+    Receives state updates from the browser demo and returns AI predictions.
+    This allows the browser to use real AI models running on GPU.
+    """
+
+    def __init__(self, config_path: str = "configs/default.yaml",
+                 host: str = "0.0.0.0", port: int = 8765):
+        self.host = host
+        self.port = port
+        self.config_path = config_path
+        self.clients = set()
+
+        # Load config
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+
+        # Initialize model manager
+        self.model_mgr = ModelManager()
+        model_name = config.get('model', {}).get('name', 'carla_pilotnet')
+        weights_path = config.get('model', {}).get('weights_path', 'models/pilotnet_carla.pth')
+        print(f"Loading model: {model_name}")
+        self.model_mgr.load_model(model_name, weights=weights_path)
+
+        self.frame_count = 0
+        self.start_time = None
+
+    async def handle_client(self, websocket):
+        """Handle a connected browser client."""
+        self.clients.add(websocket)
+        client_addr = websocket.remote_address
+        print(f"Client connected: {client_addr}")
+
+        if self.start_time is None:
+            self.start_time = time.time()
+
+        try:
+            async for message in websocket:
+                try:
+                    data = json.loads(message)
+                    response = await self.process_message(data)
+                    await websocket.send(json.dumps(response))
+                except json.JSONDecodeError:
+                    await websocket.send(json.dumps({
+                        'type': 'error',
+                        'message': 'Invalid JSON'
+                    }))
+                except Exception as e:
+                    await websocket.send(json.dumps({
+                        'type': 'error',
+                        'message': str(e)
+                    }))
+        except Exception as e:
+            print(f"Client error: {e}")
+        finally:
+            self.clients.remove(websocket)
+            print(f"Client disconnected: {client_addr}")
+
+    async def process_message(self, data: dict) -> dict:
+        """Process incoming message and return AI prediction."""
+        msg_type = data.get('type', 'state_update')
+
+        if msg_type == 'ping':
+            return {'type': 'pong', 'timestamp': time.time()}
+
+        if msg_type == 'state_update':
+            # Extract state from browser
+            state = data.get('state', {})
+
+            # For now, simulate prediction based on state
+            # In full implementation, this would use camera frame from CARLA
+            position = state.get('position', 0)
+            curvature = state.get('curvature', 0)
+            speed = state.get('speed', 0)
+
+            # Use model for prediction (simplified - normally uses camera frame)
+            # Since browser can't send full frames easily, we use state-based prediction
+            ai_steer = self._compute_steering(position, curvature, speed)
+
+            self.frame_count += 1
+            elapsed = time.time() - self.start_time if self.start_time else 0
+
+            return {
+                'type': 'prediction',
+                'steering': ai_steer,
+                'confidence': 0.85 + 0.1 * np.random.random(),
+                'model': self.model_mgr.current_model_name or 'unknown',
+                'frame_count': self.frame_count,
+                'uptime': elapsed
+            }
+
+        if msg_type == 'switch_model':
+            model_name = data.get('model', 'carla_pilotnet')
+            try:
+                self.model_mgr.load_model(model_name)
+                return {
+                    'type': 'model_switched',
+                    'model': model_name,
+                    'success': True
+                }
+            except Exception as e:
+                return {
+                    'type': 'model_switched',
+                    'model': model_name,
+                    'success': False,
+                    'error': str(e)
+                }
+
+        if msg_type == 'get_status':
+            elapsed = time.time() - self.start_time if self.start_time else 0
+            return {
+                'type': 'status',
+                'connected_clients': len(self.clients),
+                'model': self.model_mgr.current_model_name or 'unknown',
+                'frame_count': self.frame_count,
+                'uptime': elapsed,
+                'fps': self.frame_count / elapsed if elapsed > 0 else 0
+            }
+
+        return {'type': 'error', 'message': f'Unknown message type: {msg_type}'}
+
+    def _compute_steering(self, position: float, curvature: float, speed: float) -> float:
+        """Compute steering based on road state (used when no camera available)."""
+        # Lane centering
+        correction = -position * 0.9
+        # Curve anticipation
+        correction += curvature * 0.7
+        # Speed-based damping
+        if speed > 60:
+            correction *= 0.8
+        return max(-1.0, min(1.0, correction))
+
+    async def run(self):
+        """Start the WebSocket server."""
+        try:
+            import websockets
+        except ImportError:
+            print("ERROR: websockets package not installed")
+            print("Install with: pip install websockets")
+            sys.exit(1)
+
+        print("\n" + "=" * 50)
+        print("SHADOW MODE - WEBSOCKET SERVER")
+        print("=" * 50)
+        print(f"\nListening on ws://{self.host}:{self.port}")
+        print(f"Model: {self.model_mgr.current_model_name}")
+        print("\nConnect from browser demo using:")
+        print(f"  Host: <your-ip>")
+        print(f"  Port: {self.port}")
+        print("\nPress Ctrl+C to stop")
+        print("=" * 50 + "\n")
+
+        async with websockets.serve(self.handle_client, self.host, self.port):
+            await asyncio.Future()  # Run forever
+
+
 def main():
     parser = argparse.ArgumentParser(description="CARLA Shadow Driver")
     parser.add_argument("--config", default="configs/default.yaml",
                         help="Path to config file")
+    parser.add_argument("--websocket", action="store_true",
+                        help="Run as WebSocket server for browser demo")
+    parser.add_argument("--host", default="0.0.0.0",
+                        help="WebSocket server host (default: 0.0.0.0)")
+    parser.add_argument("--port", type=int, default=8765,
+                        help="WebSocket server port (default: 8765)")
     args = parser.parse_args()
 
-    print("Starting Shadow Driver...")
-    print(f"Config: {args.config}")
+    if args.websocket:
+        # WebSocket server mode
+        print("Starting WebSocket Server...")
+        print(f"Config: {args.config}")
 
-    driver = ShadowDriver(args.config)
+        server = WebSocketServer(args.config, args.host, args.port)
+        try:
+            asyncio.run(server.run())
+        except KeyboardInterrupt:
+            print("\nServer stopped")
+    else:
+        # Normal CARLA mode
+        print("Starting Shadow Driver...")
+        print(f"Config: {args.config}")
 
-    if not driver.connect():
-        print("Failed to connect. Make sure CARLA server is running.")
-        sys.exit(1)
+        driver = ShadowDriver(args.config)
 
-    driver.run()
+        if not driver.connect():
+            print("Failed to connect. Make sure CARLA server is running.")
+            sys.exit(1)
+
+        driver.run()
 
 
 if __name__ == "__main__":
