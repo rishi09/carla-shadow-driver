@@ -1,6 +1,6 @@
 # Vast.ai Quick Start Guide
 
-Run real AI models (NVIDIA Alpamayo or PilotNet) on GPU and connect from the browser demo.
+Run real AI models (PilotNet or NVIDIA Alpamayo) on GPU and connect from the browser demo.
 
 ## GPU Requirements
 
@@ -9,92 +9,145 @@ Run real AI models (NVIDIA Alpamayo or PilotNet) on GPU and connect from the bro
 | PilotNet | 8 GB | RTX 5080 (16GB) | ~$0.15/hr |
 | Alpamayo | 24 GB | RTX 5090 (32GB) | ~$0.58/hr |
 
-## Step 1: Rent a GPU
+---
 
-1. Go to [vast.ai/console/create](https://cloud.vast.ai/create/)
-2. Set filters:
-   - **Per GPU RAM**: 24+ GB (for Alpamayo) or 16+ GB (for PilotNet)
-   - **Reliability**: 99%+
-3. Select a **PyTorch** template
-4. Click **RENT**
+## Quick Setup (5 Steps)
 
-## Step 2: Connect via SSH
+### Step 1: Rent a GPU on Vast.ai
 
-Once the instance shows "running":
+1. Go to [cloud.vast.ai/create](https://cloud.vast.ai/create/)
+2. Set filter: **Per GPU RAM** ≥ 24 GB
+3. Select **PyTorch (vast)** template
+4. Click **RENT** on an RTX 5090 or similar
+
+Wait for status to show **Running**.
+
+### Step 2: Open GPU Terminal
+
+1. Click the **terminal icon** (>_) on your instance
+2. Click **"Open Jupyter terminal"**
+3. Accept the SSL warning if prompted
+
+### Step 3: Set Up the Server
+
+In the GPU terminal, run:
 
 ```bash
-# Copy the SSH command from Vast.ai console
-ssh -p <port> root@<ip-address>
-```
-
-## Step 3: Set Up Environment
-
-```bash
-# Clone the repo
 git clone https://github.com/rishi09/carla-shadow-driver.git
 cd carla-shadow-driver
-
-# Install dependencies
 pip install -r requirements.txt
-
-# Download model (choose one)
-python scripts/download_model.py pilotnet    # 6 MB, fast
-python scripts/download_model.py alpamayo    # 20 GB, needs 24GB+ VRAM
+python scripts/download_model.py pilotnet
 ```
 
-## Step 4: Start WebSocket Server
+### Step 4: Start WebSocket Server
 
 ```bash
-python src/shadow_mode.py --websocket --port 8765
+python src/shadow_mode.py --websocket --port 5001
 ```
 
-You should see:
+Keep this running. You should see:
 ```
-==================================================
 SHADOW MODE - WEBSOCKET SERVER
-==================================================
-
-Listening on ws://0.0.0.0:8765
-Model: carla_pilotnet
-
-Connect from browser demo using:
-  Host: <your-ip>
-  Port: 8765
+Listening on ws://0.0.0.0:5001
 ```
 
-## Step 5: Connect from Browser
+### Step 5: Create SSH Tunnel (on your Mac)
 
-1. Open your demo: https://carla-shadow-driver.vercel.app
-2. Click **"Connect Real AI (GPU)"** button
+Vast.ai doesn't expose custom ports directly. Use SSH tunneling:
+
+**First time only - set up SSH key:**
+```bash
+# Generate key if you don't have one
+ssh-keygen -t rsa -b 4096  # Press Enter for all prompts
+
+# Copy your public key
+cat ~/.ssh/id_rsa.pub
+```
+Add this key to Vast.ai: **Account** → **SSH Keys** → Paste → Save
+
+**Create the tunnel:**
+```bash
+ssh -L 9999:localhost:5001 -p <SSH_PORT> root@<INSTANCE_IP>
+```
+
+Find `<SSH_PORT>` and `<INSTANCE_IP>` from Vast.ai console:
+- Look for `VAST_TCP_PORT_22=XXXXX` (XXXXX is your SSH port)
+- IP is shown at top of instance card
+
+Example:
+```bash
+ssh -L 9999:localhost:5001 -p 34548 root@194.228.55.129
+```
+
+### Step 6: Connect from Browser
+
+1. Open `demo_visual_car.html` locally (double-click the file)
+2. Click **"Connect Real AI (GPU)"**
 3. Enter:
-   - **Host**: Your Vast.ai instance IP (from SSH command)
-   - **Port**: 8765
-4. Click **Connect**
+   - Host: `localhost`
+   - Port: `9999`
+4. Click **Connect** - green dot = success!
+5. Switch to **AI Only** mode and watch the AI drive
 
-The status dot will turn green when connected.
+---
 
-## Step 6: Stop When Done
+## Resuming Later
 
-1. Press `Ctrl+C` in the SSH terminal
-2. Go to Vast.ai console → Instances
-3. Click **DESTROY** to stop billing
+When you come back later:
+
+### If instance is still running:
+1. Start WebSocket server on GPU (Step 4)
+2. Create SSH tunnel on Mac (Step 5)
+3. Connect from browser (Step 6)
+
+### If you destroyed the instance:
+Start from Step 1.
+
+---
+
+## Finding Your SSH Port
+
+Run this in the GPU terminal to see port mappings:
+```bash
+env | grep VAST_TCP_PORT
+```
+
+Look for `VAST_TCP_PORT_22=XXXXX` - that XXXXX is your SSH port.
+
+---
 
 ## Troubleshooting
 
-### Can't connect from browser?
-- Make sure port 8765 is open (Vast.ai usually exposes common ports)
-- Try a different port: `--port 8080`
-- Check the instance has a public IP
+### "Address already in use" on GPU
+```bash
+pkill -f shadow_mode
+python src/shadow_mode.py --websocket --port 5001
+```
 
-### Model won't load?
-- Check GPU RAM: `nvidia-smi`
-- Alpamayo needs 24GB+ free VRAM
-- Try PilotNet instead if low on memory
+### "Address already in use" on Mac (port 9999)
+Use a different local port:
+```bash
+ssh -L 8888:localhost:5001 -p <SSH_PORT> root@<IP>
+```
+Then connect to `localhost:8888` in browser.
 
-### Connection drops?
-- Vast.ai instances may have idle timeouts
-- Keep the browser tab active
-- Re-run the WebSocket server if needed
+### Connection stuck on "Connecting..."
+- Make sure SSH tunnel is running on Mac
+- Make sure WebSocket server is running on GPU
+- Try refreshing the browser page
+
+### HTTPS error in browser
+Don't use the Vercel URL for GPU connection. Open `demo_visual_car.html` directly from your local files instead.
+
+---
+
+## When Done
+
+1. Press `Ctrl+C` in GPU terminal to stop server
+2. Close SSH tunnel on Mac (`exit` or `Ctrl+D`)
+3. Go to Vast.ai → Instances → **DESTROY** to stop billing
+
+---
 
 ## Cost Estimates
 
@@ -103,21 +156,3 @@ The status dot will turn green when connected.
 | RTX 5080 (16GB) | $0.15 | ~33 hours |
 | RTX 5090 (32GB) | $0.58 | ~8.5 hours |
 | RTX 4090 (24GB) | $0.40 | ~12.5 hours |
-
-## WebSocket Protocol
-
-The server accepts these message types:
-
-```javascript
-// Ping
-{ "type": "ping" }
-
-// State update (returns AI prediction)
-{ "type": "state_update", "state": { "position": 0.1, "curvature": 0.05, "speed": 45 } }
-
-// Switch model
-{ "type": "switch_model", "model": "alpamayo" }
-
-// Get status
-{ "type": "get_status" }
-```

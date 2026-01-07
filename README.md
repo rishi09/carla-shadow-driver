@@ -75,11 +75,12 @@ python3 -m http.server 8080
 
 To run the actual NVIDIA Alpamayo model (10B parameters):
 
-1. **Rent GPU on Vast.ai** (~$0.40/hr for RTX 4090 with 24GB VRAM)
-2. **Install CARLA and model**
-3. **Connect via WebSocket**
+1. **Rent GPU on Vast.ai** (~$0.58/hr for RTX 5090 with 32GB VRAM)
+2. **Clone repo and start WebSocket server**
+3. **Create SSH tunnel from your Mac**
+4. **Connect browser to localhost**
 
-See `VASTAI_SETUP.md` for detailed instructions.
+See [`VASTAI_QUICK_START.md`](VASTAI_QUICK_START.md) for step-by-step instructions.
 
 ## Project Structure
 
