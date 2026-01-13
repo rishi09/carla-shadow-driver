@@ -1,0 +1,99 @@
+{
+  "id": "easy",
+  "name": "Sunset Speedway",
+  "description": "A beginner-friendly oval track with wide lanes and gentle curves. Perfect for learning the basics.",
+  "difficulty": "easy",
+
+  "width": 120,
+  "laps": 3,
+  "parTime": 45000,
+  "goldTime": 38000,
+
+  "centerLine": [
+    { "x": 450, "y": 120 },
+    { "x": 700, "y": 120 },
+    { "x": 780, "y": 160 },
+    { "x": 820, "y": 220 },
+    { "x": 820, "y": 380 },
+    { "x": 780, "y": 440 },
+    { "x": 700, "y": 480 },
+    { "x": 200, "y": 480 },
+    { "x": 120, "y": 440 },
+    { "x": 80, "y": 380 },
+    { "x": 80, "y": 220 },
+    { "x": 120, "y": 160 },
+    { "x": 200, "y": 120 },
+    { "x": 450, "y": 120 }
+  ],
+
+  "boundaries": {
+    "outer": [
+      { "x": 450, "y": 60 },
+      { "x": 720, "y": 60 },
+      { "x": 810, "y": 110 },
+      { "x": 860, "y": 180 },
+      { "x": 860, "y": 420 },
+      { "x": 810, "y": 490 },
+      { "x": 720, "y": 540 },
+      { "x": 180, "y": 540 },
+      { "x": 90, "y": 490 },
+      { "x": 40, "y": 420 },
+      { "x": 40, "y": 180 },
+      { "x": 90, "y": 110 },
+      { "x": 180, "y": 60 }
+    ],
+    "inner": [
+      { "x": 450, "y": 180 },
+      { "x": 680, "y": 180 },
+      { "x": 750, "y": 210 },
+      { "x": 780, "y": 260 },
+      { "x": 780, "y": 340 },
+      { "x": 750, "y": 390 },
+      { "x": 680, "y": 420 },
+      { "x": 220, "y": 420 },
+      { "x": 150, "y": 390 },
+      { "x": 120, "y": 340 },
+      { "x": 120, "y": 260 },
+      { "x": 150, "y": 210 },
+      { "x": 220, "y": 180 }
+    ]
+  },
+
+  "startPosition": { "x": 450, "y": 95 },
+  "startAngle": 0,
+  "aiStartPosition": { "x": 450, "y": 145 },
+  "aiStartAngle": 0,
+
+  "finishLine": {
+    "position": { "x": 450, "y": 120 },
+    "width": 120,
+    "angle": 0
+  },
+
+  "checkpoints": [
+    {
+      "id": 1,
+      "position": { "x": 820, "y": 300 },
+      "width": 120,
+      "angle": 1.5708
+    },
+    {
+      "id": 2,
+      "position": { "x": 450, "y": 480 },
+      "width": 120,
+      "angle": 0
+    },
+    {
+      "id": 3,
+      "position": { "x": 80, "y": 300 },
+      "width": 120,
+      "angle": 1.5708
+    }
+  ],
+
+  "obstacles": [],
+
+  "trackColor": "#3a3a4a",
+  "borderColor": "#ffffff",
+  "backgroundColor": "#1a1a2e"
+}
