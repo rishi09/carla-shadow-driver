@@ -19,6 +19,7 @@ interface TrackData {
   description: string;
   parTime: number; // in milliseconds
   goldTime: number; // in milliseconds
+  underConstruction?: boolean;
 }
 
 const TRACKS: TrackData[] = [
@@ -39,6 +40,7 @@ const TRACKS: TrackData[] = [
     description: 'Winding mountain roads with elevation changes. Test your cornering skills.',
     parTime: 70000, // 70 seconds
     goldTime: 55000, // 55 seconds
+    underConstruction: true,
   },
   {
     id: 'nightmare-circuit',
@@ -48,6 +50,7 @@ const TRACKS: TrackData[] = [
     description: 'Treacherous hairpins and narrow passages. Only the best survive.',
     parTime: 90000, // 90 seconds
     goldTime: 72000, // 72 seconds
+    underConstruction: true,
   },
 ];
 
@@ -299,6 +302,13 @@ function TrackCard({
         >
           {diffConfig.label}
         </div>
+
+        {/* Under Construction Badge */}
+        {track.underConstruction && (
+          <div className="inline-flex items-center px-3 py-1.5 rounded-full text-sm font-bold bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 mb-2 ml-2">
+            UNDER CONSTRUCTION
+          </div>
+        )}
 
         {/* Difficulty description */}
         <p className="text-white/50 text-sm mb-4">

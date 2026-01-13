@@ -176,7 +176,7 @@
     ]
   },
 
-  "startPosition": { "x": 175, "y": 75 },
+  "startPosition": { "x": 100, "y": 100 },
   "startAngle": 0,
   "aiStartPosition": { "x": 175, "y": 125 },
   "aiStartAngle": 0,
