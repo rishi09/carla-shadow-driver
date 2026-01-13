@@ -135,6 +135,11 @@ function VirtualJoystick({
   return (
     <div
       ref={baseRef}
+      role="slider"
+      aria-label="Steering and throttle joystick"
+      aria-valuemin={-1}
+      aria-valuemax={1}
+      aria-valuenow={knobPos.x / (JOYSTICK_CONFIG.baseSize / 2)}
       className={`
         relative rounded-full
         bg-dark-300/40 backdrop-blur-sm
@@ -227,6 +232,9 @@ function BrakeButton({
 
   return (
     <div
+      role="button"
+      aria-label="Brake button"
+      aria-pressed={isPressed}
       className={`
         flex items-center justify-center
         rounded-2xl
@@ -348,6 +356,8 @@ export function MobileControls({ onInput, visible }: MobileControlsProps) {
 
   return (
     <div
+      role="group"
+      aria-label="Mobile game controls"
       className="absolute bottom-0 left-0 right-0 pointer-events-auto select-none"
       style={{
         paddingBottom: 'env(safe-area-inset-bottom, 20px)',
