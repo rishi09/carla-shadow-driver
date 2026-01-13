@@ -131,6 +131,32 @@ npx vercel deploy --prod --yes
 ### Issue 4: Wrong Vercel project
 **Fix**: Logged into correct account (rishi09-3609) and linked project
 
+### Issue 5: NumPy 2.x incompatibility with PyTorch
+**Fix**: Added `pip install 'numpy<2'` before requirements.txt installation
+
+### Issue 6: Instance ID mismatch in callbacks
+**Fix**: Pass INSTANCE_ID as env var to container, enhanced callback to track status
+
+---
+
+## Debugging
+
+### Check all callback entries (no SSH needed)
+```bash
+curl -s "https://carla-shadow-driver.vercel.app/api/gpu/callback" | jq .
+```
+
+### Check specific instance status
+```bash
+curl -s "https://carla-shadow-driver.vercel.app/api/gpu/status?instance_id=YOUR_ID" | jq .
+```
+
+### SSH into instance (if needed)
+```bash
+ssh -p PORT root@ssh5.vast.ai
+cat /var/log/onstart.log
+```
+
 ---
 
 ## Cost Summary
