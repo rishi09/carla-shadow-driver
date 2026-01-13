@@ -243,20 +243,20 @@ function ModeCard({
         </div>
 
         {/* Title */}
-        <h3 className="text-2xl font-bold text-white mb-2">
+        <h3 className="text-2xl font-bold text-white mb-3">
           {title}
         </h3>
 
         {/* Description */}
-        <p className="text-white/60 mb-6 leading-relaxed">
+        <p className="text-white/70 mb-6 leading-relaxed text-base">
           {description}
         </p>
 
         {/* Features list */}
-        <ul className="space-y-2">
+        <ul className="space-y-3">
           {features.map((feature, index) => (
-            <li key={index} className="flex items-center gap-2 text-sm text-white/50">
-              <div className={`w-1.5 h-1.5 rounded-full ${colors.bullet} opacity-60`} />
+            <li key={index} className="flex items-center gap-3 text-base text-white/60">
+              <div className={`w-2 h-2 rounded-full ${colors.bullet} opacity-70`} />
               {feature}
             </li>
           ))}

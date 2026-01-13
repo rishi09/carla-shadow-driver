@@ -176,8 +176,26 @@ function TimeDisplay({
  * Checkpoint progress indicator
  */
 function CheckpointProgress({ checkpoints }: { checkpoints: boolean[] }) {
+  const hitCount = checkpoints.filter(Boolean).length;
+  const total = checkpoints.length;
+
+  if (total === 0) {
+    return (
+      <div className="text-xs text-white/40">
+        No checkpoints
+      </div>
+    );
+  }
+
   return (
-    <div className="flex items-center gap-1.5">
+    <div
+      role="progressbar"
+      aria-label={`Checkpoints: ${hitCount} of ${total}`}
+      aria-valuenow={hitCount}
+      aria-valuemin={0}
+      aria-valuemax={total}
+      className="flex items-center gap-1.5"
+    >
       {checkpoints.map((hit, index) => (
         <div
           key={index}
