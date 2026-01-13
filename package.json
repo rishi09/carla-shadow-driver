@@ -1,0 +1,8 @@
+{
+  "name": "carla-shadow-driver-api",
+  "version": "1.0.0",
+  "description": "GPU provisioning API for Shadow Driver",
+  "dependencies": {
+    "@vercel/kv": "^2.0.0"
+  }
+}
