@@ -92,7 +92,8 @@ export class BootScene extends Phaser.Scene {
 
   create(): void {
     // Emit event to notify React that boot is complete
-    this.events.emit('bootComplete');
+    // IMPORTANT: Use game.events (not this.events) so React can receive it
+    this.game.events.emit('bootComplete');
 
     // If scene data was provided, go directly to RaceScene
     if (this.sceneData?.trackId) {
