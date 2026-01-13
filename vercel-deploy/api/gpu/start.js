@@ -46,69 +46,53 @@ export default async function handler(req, res) {
       });
     }
 
-    // Get ngrok authtoken from environment
-    const NGROK_AUTHTOKEN = process.env.NGROK_AUTHTOKEN;
-    if (!NGROK_AUTHTOKEN) {
-      return res.status(500).json({
-        error: 'NGROK_AUTHTOKEN not configured',
-        hint: 'Add your ngrok authtoken to Vercel environment variables. Get one free at https://dashboard.ngrok.com/get-started/your-authtoken'
-      });
-    }
-
     // Startup script that runs when the instance boots
+    // Uses Cloudflare Tunnel for secure WebSocket access (no account required)
     const onstart = `#!/bin/bash
 set -e
 
-# Install system dependencies for OpenCV
-apt-get update && apt-get install -y libgl1-mesa-glx libglib2.0-0 --no-install-recommends
+echo "=== Installing system dependencies ==="
+apt-get update && apt-get install -y libgl1-mesa-glx libglib2.0-0 curl --no-install-recommends
 
+echo "=== Installing cloudflared ==="
+curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /usr/local/bin/cloudflared
+chmod +x /usr/local/bin/cloudflared
+
+echo "=== Cloning repository ==="
 cd /workspace
 git clone https://github.com/rishi09/carla-shadow-driver.git
 cd carla-shadow-driver
 
-# Install Python dependencies
+echo "=== Installing Python dependencies ==="
 pip install -r requirements.txt
-pip install pyngrok
 
-# Download the model
+echo "=== Downloading model ==="
 python scripts/download_model.py pilotnet
 
-# Configure ngrok authtoken
-ngrok config add-authtoken ${NGROK_AUTHTOKEN}
+echo "=== Starting WebSocket server in background ==="
+python src/shadow_mode.py --websocket --port 5001 &
+WS_PID=$!
+sleep 5  # Wait for server to start
 
-# Start ngrok tunnel and save URL
-python -c "
-from pyngrok import ngrok
-import requests
-import os
-import time
+echo "=== Starting Cloudflare Tunnel ==="
+# Start cloudflared and capture the URL
+cloudflared tunnel --url http://localhost:5001 2>&1 | while read line; do
+    echo "$line"
+    # Look for the tunnel URL in the output
+    if echo "$line" | grep -q "trycloudflare.com"; then
+        TUNNEL_URL=$(echo "$line" | grep -oE 'https://[a-zA-Z0-9-]+\\.trycloudflare\\.com')
+        if [ -n "$TUNNEL_URL" ]; then
+            echo "=== Tunnel URL: $TUNNEL_URL ==="
+            # Report URL to callback endpoint
+            curl -X POST "https://carla-shadow-driver.vercel.app/api/gpu/callback" \\
+                -H "Content-Type: application/json" \\
+                -d "{\\"instance_id\\":\\"\\$(hostname)\\",\\"tunnel_url\\":\\"$TUNNEL_URL\\"}" || true
+        fi
+    fi
+done &
 
-# Start TCP tunnel for WebSocket
-tunnel = ngrok.connect(5001, 'tcp')
-ngrok_url = tunnel.public_url
-print(f'ngrok URL: {ngrok_url}')
-
-# Save locally
-with open('/workspace/ngrok_url.txt', 'w') as f:
-    f.write(ngrok_url)
-
-# Report back to Vercel callback
-instance_id = os.environ.get('VAST_CONTAINERLABEL', 'unknown')
-try:
-    requests.post(
-        'https://carla-shadow-driver.vercel.app/api/gpu/callback',
-        json={'instance_id': instance_id, 'ngrok_url': ngrok_url},
-        timeout=10
-    )
-except Exception as e:
-    print(f'Failed to report ngrok URL: {e}')
-" &
-
-# Wait for ngrok to start
-sleep 5
-
-# Start WebSocket server
-python src/shadow_mode.py --websocket --port 5001
+# Keep container running
+wait $WS_PID
 `;
 
     // Try up to 5 different offers in case some are already taken

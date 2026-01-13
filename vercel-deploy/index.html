@@ -1273,36 +1273,32 @@
                 costText.textContent = '$' + (statusData.cost_so_far || 0).toFixed(3);
                 uptimeText.textContent = Math.floor((statusData.uptime_seconds || 0)) + 's';
 
-                // Check for ngrok URL
-                const callbackResponse = await fetch(`/api/gpu/callback?instance_id=${autoProvision.instanceId}`);
-                const callbackData = await callbackResponse.json();
-
-                if (callbackData.ngrok_url && statusData.status === 'running') {
+                // Check for tunnel URL (Cloudflare Tunnel provides HTTPS URL)
+                if (statusData.tunnel_url && statusData.status === 'running') {
                     // Stop polling
                     clearInterval(autoProvision.pollInterval);
                     autoProvision.pollInterval = null;
 
                     // Auto-connect!
-                    statusText.textContent = 'Connected!';
+                    statusText.textContent = 'Ready to connect!';
                     statusText.className = 'status-value running';
 
-                    // Parse ngrok URL (format: tcp://0.tcp.ngrok.io:12345)
-                    const url = callbackData.ngrok_url;
-                    const match = url.match(/tcp:\/\/([^:]+):(\d+)/);
+                    // Cloudflare tunnel URL is HTTPS, convert to WSS for WebSocket
+                    // e.g., https://xxx.trycloudflare.com -> wss://xxx.trycloudflare.com
+                    const tunnelUrl = statusData.tunnel_url;
+                    const wsUrl = tunnelUrl.replace('https://', 'wss://').replace('http://', 'ws://');
 
-                    if (match) {
-                        const host = match[1];
-                        const port = match[2];
+                    // Store the full WebSocket URL for connectToGPU
+                    autoProvision.tunnelWsUrl = wsUrl;
 
-                        // Auto-fill and connect
-                        document.getElementById('gpu-host').value = host;
-                        document.getElementById('gpu-port').value = port;
+                    // Auto-fill the host field with the tunnel URL for display
+                    document.getElementById('gpu-host').value = tunnelUrl;
+                    document.getElementById('gpu-port').value = ''; // Not needed for tunnel
 
-                        // Trigger connection
-                        setTimeout(() => {
-                            connectToGPU();
-                        }, 1000);
-                    }
+                    // Auto-connect after a short delay
+                    setTimeout(() => {
+                        connectToGPU();
+                    }, 1000);
                 }
 
             } catch (error) {
@@ -1414,26 +1410,41 @@
         }
 
         function connectToGPU() {
-            const host = document.getElementById('gpu-host').value.trim();
-            const port = document.getElementById('gpu-port').value.trim() || '8765';
+            let wsUrl;
 
-            if (!host) {
-                alert('Please enter a GPU host address');
-                return;
+            // Check if we have a tunnel URL from auto-provisioning
+            if (autoProvision.tunnelWsUrl) {
+                wsUrl = autoProvision.tunnelWsUrl;
+            } else {
+                // Manual connection: build URL from host and port
+                const host = document.getElementById('gpu-host').value.trim();
+                const port = document.getElementById('gpu-port').value.trim() || '8765';
+
+                if (!host) {
+                    alert('Please enter a GPU host address');
+                    return;
+                }
+
+                // Check if host looks like a URL (contains ://)
+                if (host.includes('://')) {
+                    // Convert https to wss, http to ws
+                    wsUrl = host.replace('https://', 'wss://').replace('http://', 'ws://');
+                } else {
+                    // Build ws:// URL from host:port
+                    wsUrl = `ws://${host}:${port}`;
+                }
             }
 
             updateConnectionStatus('connecting', 'Connecting...');
             document.getElementById('connect-btn').disabled = true;
 
             try {
-                const wsUrl = `ws://${host}:${port}`;
                 gpuConnection.ws = new WebSocket(wsUrl);
+                gpuConnection.wsUrl = wsUrl; // Store for display
 
                 gpuConnection.ws.onopen = () => {
                     gpuConnection.connected = true;
-                    gpuConnection.host = host;
-                    gpuConnection.port = port;
-                    updateConnectionStatus('connected', `Connected to ${host}:${port}`);
+                    updateConnectionStatus('connected', `Connected to ${wsUrl}`);
                     document.getElementById('connect-btn').disabled = true;
                     document.getElementById('disconnect-btn').disabled = false;
 

@@ -1,4 +1,11 @@
 // Check GPU instance status on Vast.ai
+// Also checks for tunnel URL from callback store
+
+// Access the shared tunnel URL store
+if (!global.tunnelUrls) {
+  global.tunnelUrls = {};
+}
+
 export default async function handler(req, res) {
   // Set CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -48,16 +55,15 @@ export default async function handler(req, res) {
       });
     }
 
-    // Check if we have a stored ngrok URL for this instance
-    let ngrok_url = null;
-    if (global.ngrokUrls && global.ngrokUrls[instance_id]) {
-      ngrok_url = global.ngrokUrls[instance_id];
-    }
+    // Check for tunnel URL from callback store
+    // The GPU reports its Cloudflare tunnel URL to /api/gpu/callback
+    const tunnel_url = global.tunnelUrls[instance_id] || null;
 
     return res.status(200).json({
       instance_id: instance_id,
       status: instance.cur_state || instance.actual_status || instance.status_msg || 'unknown',
-      ngrok_url: ngrok_url,
+      tunnel_url: tunnel_url,
+      public_ip: instance.public_ipaddr,
       gpu_name: instance.gpu_name || instance.machine_id,
       cost_so_far: instance.total_cost || 0,
       uptime_seconds: instance.duration || 0,
