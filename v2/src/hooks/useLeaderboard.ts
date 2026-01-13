@@ -23,7 +23,7 @@ const STORAGE_KEY_PREFIX = 'shadow-driver-leaderboard-';
 const MAX_ENTRIES = 10;
 
 function generateId(): string {
-  return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  return `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
 }
 
 function getStorageKey(trackId: string): string {
@@ -80,6 +80,18 @@ export function useLeaderboard(trackId: string): UseLeaderboardReturn {
 
   const addEntry = useCallback(
     (entryData: Omit<LeaderboardEntry, 'id' | 'date'>): LeaderboardEntry => {
+      // Validate time is a positive number
+      if (typeof entryData.time !== 'number' || entryData.time < 0 || !isFinite(entryData.time)) {
+        console.error('Invalid time value for leaderboard entry:', entryData.time);
+        // Return a dummy entry to avoid breaking the UI
+        return {
+          ...entryData,
+          id: generateId(),
+          date: new Date().toISOString(),
+          time: 0,
+        };
+      }
+
       const newEntry: LeaderboardEntry = {
         ...entryData,
         id: generateId(),

@@ -55,9 +55,16 @@ const TRACKS: TrackData[] = [
  * Get the best time for a track/mode combination from localStorage
  */
 const getBestTime = (trackId: string, mode: string): number | null => {
-  const key = `best_${trackId}_${mode}`;
-  const stored = localStorage.getItem(key);
-  return stored ? parseInt(stored, 10) : null;
+  try {
+    const key = `best_${trackId}_${mode}`;
+    const stored = localStorage.getItem(key);
+    if (!stored) return null;
+    const parsed = parseInt(stored, 10);
+    return isNaN(parsed) ? null : parsed;
+  } catch {
+    // localStorage may be unavailable in private browsing mode
+    return null;
+  }
 };
 
 /**
