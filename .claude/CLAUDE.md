@@ -23,6 +23,12 @@ This exists because multiple bugs shipped that could have been caught with basic
 ```markdown
 ## Pre-Deploy Verification
 
+### 0. Root Directory Check (CRITICAL!)
+Before editing any files:
+- [ ] Run: `npx vercel project inspect | grep "Root Directory"`
+- [ ] Verify you're editing files in the Root Directory path
+- [ ] If not, sync changes to correct location after editing
+
 ### 1. API Smoke Test (MANDATORY)
 For each API endpoint the frontend calls:
 - [ ] curl the endpoint from the DEPLOYED domain
@@ -31,8 +37,8 @@ For each API endpoint the frontend calls:
 
 ### 2. Serverless State Check
 - [ ] Is any state stored in-memory (global, module vars)?
-- [ ] If yes, will it survive cold starts? (Use KV/Redis instead)
-- [ ] Check: Does response include "using_kv: true"?
+- [ ] If yes, will it survive cold starts? (Use Upstash Redis instead)
+- [ ] Check: Does response include "using_redis: true"?
 
 ### 3. Async Flow Check
 For multi-step operations (start → callback → poll):
@@ -119,7 +125,7 @@ carla-shadow-driver.vercel.app (API)
     └─ /api/gpu/stop   → Destroys GPU instance
     │
     ▼
-Vercel KV (Required for callback data persistence)
+Upstash Redis (via Vercel Marketplace - required for callback persistence)
     │
     ▼
 Vast.ai GPU → Cloudflare Tunnel → WebSocket to browser
@@ -128,18 +134,22 @@ Vast.ai GPU → Cloudflare Tunnel → WebSocket to browser
 ### Environment Variables (carla-shadow-driver project)
 
 ```
-VASTAI_API_KEY     - Vast.ai API key for GPU provisioning
-KV_REST_API_URL    - Vercel KV endpoint (auto-set when KV connected)
-KV_REST_API_TOKEN  - Vercel KV auth token (auto-set when KV connected)
+VASTAI_API_KEY              - Vast.ai API key for GPU provisioning
+KV_REST_API_URL             - Upstash Redis endpoint (via Vercel Marketplace)
+KV_REST_API_TOKEN           - Upstash Redis auth token (via Vercel Marketplace)
+UPSTASH_REDIS_REST_URL      - Alt naming if using Upstash directly
+UPSTASH_REDIS_REST_TOKEN    - Alt naming if using Upstash directly
 ```
+
+**Note:** Upstash via Vercel Marketplace uses KV_* naming for compatibility. Code checks both naming conventions.
 
 ---
 
 ## Known Issues & Fixes
 
 ### Issue: "Starting server..." spins forever
-**Cause:** Vercel KV not configured, callback data lost on cold start
-**Fix:** Set up Vercel KV for the carla-shadow-driver project
+**Cause:** Upstash Redis not configured, callback data lost on cold start
+**Fix:** Set up Upstash Redis for the carla-shadow-driver project via Vercel Marketplace
 
 ### Issue: "Unexpected token '<'" JSON parse error
 **Cause:** API URL resolving to wrong domain, returning HTML 404
@@ -155,9 +165,9 @@ curl -s https://carla-shadow-driver.vercel.app/api/gpu/callback | head -1
 # Good: {"entries":0,"data":{},...}
 # Bad: <!DOCTYPE html> or The page...
 
-# Check if KV is enabled
-curl -s https://carla-shadow-driver.vercel.app/api/gpu/callback | grep using_kv
-# Should show: "using_kv":true
+# Check if Redis is enabled
+curl -s https://carla-shadow-driver.vercel.app/api/gpu/callback | grep using_redis
+# Should show: "using_redis":true
 
 # Test callback persistence (simulates GPU callback)
 curl -X POST https://carla-shadow-driver.vercel.app/api/gpu/callback \

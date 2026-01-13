@@ -26,6 +26,20 @@ Files to audit: [vercel-deploy/, api/, serverless/, etc.]
 
 ## Audit Checklist
 
+### 0. Root Directory Audit (CRITICAL!)
+Verify you're editing files that will actually be deployed:
+
+```bash
+npx vercel project inspect | grep "Root Directory"
+```
+
+**Common mistake:** Editing `/api/gpu/callback.js` when Vercel deploys from `/vercel-deploy/api/gpu/callback.js`. Your changes won't appear in production!
+
+For each file you're about to edit:
+- [ ] Is it inside the Root Directory path?
+- [ ] If not, do you need to copy changes to the correct location?
+- [ ] Are there duplicate API directories that need to stay in sync?
+
 ### 1. State Persistence Audit
 Search for in-memory state that won't survive cold starts:
 

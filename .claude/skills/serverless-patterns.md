@@ -260,33 +260,53 @@ export async function handler(req, res) {
 1. Go to https://vercel.com/dashboard
 2. Select your project
 3. Go to **Storage** tab
-4. Click **Create Database** → **KV**
-5. Choose a name (e.g., `gpu-tunnel-store`)
-6. Click **Create**
+4. Click **Browse Marketplace** → **Upstash Redis** (Vercel KV requires paid plan)
+5. Create a new database (free tier: 500K commands/month)
 
 ### Step 2: Connect to Project
 
-1. In the KV store page, click **Connect Project**
-2. Select your project
-3. Choose environment (Production, Preview, Development)
+1. In Upstash settings, click **Connect Project**
+2. Select your Vercel project
+3. Choose environments (Production, Preview, Development)
 4. Click **Connect**
 
 ### Step 3: Verify Environment Variables
 
-Vercel automatically adds:
+Upstash via Vercel Marketplace adds these (KV naming convention):
 - `KV_REST_API_URL`
 - `KV_REST_API_TOKEN`
-- `KV_URL` (optional)
+- `KV_URL`
 
-### Step 4: Deploy
+Or if using Upstash directly:
+- `UPSTASH_REDIS_REST_URL`
+- `UPSTASH_REDIS_REST_TOKEN`
+
+**Best practice:** Support both naming conventions in your code:
+
+```javascript
+const url = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
+const token = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
+```
+
+### Step 4: Verify Root Directory (CRITICAL!)
+
+Before deploying, check which directory Vercel deploys from:
+
+```bash
+npx vercel project inspect | grep "Root Directory"
+```
+
+**Common mistake:** Editing files in `/api/` when Vercel is configured to deploy from `/vercel-deploy/`. Your changes won't be deployed!
+
+### Step 5: Deploy
 
 Redeploy your project for the env vars to take effect.
 
-### Step 5: Verify
+### Step 6: Verify
 
 ```bash
 curl https://your-app.vercel.app/api/your-endpoint
-# Response should include: "using_kv": true
+# Response should include: "using_redis": true
 ```
 
 ---
