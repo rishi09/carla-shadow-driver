@@ -91,21 +91,24 @@ const formatTimeShort = (ms: number): string => {
   return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}.${centiseconds.toString().padStart(2, '0')}`;
 };
 
-const difficultyConfig: Record<Difficulty, { label: string; bgClass: string; textClass: string; glowColor: string }> = {
+const difficultyConfig: Record<Difficulty, { label: string; description: string; bgClass: string; textClass: string; glowColor: string }> = {
   easy: {
-    label: 'EASY',
+    label: 'BEGINNER',
+    description: 'Wide roads, gentle turns',
     bgClass: 'bg-green-500/20',
     textClass: 'text-green-400',
     glowColor: 'rgba(34, 197, 94, 0.4)',
   },
   medium: {
-    label: 'MEDIUM',
+    label: 'NORMAL',
+    description: 'Some tricky corners',
     bgClass: 'bg-amber-500/20',
     textClass: 'text-amber-400',
     glowColor: 'rgba(245, 158, 11, 0.4)',
   },
   hard: {
-    label: 'HARD',
+    label: 'EXPERT',
+    description: 'Narrow roads, sharp turns',
     bgClass: 'bg-red-500/20',
     textClass: 'text-red-400',
     glowColor: 'rgba(239, 68, 68, 0.4)',
@@ -126,7 +129,7 @@ export function TrackSelect({ mode, onSelectTrack, onBack }: TrackSelectProps) {
     }
   };
 
-  const modeLabel = mode === 'head-to-head' ? 'Head to Head' : 'Time Trial';
+  const modeLabel = mode === 'head-to-head' ? 'Race Against Computer' : 'Practice Mode';
 
   return (
     <div className="flex-1 flex flex-col items-center justify-center px-6 py-12">
@@ -134,13 +137,16 @@ export function TrackSelect({ mode, onSelectTrack, onBack }: TrackSelectProps) {
       <div className="text-center mb-12">
         <div className="relative inline-block">
           <h1 className="text-4xl md:text-5xl font-bold tracking-tight mb-2 text-white">
-            SELECT YOUR TRACK
+            PICK A TRACK
           </h1>
+          <p className="text-lg text-white/60 mt-2">
+            Choose where you want to race
+          </p>
 
           {/* Mode badge */}
           <div className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-full bg-dark-200/60 border border-white/10">
-            <span className="text-white/60 text-sm">Mode:</span>
-            <span className={`text-sm font-semibold ${mode === 'head-to-head' ? 'text-gradient-human' : 'text-gradient'}`}>
+            <span className="text-white/60 text-base">Mode:</span>
+            <span className={`text-base font-semibold ${mode === 'head-to-head' ? 'text-gradient-human' : 'text-gradient'}`}>
               {modeLabel}
             </span>
           </div>
@@ -285,16 +291,22 @@ function TrackCard({
         {/* Difficulty Badge */}
         <div
           className={`
-            inline-flex items-center px-3 py-1 rounded-full text-xs font-bold
+            inline-flex items-center px-3 py-1.5 rounded-full text-sm font-bold
             ${diffConfig.bgClass} ${diffConfig.textClass}
-            border border-current/30 mb-4
+            border border-current/30 mb-2
           `}
+          title={diffConfig.description}
         >
           {diffConfig.label}
         </div>
 
+        {/* Difficulty description */}
+        <p className="text-white/50 text-sm mb-4">
+          {diffConfig.description}
+        </p>
+
         {/* Description */}
-        <p className="text-white/50 text-sm mb-6 leading-relaxed min-h-[40px]">
+        <p className="text-white/60 text-base mb-6 leading-relaxed min-h-[50px]">
           {track.description}
         </p>
 
@@ -302,46 +314,51 @@ function TrackCard({
         <div className="h-px bg-white/10 mb-4" />
 
         {/* Times Section */}
-        <div className="space-y-2 mb-6">
+        <div className="space-y-3 mb-6">
           {/* Personal Best */}
           <div className="flex items-center justify-between">
-            <span className="text-white/40 text-xs uppercase tracking-wide">Best Time</span>
+            <span className="text-white/50 text-sm">Your Best Time</span>
             <span
               className={`
-                font-mono text-sm font-semibold
+                font-mono text-base font-semibold
                 ${isGoldTime ? 'text-yellow-400' : isParTime ? 'text-green-400' : hasBestTime ? 'text-white' : 'text-white/30'}
               `}
             >
-              {formatTime(bestTime)}
-              {isGoldTime && <span className="ml-1">🏆</span>}
+              {hasBestTime ? formatTime(bestTime) : 'Not played yet'}
+              {isGoldTime && <span className="ml-1">(Trophy)</span>}
             </span>
           </div>
 
-          {/* Par Time */}
+          {/* Target Time - simplified explanation */}
           <div className="flex items-center justify-between">
-            <span className="text-white/40 text-xs uppercase tracking-wide">Par Time</span>
-            <span className="font-mono text-sm text-white/60">{formatTimeShort(track.parTime)}</span>
+            <span className="text-white/50 text-sm" title="A good target time to beat">
+              Target Time
+            </span>
+            <span className="font-mono text-base text-white/70">{formatTimeShort(track.parTime)}</span>
           </div>
 
-          {/* Gold Time */}
+          {/* Gold Time - simplified explanation */}
           <div className="flex items-center justify-between">
-            <span className="text-white/40 text-xs uppercase tracking-wide">Gold Time</span>
-            <span className="font-mono text-sm text-yellow-400/80">{formatTimeShort(track.goldTime)}</span>
+            <span className="text-white/50 text-sm" title="The best possible time - very hard to beat!">
+              Best Possible
+            </span>
+            <span className="font-mono text-base text-yellow-400/80">{formatTimeShort(track.goldTime)} (Gold)</span>
           </div>
         </div>
 
         {/* Select Button */}
         <button
           className={`
-            w-full py-3 px-4 rounded-lg font-semibold text-sm uppercase tracking-wider
+            w-full py-4 px-4 rounded-lg font-semibold text-base uppercase tracking-wider
             transition-all duration-200
             ${isSelected
               ? 'bg-accent text-dark-400'
               : 'bg-white/10 text-white hover:bg-white/20 border border-white/10 hover:border-white/30'
             }
           `}
+          aria-pressed={isSelected}
         >
-          {isSelected ? 'Selected' : 'Select'}
+          {isSelected ? 'Track Selected!' : 'Choose This Track'}
         </button>
 
         {/* Selected Indicator */}

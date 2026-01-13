@@ -57,9 +57,9 @@ describe('App Component', () => {
   it('shows game mode options in menu', () => {
     render(<App />);
 
-    // Check for game mode buttons
-    expect(screen.getByText(/head to head/i)).toBeInTheDocument();
-    expect(screen.getByText(/time trial/i)).toBeInTheDocument();
+    // Check for game mode buttons (updated text from MainMenu)
+    expect(screen.getByText(/race against computer/i)).toBeInTheDocument();
+    expect(screen.getByText(/practice mode/i)).toBeInTheDocument();
   });
 });
 
@@ -67,9 +67,20 @@ describe('Game Mode Selection', () => {
   it('navigates to track selection when head-to-head is selected', () => {
     render(<App />);
 
-    // Find and click the head-to-head card
-    const headToHeadButton = screen.getByText(/head to head/i);
-    fireEvent.click(headToHeadButton);
+    // Find the card containing "Race Against Computer" and click it
+    // The card has role="button" with aria-label containing the title
+    const modeCards = screen.getAllByRole('button');
+    const headToHeadCard = modeCards.find(card =>
+      card.getAttribute('aria-label')?.toLowerCase().includes('race against computer')
+    );
+
+    if (headToHeadCard) {
+      fireEvent.click(headToHeadCard);
+    } else {
+      // Fallback: click on the text element's parent
+      const text = screen.getByText(/race against computer/i);
+      fireEvent.click(text.closest('[role="button"]') || text.parentElement || text);
+    }
 
     // Should now show track selection screen
     expect(screen.getByText(/select your track/i)).toBeInTheDocument();
@@ -78,9 +89,10 @@ describe('Game Mode Selection', () => {
   it('shows back button in track selection view', () => {
     render(<App />);
 
-    // Navigate to track selection
-    const headToHeadButton = screen.getByText(/head to head/i);
-    fireEvent.click(headToHeadButton);
+    // Navigate to track selection - click on parent with role=button
+    const text = screen.getByText(/race against computer/i);
+    const card = text.closest('[role="button"]') || text.parentElement;
+    if (card) fireEvent.click(card);
 
     // Check for back button
     expect(screen.getByText(/back to mode select/i)).toBeInTheDocument();
@@ -90,15 +102,16 @@ describe('Game Mode Selection', () => {
     render(<App />);
 
     // Navigate to track selection
-    const headToHeadButton = screen.getByText(/head to head/i);
-    fireEvent.click(headToHeadButton);
+    const text = screen.getByText(/race against computer/i);
+    const card = text.closest('[role="button"]') || text.parentElement;
+    if (card) fireEvent.click(card);
 
     // Click back button
     const backButton = screen.getByText(/back to mode select/i);
     fireEvent.click(backButton);
 
     // Should be back on menu
-    expect(screen.getByText(/head to head/i)).toBeInTheDocument();
+    expect(screen.getByText(/race against computer/i)).toBeInTheDocument();
     expect(screen.queryByText(/select your track/i)).not.toBeInTheDocument();
   });
 
@@ -106,8 +119,9 @@ describe('Game Mode Selection', () => {
     render(<App />);
 
     // Navigate to track selection
-    const headToHeadButton = screen.getByText(/head to head/i);
-    fireEvent.click(headToHeadButton);
+    const text = screen.getByText(/race against computer/i);
+    const card = text.closest('[role="button"]') || text.parentElement;
+    if (card) fireEvent.click(card);
 
     // Select a track
     const trackCard = screen.getByText(/sunset speedway/i);

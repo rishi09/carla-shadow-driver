@@ -3,6 +3,7 @@ import Phaser from 'phaser';
 import { createPhaserGame, destroyPhaserGame } from '../../game/PhaserGame';
 import { GameHUD } from './GameHUD';
 import { CountdownOverlay } from './CountdownOverlay';
+import { ControlsHint } from './ControlsHint';
 import type { GameMode, Difficulty, RaceHUDState, InputState } from '../../types/game';
 import type { RaceScene } from '../../game/scenes/RaceScene';
 
@@ -87,6 +88,27 @@ export function GameContainer({
 
   // Track if race has started (for countdown)
   const [raceStarted, setRaceStarted] = useState(false);
+
+  // Track if controls hint has been dismissed
+  const [showControlsHint, setShowControlsHint] = useState(true);
+
+  // Check if this is the user's first race (stored in localStorage)
+  const isFirstRace = useCallback(() => {
+    try {
+      return !localStorage.getItem('shadow-driver-has-played');
+    } catch {
+      return true;
+    }
+  }, []);
+
+  // Mark that user has played before
+  const markAsPlayed = useCallback(() => {
+    try {
+      localStorage.setItem('shadow-driver-has-played', 'true');
+    } catch {
+      // localStorage may be unavailable
+    }
+  }, []);
 
   /**
    * Handle countdown completion
@@ -274,6 +296,19 @@ export function GameContainer({
           checkpoints={createCheckpointsArray(hudState.checkpoints, hudState.totalCheckpoints)}
           penaltyFlash={hudState.penaltyFlash}
           gameMode={hudState.gameMode}
+        />
+      )}
+
+      {/* Controls Hint overlay - show during first race or after countdown */}
+      {!showCountdown && hudState.raceState === 'racing' && showControlsHint && !isMobile && (
+        <ControlsHint
+          visible={showControlsHint}
+          onDismiss={() => {
+            setShowControlsHint(false);
+            markAsPlayed();
+          }}
+          autoHideSeconds={12}
+          isFirstRace={isFirstRace()}
         />
       )}
 

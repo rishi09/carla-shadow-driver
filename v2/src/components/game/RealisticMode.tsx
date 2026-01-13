@@ -19,7 +19,7 @@
  * @see https://github.com/hamidrezaghanbari/super-car-racing-three
  */
 
-import { useRef, useEffect, useState, useCallback } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import type { InputState } from '../../types/game';
 
 // =============================================================================
@@ -101,8 +101,9 @@ export function RealisticMode({
   width = 900,
   height = 600,
   trackId,
-  onInput,
-  hudState,
+  // These props will be used when React Three Fiber is installed
+  onInput: _onInput,
+  hudState: _hudState,
 }: RealisticModeProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [isReady, setIsReady] = useState(false);

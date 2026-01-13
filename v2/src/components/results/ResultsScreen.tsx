@@ -57,11 +57,11 @@ function getMedalEmoji(medal: Medal): string {
 function getMedalLabel(medal: Medal): string {
   switch (medal) {
     case 'gold':
-      return 'GOLD - You beat the gold time!';
+      return 'GOLD - Amazing! You got the best time!';
     case 'silver':
-      return 'SILVER - You beat par!';
+      return 'SILVER - Great job! You beat the target!';
     case 'bronze':
-      return 'BRONZE - Race completed!';
+      return 'BRONZE - Good work! You finished the race!';
     default:
       return '';
   }
@@ -95,10 +95,10 @@ function ResultCard({ title, result, variant, isWinner }: ResultCardProps) {
   return (
     <Card variant={variant} className="flex-1 min-w-[280px]">
       <CardHeader>
-        <CardTitle className={variant === 'human' ? 'text-human' : 'text-ai'}>
+        <CardTitle className={`text-xl ${variant === 'human' ? 'text-human' : 'text-ai'}`}>
           {title}
           {isWinner && (
-            <span className="ml-2 text-accent animate-pulse">(Winner)</span>
+            <span className="ml-2 text-accent animate-pulse">(Winner!)</span>
           )}
         </CardTitle>
       </CardHeader>
@@ -109,36 +109,40 @@ function ResultCard({ title, result, variant, isWinner }: ResultCardProps) {
         </div>
 
         {/* Lap Breakdown */}
-        <div className="space-y-2 mb-6">
+        <div className="space-y-3 mb-6">
+          <p className="text-base text-white/60 mb-2">Lap Times:</p>
           {result.lapTimes.map((lapTime, index) => (
             <div
               key={index}
-              className={`flex justify-between text-sm ${
+              className={`flex justify-between text-base ${
                 index === bestLapIndex ? 'text-accent font-semibold' : 'text-white/70'
               }`}
             >
               <span>Lap {index + 1}:</span>
               <span className="font-mono">
                 {formatTime(lapTime)}
-                {index === bestLapIndex && ' (BEST)'}
+                {index === bestLapIndex && ' (Fastest!)'}
               </span>
             </div>
           ))}
         </div>
 
         {/* Penalties & Bonuses */}
-        <div className="space-y-1 text-sm border-t border-white/10 pt-4">
+        <div className="space-y-2 text-base border-t border-white/10 pt-4">
           {result.crashes > 0 && (
             <div className="flex justify-between text-warning">
-              <span>Crashes: {result.crashes}</span>
+              <span>Wall Hits: {result.crashes}</span>
               <span className="font-mono">+{formatTime(result.crashPenalty)}</span>
             </div>
           )}
           {result.perfectLaps > 0 && (
             <div className="flex justify-between text-human">
-              <span>Perfect Laps: {result.perfectLaps}</span>
+              <span>Clean Laps: {result.perfectLaps}</span>
               <span className="font-mono">-{formatTime(result.perfectBonus)}</span>
             </div>
+          )}
+          {result.crashes === 0 && result.perfectLaps === 0 && (
+            <p className="text-white/50 text-center">No bonuses or penalties</p>
           )}
         </div>
       </CardContent>

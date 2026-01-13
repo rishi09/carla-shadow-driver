@@ -136,6 +136,36 @@ jest.mock('phaser', () => ({
 **Fix applied:**
 **Lesson:**
 
+### F-002: localStorage Access Without Try-Catch
+**What happened:** `getBestTime` in TrackSelect.tsx could throw in private browsing mode
+**Root cause:** localStorage may be unavailable or throw in certain browser contexts (Safari private mode)
+**Fix applied:** Wrapped localStorage access in try-catch, added NaN validation for parsed values
+**Lesson:** Always wrap localStorage access in try-catch for robust handling
+
+### F-003: Empty Array Math.min() Returns Infinity
+**What happened:** `Math.min(...result.lapTimes)` on empty array returns Infinity, causing incorrect best lap highlighting
+**Root cause:** JavaScript's `Math.min()` with no arguments returns Infinity
+**Fix applied:** Added length check before computing min, handled empty array case with fallback message
+**Lesson:** Always validate array length before using spread operator with Math.min/max
+
+### F-004: Timer/Interval Memory Leaks in GameContainer
+**What happened:** setInterval and setTimeout could leak if component unmounts during race initialization
+**Root cause:** Timers created inside bootComplete callback weren't tracked for cleanup
+**Fix applied:** Track all intervals/timeouts in variables and clear them in cleanup function
+**Lesson:** All async operations (intervals, timeouts, subscriptions) must be tracked and cleaned up
+
+### F-005: Duplicate Leaderboard Entries on Re-render
+**What happened:** useEffect adding entries could run multiple times in StrictMode or on re-render
+**Root cause:** No guard against duplicate entry addition
+**Fix applied:** Added ref to track if entry was already added
+**Lesson:** Effects with side-effects need idempotency guards, especially for data persistence
+
+### F-006: Deprecated String.substr() Method
+**What happened:** `generateId()` used deprecated `substr()` method
+**Root cause:** Legacy code pattern
+**Fix applied:** Replaced with `substring()` which has the same behavior for positive indices
+**Lesson:** Use modern API methods; `substr` is deprecated in favor of `substring` or `slice`
+
 ---
 
 ## Successful Patterns
@@ -993,3 +1023,72 @@ If 3D development takes too long, pre-recorded video mode could work:
 - Sync video playback with game progress
 - Less interactive but achieves "impressive graphics" goal
 
+### Component Testing Session (Component Testing Expert)
+**Date:** 2026-01-12
+**Task:** Test each React component individually for bugs, edge cases, and accessibility issues
+
+**Components Tested:**
+| Component | Status | Issues Found | Fixed |
+|-----------|--------|--------------|-------|
+| MainMenu.tsx | Tested | Missing accessibility, keyboard nav | Yes |
+| TrackSelect.tsx | Tested | localStorage throws in private mode | Yes |
+| GameContainer.tsx | Tested | Timer/interval memory leaks | Yes |
+| GameHUD.tsx | Tested | Empty checkpoints array handling | Yes |
+| CountdownOverlay.tsx | Tested | Good - has proper aria attributes | N/A |
+| MobileControls.tsx | Tested | Missing accessibility labels | Yes |
+| ResultsScreen.tsx | Tested | Empty lapTimes Math.min bug, duplicate entries | Yes |
+| useLeaderboard.ts | Tested | Deprecated substr(), no time validation | Yes |
+
+**Bugs Fixed:**
+
+1. **TrackSelect.tsx - localStorage Access**
+   - Added try-catch wrapper for `getBestTime` function
+   - Added NaN validation for parsed integer values
+
+2. **useLeaderboard.ts - Multiple Issues**
+   - Replaced deprecated `substr()` with `substring()`
+   - Added validation for time being a positive finite number
+
+3. **ResultsScreen.tsx - Edge Cases**
+   - Added empty array check before `Math.min(...lapTimes)`
+   - Added ref to prevent duplicate leaderboard entries on re-render
+   - Added fallback message for empty lap data
+
+4. **GameContainer.tsx - Memory Leaks**
+   - Track all intervals/timeouts in variables
+   - Clear all timers in cleanup function
+
+5. **GameHUD.tsx - Empty Checkpoints**
+   - Added length check for checkpoints array
+   - Added fallback message and proper progressbar role
+
+6. **MobileControls.tsx - Accessibility**
+   - Added `role="group"` with aria-label to main container
+   - Added `role="slider"` with aria attributes to joystick
+   - Added `role="button"` with aria-pressed to brake button
+
+7. **MainMenu.tsx - Accessibility**
+   - Added `role="button"` with aria-label to mode cards
+   - Added `aria-pressed` for selection state
+   - Added keyboard navigation (Enter/Space key support)
+   - Added `tabIndex={0}` for focusability
+
+**Remaining Issues (Low Priority):**
+- ModeCard has unused `mode` and `secondaryColor` props (minor - no functional impact)
+- CountdownOverlay's `triggerTick` in useEffect deps could cause issues if callback changes
+- Event handlers in some components not memoized (minor performance concern)
+
+**Test Coverage Recommendations:**
+1. Add unit tests for `getBestTime` with mocked localStorage
+2. Add unit tests for `formatTime` edge cases (negative, NaN, Infinity)
+3. Add integration tests for leaderboard persistence
+4. Add accessibility tests using jest-axe or similar
+
+**Files Modified:**
+- `src/components/menu/TrackSelect.tsx` - localStorage error handling
+- `src/components/menu/MainMenu.tsx` - Accessibility improvements
+- `src/components/game/GameContainer.tsx` - Timer cleanup
+- `src/components/game/GameHUD.tsx` - Empty checkpoints handling
+- `src/components/game/MobileControls.tsx` - Accessibility labels
+- `src/components/results/ResultsScreen.tsx` - Edge case fixes
+- `src/hooks/useLeaderboard.ts` - Deprecated method fix, validation

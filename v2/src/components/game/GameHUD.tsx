@@ -94,7 +94,7 @@ function SpeedGauge({ speed }: { speed: number }) {
     <div className="flex items-center gap-3">
       {/* Car icon */}
       <div className="text-human">
-        <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+        <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
           <rect x="2" y="9" width="20" height="6" rx="2" />
           <circle cx="6" cy="16" r="2" />
           <circle cx="18" cy="16" r="2" />
@@ -106,19 +106,24 @@ function SpeedGauge({ speed }: { speed: number }) {
       <div className="flex flex-col">
         <div className="flex items-baseline gap-1">
           <span
-            className="text-2xl font-bold text-white tabular-nums"
+            className="text-3xl font-bold text-white tabular-nums"
             style={{ minWidth: '3ch' }}
+            aria-label={`Speed: ${Math.round(animatedSpeed)} kilometers per hour`}
           >
             {Math.round(animatedSpeed)}
           </span>
-          <span className="text-xs text-white/50 uppercase">km/h</span>
+          <span className="text-sm text-white/60 uppercase">km/h</span>
         </div>
 
         {/* Speed bar */}
-        <div className="w-32 h-1.5 bg-dark-400 rounded-full overflow-hidden mt-1">
+        <div className="w-36 h-2 bg-dark-400 rounded-full overflow-hidden mt-1">
           <div
             className={`h-full bg-gradient-to-r ${getSpeedColor(percentage)} rounded-full transition-all duration-100`}
             style={{ width: `${percentage}%` }}
+            role="progressbar"
+            aria-valuenow={Math.round(animatedSpeed)}
+            aria-valuemin={0}
+            aria-valuemax={maxSpeed}
           />
         </div>
       </div>
@@ -131,12 +136,12 @@ function SpeedGauge({ speed }: { speed: number }) {
  */
 function LapCounter({ lapNumber, totalLaps }: { lapNumber: number; totalLaps: number }) {
   return (
-    <div className="flex items-center gap-2">
-      <span className="text-white/50 text-sm uppercase tracking-wider">Lap</span>
+    <div className="flex items-center gap-2" aria-label={`Lap ${lapNumber} of ${totalLaps}`}>
+      <span className="text-white/60 text-base uppercase tracking-wider">Lap</span>
       <div className="flex items-baseline">
-        <span className="text-2xl font-bold text-white tabular-nums">{lapNumber}</span>
-        <span className="text-lg text-white/40 mx-0.5">/</span>
-        <span className="text-lg text-white/60 tabular-nums">{totalLaps}</span>
+        <span className="text-3xl font-bold text-white tabular-nums">{lapNumber}</span>
+        <span className="text-xl text-white/40 mx-0.5">/</span>
+        <span className="text-xl text-white/60 tabular-nums">{totalLaps}</span>
       </div>
     </div>
   );
@@ -158,12 +163,12 @@ function TimeDisplay({
 
   return (
     <div className="flex flex-col items-center">
-      <span className={`text-xs uppercase tracking-wider ${
-        variant === 'best' ? 'text-accent/70' : 'text-white/40'
+      <span className={`text-sm uppercase tracking-wider ${
+        variant === 'best' ? 'text-accent/70' : 'text-white/50'
       }`}>
-        {label}
+        {label === 'Current' ? 'Time' : label}
       </span>
-      <span className={`text-lg font-mono font-semibold tabular-nums ${
+      <span className={`text-xl font-mono font-semibold tabular-nums ${
         variant === 'best' ? 'text-accent' : 'text-white'
       }`}>
         {formattedTime}
@@ -401,26 +406,26 @@ export function GameHUD({
 
             {/* Checkpoint progress */}
             <div className="flex flex-col items-center gap-1">
-              <span className="text-xs text-white/40 uppercase tracking-wider">
+              <span className="text-sm text-white/50 uppercase tracking-wider">
                 Checkpoints
               </span>
               <CheckpointProgress checkpoints={checkpoints} />
             </div>
 
             {/* Position (head-to-head) or empty space (time trial) */}
-            <div className="min-w-[100px] flex justify-end">
+            <div className="min-w-[120px] flex justify-end">
               {isHeadToHead && position !== null ? (
                 <PositionIndicator position={position} animate={positionAnimate} />
               ) : (
-                <div className="flex items-center gap-2 text-white/40">
-                  <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <div className="flex items-center gap-2 text-white/50">
+                  <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                     <circle cx="12" cy="13" r="8" />
                     <line x1="12" y1="9" x2="12" y2="13" />
                     <line x1="12" y1="13" x2="15" y2="13" />
                     <line x1="12" y1="5" x2="12" y2="3" />
                     <line x1="9" y1="3" x2="15" y2="3" />
                   </svg>
-                  <span className="text-sm">Time Trial</span>
+                  <span className="text-base">Practice</span>
                 </div>
               )}
             </div>
