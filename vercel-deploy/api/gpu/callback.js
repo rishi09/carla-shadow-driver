@@ -1,11 +1,63 @@
 // Callback endpoint for GPU to report its tunnel URL and status
-// Note: In production, use Vercel KV for persistent storage
-// For now, we use an in-memory store (works within same instance only)
+// Uses Vercel KV for persistent storage across cold starts
 
-// Simple in-memory store (will be lost on cold start)
-// For production, set up Vercel KV: https://vercel.com/docs/storage/vercel-kv
+import { kv } from '@vercel/kv';
+
+// Fallback to in-memory if KV not configured
+const useKV = process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN;
+
+// In-memory fallback
 if (!global.tunnelUrls) {
   global.tunnelUrls = {};
+}
+
+// Helper to get data
+async function getData(instanceId) {
+  if (useKV) {
+    try {
+      const data = await kv.get(`gpu:${instanceId}`);
+      return data || null;
+    } catch (e) {
+      console.error('KV get error:', e);
+      return global.tunnelUrls[instanceId] || null;
+    }
+  }
+  return global.tunnelUrls[instanceId] || null;
+}
+
+// Helper to set data
+async function setData(instanceId, data) {
+  if (useKV) {
+    try {
+      // Store with 1 hour TTL (instances shouldn't last longer)
+      await kv.set(`gpu:${instanceId}`, data, { ex: 3600 });
+      console.log(`[KV] Stored data for ${instanceId}`);
+    } catch (e) {
+      console.error('KV set error:', e);
+      global.tunnelUrls[instanceId] = data;
+    }
+  } else {
+    global.tunnelUrls[instanceId] = data;
+  }
+}
+
+// Helper to get all keys (for debugging)
+async function getAllData() {
+  if (useKV) {
+    try {
+      const keys = await kv.keys('gpu:*');
+      const result = {};
+      for (const key of keys) {
+        const data = await kv.get(key);
+        result[key.replace('gpu:', '')] = data;
+      }
+      return result;
+    } catch (e) {
+      console.error('KV keys error:', e);
+      return global.tunnelUrls;
+    }
+  }
+  return global.tunnelUrls;
 }
 
 export default async function handler(req, res) {
@@ -26,31 +78,33 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'instance_id is required' });
     }
 
-    // Get or create the entry for this instance
-    if (!global.tunnelUrls[instance_id]) {
-      global.tunnelUrls[instance_id] = {};
-    }
+    // Get existing data or create new
+    let data = await getData(instance_id) || {};
 
     // Update with tunnel URL if provided
     const url = tunnel_url || ngrok_url;
     if (url) {
-      global.tunnelUrls[instance_id].tunnel_url = url;
-      global.tunnelUrls[instance_id].ready = true;
-      console.log(`Stored tunnel URL for ${instance_id}: ${url}`);
+      data.tunnel_url = url;
+      data.ready = true;
+      console.log(`Storing tunnel URL for ${instance_id}: ${url} (KV: ${useKV})`);
     }
 
     // Update status if provided
     if (status) {
-      global.tunnelUrls[instance_id].status = status;
-      global.tunnelUrls[instance_id].message = message || '';
-      global.tunnelUrls[instance_id].last_update = Date.now();
-      console.log(`Status update for ${instance_id}: ${status} - ${message}`);
+      data.status = status;
+      data.message = message || '';
+      data.last_update = Date.now();
+      console.log(`Status update for ${instance_id}: ${status} - ${message} (KV: ${useKV})`);
     }
+
+    // Save the data
+    await setData(instance_id, data);
 
     return res.status(200).json({
       status: 'ok',
       instance_id,
-      data: global.tunnelUrls[instance_id]
+      using_kv: useKV,
+      data
     });
   }
 
@@ -60,13 +114,15 @@ export default async function handler(req, res) {
 
     if (!instance_id) {
       // Return all entries for debugging
+      const allData = await getAllData();
       return res.status(200).json({
-        entries: Object.keys(global.tunnelUrls).length,
-        data: global.tunnelUrls
+        using_kv: useKV,
+        entries: Object.keys(allData).length,
+        data: allData
       });
     }
 
-    const data = global.tunnelUrls[instance_id] || null;
+    const data = await getData(instance_id);
 
     if (data && typeof data === 'object') {
       return res.status(200).json({
@@ -75,7 +131,8 @@ export default async function handler(req, res) {
         status: data.status || null,
         message: data.message || null,
         ready: data.ready || false,
-        found: true
+        found: true,
+        using_kv: useKV
       });
     }
 
@@ -84,14 +141,16 @@ export default async function handler(req, res) {
       return res.status(200).json({
         instance_id,
         tunnel_url: data,
-        found: true
+        found: true,
+        using_kv: useKV
       });
     }
 
     return res.status(200).json({
       instance_id,
       tunnel_url: null,
-      found: false
+      found: false,
+      using_kv: useKV
     });
   }
 

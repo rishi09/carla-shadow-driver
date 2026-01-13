@@ -1,9 +1,29 @@
 // Check GPU instance status on Vast.ai
 // Also checks for tunnel URL and setup status from callback store
+// Uses Vercel KV for persistent storage across cold starts
 
-// Access the shared tunnel URL store
+import { kv } from '@vercel/kv';
+
+// Fallback to in-memory if KV not configured
+const useKV = process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN;
+
+// In-memory fallback
 if (!global.tunnelUrls) {
   global.tunnelUrls = {};
+}
+
+// Helper to get data from KV or memory
+async function getData(instanceId) {
+  if (useKV) {
+    try {
+      const data = await kv.get(`gpu:${instanceId}`);
+      return data || null;
+    } catch (e) {
+      console.error('KV get error:', e);
+      return global.tunnelUrls[instanceId] || null;
+    }
+  }
+  return global.tunnelUrls[instanceId] || null;
 }
 
 export default async function handler(req, res) {
@@ -55,13 +75,13 @@ export default async function handler(req, res) {
       });
     }
 
-    // Check for tunnel URL and status from callback store
-    // Try multiple keys: instance_id, offer_id, or check all entries
-    let callbackData = global.tunnelUrls[instance_id];
+    // Check for tunnel URL and status from KV or memory store
+    // Try instance_id first, then offer_id
+    let callbackData = await getData(instance_id);
 
-    // Also try with offer_id if provided
+    // Also try with offer_id if provided and no data found
     if (!callbackData && offer_id) {
-      callbackData = global.tunnelUrls[offer_id];
+      callbackData = await getData(offer_id);
     }
 
     // Extract tunnel info
@@ -88,7 +108,8 @@ export default async function handler(req, res) {
       cost_so_far: instance.total_cost || 0,
       uptime_seconds: instance.duration || 0,
       ssh_host: instance.ssh_host,
-      ssh_port: instance.ssh_port
+      ssh_port: instance.ssh_port,
+      using_kv: useKV
     });
 
   } catch (error) {
