@@ -106,6 +106,9 @@ const INACTIVITY_DISCONNECT_TIMEOUT = 5 * 60 * 1000;
 /** Ping interval for keepalive (ms) */
 const PING_INTERVAL = 30000;
 
+/** API base URL - the GPU API is hosted on the main vercel-deploy project */
+const API_BASE_URL = 'https://carla-shadow-driver.vercel.app';
+
 // ============================================================================
 // Hook Implementation
 // ============================================================================
@@ -346,7 +349,7 @@ export function useGPUConnection(): UseGPUConnectionReturn {
         params.append('offer_id', currentOfferId);
       }
 
-      const response = await fetch(`/api/gpu/status?${params.toString()}`);
+      const response = await fetch(`${API_BASE_URL}/api/gpu/status?${params.toString()}`);
       const data = await response.json();
 
       if (!response.ok) {
@@ -406,7 +409,7 @@ export function useGPUConnection(): UseGPUConnectionReturn {
     setInactivityWarning(false);
 
     try {
-      const response = await fetch('/api/gpu/start', { method: 'POST' });
+      const response = await fetch(`${API_BASE_URL}/api/gpu/start`, { method: 'POST' });
       const data = await response.json();
 
       if (!response.ok) {
@@ -463,7 +466,7 @@ export function useGPUConnection(): UseGPUConnectionReturn {
 
     if (currentInstanceId) {
       try {
-        const response = await fetch('/api/gpu/stop', {
+        const response = await fetch(`${API_BASE_URL}/api/gpu/stop`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ instance_id: currentInstanceId }),
