@@ -334,3 +334,203 @@ After E2E testing, report results in this format:
 6. **Run before EVERY deployment** - Not just major releases
 7. **Automate what you can** - But manual testing still valuable
 8. **Test on multiple browsers** - At minimum: Chrome + Safari
+
+---
+
+## Async Multi-Step Flow Testing
+
+### The Problem
+
+Many features involve multi-step async flows:
+1. User clicks button → API call starts
+2. Backend starts long operation
+3. Backend calls back with result
+4. Frontend polls for result
+5. Frontend shows success
+
+**Standard E2E tests miss this** because:
+- Step 2-4 happen outside the browser
+- Cold starts can break the callback chain
+- Polling may hit different server instances
+
+### Async Flow Testing Checklist
+
+```markdown
+## Async Flow Test: [Feature Name]
+
+### 1. Map the Request Chain
+```
+User Action → API 1 → External Service → Callback API → Poll API → UI Update
+```
+
+For each step, document:
+- [ ] URL being called
+- [ ] Expected response format
+- [ ] Timeout value
+- [ ] What triggers the next step
+
+### 2. Test Each API Independently
+
+Before testing the full flow, curl each API:
+
+```bash
+# Step 1: Trigger the operation
+curl -X POST https://your-domain.vercel.app/api/start \
+  -H "Content-Type: application/json" \
+  -d '{"param": "value"}' | jq
+
+# Step 2: Simulate the callback (what the external service sends)
+curl -X POST https://your-domain.vercel.app/api/callback \
+  -H "Content-Type: application/json" \
+  -d '{"id": "test123", "result": "success"}' | jq
+
+# Step 3: Poll for the result
+curl "https://your-domain.vercel.app/api/status?id=test123" | jq
+```
+
+### 3. Test Cold Start Resilience
+
+Wait 2+ minutes between callback and poll to simulate cold start:
+
+```bash
+# Send callback
+curl -X POST .../api/callback -d '{"id": "cold-test"}'
+
+# Wait for cold start
+echo "Waiting 2 minutes for cold start..."
+sleep 120
+
+# Poll - should still find the data
+curl ".../api/status?id=cold-test"
+# If using KV: data should be there
+# If using in-memory: data will be LOST
+```
+
+### 4. Test Concurrent Requests
+
+Multiple users doing the same flow:
+
+```bash
+# Start 3 concurrent operations
+curl -X POST .../api/start -d '{"id": "user1"}' &
+curl -X POST .../api/start -d '{"id": "user2"}' &
+curl -X POST .../api/start -d '{"id": "user3"}' &
+wait
+
+# Each should have independent state
+curl ".../api/status?id=user1"
+curl ".../api/status?id=user2"
+curl ".../api/status?id=user3"
+```
+```
+
+### Async Flow Test Template (Playwright)
+
+```python
+async def test_async_flow():
+    """Test a multi-step async operation."""
+
+    # Step 1: Start the operation via UI
+    await page.click('button:text("Start GPU")')
+
+    # Step 2: Verify loading state appears
+    await page.wait_for_selector('text=Starting server', timeout=5000)
+    screenshot(page, 'loading_state')
+
+    # Step 3: Simulate the callback (if testing infrastructure)
+    # In real E2E, this happens from external service
+    # For testing, we might need a test endpoint
+
+    # Step 4: Wait for completion (with generous timeout)
+    try:
+        await page.wait_for_selector('text=Connected', timeout=120000)
+        screenshot(page, 'connected')
+    except TimeoutError:
+        # Capture what we're stuck on
+        screenshot(page, 'timeout_state')
+        # Check if it's a known failure mode
+        if await page.is_visible('text=Starting server'):
+            raise Exception("Stuck on loading - callback may not have been received")
+        raise
+
+    # Step 5: Verify the operation actually worked
+    # Don't just check UI - verify the effect
+    result = await page.evaluate('window.gpuConnection?.isConnected()')
+    assert result == True, "GPU should be connected"
+```
+
+### Testing GPU-Like Flows
+
+For operations that take 2-5 minutes:
+
+```python
+async def test_long_running_operation():
+    """Test operation that takes several minutes."""
+
+    # Start operation
+    await page.click('button:text("Start")')
+    start_time = time.time()
+
+    # Poll with logging
+    max_wait = 300  # 5 minutes
+    poll_interval = 10  # Check every 10 seconds
+
+    while time.time() - start_time < max_wait:
+        # Check for success
+        if await page.is_visible('text=Success'):
+            elapsed = time.time() - start_time
+            print(f"✓ Completed in {elapsed:.0f} seconds")
+            return True
+
+        # Check for failure
+        if await page.is_visible('text=Error'):
+            error_text = await page.text_content('.error-message')
+            raise Exception(f"Operation failed: {error_text}")
+
+        # Log progress
+        elapsed = time.time() - start_time
+        status = await page.text_content('.status') if await page.is_visible('.status') else 'unknown'
+        print(f"  [{elapsed:.0f}s] Status: {status}")
+
+        await page.wait_for_timeout(poll_interval * 1000)
+
+    raise TimeoutError(f"Operation did not complete within {max_wait} seconds")
+```
+
+### Debugging Async Flow Failures
+
+When async flow tests fail:
+
+1. **Check each API independently**
+   ```bash
+   curl -v https://domain/api/start
+   curl -v https://domain/api/callback
+   curl -v https://domain/api/status
+   ```
+
+2. **Check for cold start issues**
+   - Response includes `using_kv: false`? State will be lost
+   - Long delays between steps? Cold start likely
+
+3. **Check for instance isolation**
+   - Are callback and poll hitting same instance?
+   - In serverless, assume they're NOT
+
+4. **Check for race conditions**
+   - Does poll happen before callback?
+   - Is there a minimum wait time needed?
+
+---
+
+## Integration with Failure Mode Analysis
+
+Before writing E2E tests, use the `failure-mode-checklist.md` to identify what can go wrong. Then write tests specifically for those failure modes:
+
+```markdown
+| Failure Mode | Test Case |
+|--------------|-----------|
+| API returns HTML instead of JSON | test_api_returns_json() |
+| Cold start loses callback data | test_cold_start_resilience() |
+| Timeout during long operation | test_graceful_timeout() |
+| Concurrent requests interfere | test_concurrent_operations() |
+```
