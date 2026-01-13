@@ -6,6 +6,47 @@ import { CountdownOverlay } from './CountdownOverlay';
 import { ControlsHint } from './ControlsHint';
 import type { GameMode, Difficulty, RaceHUDState, InputState } from '../../types/game';
 import type { RaceScene } from '../../game/scenes/RaceScene';
+import type { AIPrediction, GameStatePayload } from '../../hooks/useGPUConnection';
+
+// ============================================================================
+// Event Contract: React <-> Phaser GPU Integration
+// ============================================================================
+//
+// This module implements bidirectional communication between React and Phaser
+// for GPU-based AI predictions.
+//
+// Events (using game.events, NOT scene.events):
+//
+// 1. Phaser -> React: 'aiGameState'
+//    Payload: { position: number, speed: number, curvature: number }
+//    Frequency: Emitted every frame when racing (Phaser will emit, React filters to 10Hz)
+//    Purpose: Send AI car state to GPU for prediction
+//
+// 2. React -> Phaser: 'gpuPrediction'
+//    Payload: { steering: number, throttle?: number, brake?: number }
+//    Frequency: Whenever GPU returns a prediction
+//    Purpose: Apply GPU prediction to AI car instead of local AIController
+//
+// 3. React -> Phaser: 'setGPUMode'
+//    Payload: { enabled: boolean }
+//    Frequency: Once when game starts, or when GPU connection changes
+//    Purpose: Tell RaceScene whether to use GPU predictions or local AI
+//
+// ============================================================================
+
+/**
+ * GPU connection props passed from App.tsx
+ */
+export interface GPUConnectionProps {
+  /** Whether to use real GPU for AI predictions */
+  useRealGPU: boolean;
+  /** Whether GPU WebSocket is connected */
+  isConnected: boolean;
+  /** Function to send game state to GPU, returns last prediction */
+  sendGameState: (state: GameStatePayload) => AIPrediction | null;
+  /** Latest prediction from GPU (updated asynchronously) */
+  lastPrediction: AIPrediction | null;
+}
 
 interface GameContainerProps {
   width?: number;
@@ -14,6 +55,8 @@ interface GameContainerProps {
   mode: GameMode;
   difficulty?: Difficulty;
   isMobile?: boolean;
+  /** GPU connection props for real AI predictions */
+  gpuConnection?: GPUConnectionProps;
   onRaceComplete?: (result: {
     playerResult: {
       totalTime: number;
@@ -64,11 +107,16 @@ export function GameContainer({
   mode,
   difficulty = 'medium',
   isMobile = false,
+  gpuConnection,
   onRaceComplete,
 }: GameContainerProps) {
   const gameRef = useRef<Phaser.Game | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const raceSceneRef = useRef<RaceScene | null>(null);
+
+  // GPU state sending throttle (10Hz = every 100ms)
+  const lastGPUSendTimeRef = useRef<number>(0);
+  const GPU_SEND_INTERVAL = 100; // ms
 
   // UI State
   const [showCountdown, setShowCountdown] = useState(true);
@@ -154,7 +202,7 @@ export function GameContainer({
       if (raceScene) {
         raceSceneRef.current = raceScene;
 
-        // Listen for game state updates
+        // Listen for game state updates (HUD)
         raceScene.events.on('gameState', (state: RaceHUDState) => {
           setHudState(state);
         });
@@ -163,6 +211,37 @@ export function GameContainer({
         raceScene.events.on('raceStart', () => {
           setRaceStarted(true);
           setShowCountdown(false);
+        });
+
+        // ================================================================
+        // GPU Integration: Listen for AI game state from Phaser
+        // ================================================================
+        // This event is emitted by RaceScene when racing with an AI car.
+        // We throttle sending to GPU at 10Hz (every 100ms).
+        game.events.on('aiGameState', (state: { position: number; speed: number; curvature: number }) => {
+          // Only send if GPU is connected and enabled
+          if (!gpuConnection?.useRealGPU || !gpuConnection?.isConnected) {
+            return;
+          }
+
+          // Throttle to 10Hz
+          const now = performance.now();
+          if (now - lastGPUSendTimeRef.current < GPU_SEND_INTERVAL) {
+            return;
+          }
+          lastGPUSendTimeRef.current = now;
+
+          // Send to GPU via WebSocket
+          gpuConnection.sendGameState({
+            position: state.position,
+            speed: state.speed,
+            curvature: state.curvature,
+          });
+        });
+
+        // Tell RaceScene whether to use GPU mode
+        game.events.emit('setGPUMode', {
+          enabled: gpuConnection?.useRealGPU && gpuConnection?.isConnected,
         });
 
         // Listen for race complete
@@ -259,11 +338,48 @@ export function GameContainer({
         raceSceneRef.current.events.off('raceStart');
         raceSceneRef.current.events.off('raceComplete');
       }
+      // Clean up GPU event listeners from game.events
+      if (gameRef.current) {
+        gameRef.current.events.off('aiGameState');
+      }
       destroyPhaserGame(gameRef.current);
       gameRef.current = null;
       raceSceneRef.current = null;
     };
-  }, [width, height, trackId, mode, difficulty, onRaceComplete]);
+  }, [width, height, trackId, mode, difficulty, onRaceComplete, gpuConnection]);
+
+  // ================================================================
+  // GPU Integration: Forward predictions to Phaser
+  // ================================================================
+  // When GPU prediction changes, emit it to Phaser via game.events
+  useEffect(() => {
+    if (!gpuConnection?.lastPrediction || !gameRef.current) {
+      return;
+    }
+
+    // Only forward if GPU mode is enabled
+    if (!gpuConnection.useRealGPU || !gpuConnection.isConnected) {
+      return;
+    }
+
+    // Emit prediction to Phaser (RaceScene will listen for this)
+    gameRef.current.events.emit('gpuPrediction', {
+      steering: gpuConnection.lastPrediction.steering,
+      throttle: gpuConnection.lastPrediction.throttle,
+      brake: gpuConnection.lastPrediction.brake,
+    });
+  }, [gpuConnection?.lastPrediction, gpuConnection?.useRealGPU, gpuConnection?.isConnected]);
+
+  // ================================================================
+  // GPU Integration: Update GPU mode when connection state changes
+  // ================================================================
+  useEffect(() => {
+    if (!gameRef.current) return;
+
+    gameRef.current.events.emit('setGPUMode', {
+      enabled: gpuConnection?.useRealGPU && gpuConnection?.isConnected,
+    });
+  }, [gpuConnection?.useRealGPU, gpuConnection?.isConnected]);
 
   return (
     <div className="relative" style={{ width: `${width}px`, height: `${height}px` }}>

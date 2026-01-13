@@ -16,6 +16,38 @@ import type {
 
 type RaceState = 'loading' | 'countdown' | 'racing' | 'finished';
 
+// ============================================================================
+// Event Contract: React <-> Phaser GPU Integration
+// ============================================================================
+//
+// This scene implements the Phaser side of the GPU AI integration.
+//
+// Events this scene LISTENS to (via game.events):
+//
+// 1. 'gpuPrediction'
+//    Payload: { steering: number, throttle?: number, brake?: number }
+//    Action: Store prediction for use in next AI car update
+//
+// 2. 'setGPUMode'
+//    Payload: { enabled: boolean }
+//    Action: Toggle between GPU predictions and local AIController
+//
+// Events this scene EMITS (via game.events):
+//
+// 1. 'aiGameState'
+//    Payload: { position: number, speed: number, curvature: number }
+//    Frequency: Every frame when racing with AI car
+//    Purpose: React will forward to GPU at 10Hz
+//
+// ============================================================================
+
+/** GPU prediction data from React */
+interface GPUPrediction {
+  steering: number;
+  throttle?: number;
+  brake?: number;
+}
+
 /**
  * RaceScene - The main gameplay scene
  *
@@ -62,6 +94,12 @@ export class RaceScene extends Phaser.Scene {
   // Track finish line crossing (simple debounce)
   private playerCrossedFinish: boolean = false;
   private aiCrossedFinish: boolean = false;
+
+  // GPU AI Integration state
+  private useGPUMode: boolean = false;
+  private lastGPUPrediction: GPUPrediction | null = null;
+  private gpuPredictionAge: number = 0; // ms since last prediction
+  private readonly GPU_PREDICTION_TIMEOUT = 500; // Fallback to local AI if no prediction in 500ms
 
   constructor() {
     super({ key: 'RaceScene' });
@@ -158,6 +196,33 @@ export class RaceScene extends Phaser.Scene {
 
     // 10. Signal React that scene is ready
     this.emitSceneReady();
+
+    // 11. Set up GPU event listeners (via game.events, not scene.events)
+    this.setupGPUEventListeners();
+  }
+
+  /**
+   * Set up event listeners for GPU AI integration
+   * Uses game.events for cross-boundary communication with React
+   */
+  private setupGPUEventListeners(): void {
+    // Listen for GPU mode toggle from React
+    this.game.events.on('setGPUMode', (data: { enabled: boolean }) => {
+      this.useGPUMode = data.enabled;
+      console.log(`[RaceScene] GPU mode ${data.enabled ? 'enabled' : 'disabled'}`);
+
+      // Reset prediction state when mode changes
+      if (!data.enabled) {
+        this.lastGPUPrediction = null;
+        this.gpuPredictionAge = 0;
+      }
+    });
+
+    // Listen for GPU predictions from React
+    this.game.events.on('gpuPrediction', (prediction: GPUPrediction) => {
+      this.lastGPUPrediction = prediction;
+      this.gpuPredictionAge = 0; // Reset age on new prediction
+    });
   }
 
   /**
@@ -331,7 +396,31 @@ export class RaceScene extends Phaser.Scene {
 
     // 3. Update AI car
     if (this.aiCar && this.aiController) {
-      const aiInput = this.aiController.compute();
+      // Update GPU prediction age
+      this.gpuPredictionAge += delta;
+
+      // Emit AI game state for GPU (React will throttle to 10Hz)
+      this.emitAIGameState();
+
+      // Determine input source: GPU prediction or local AI
+      let aiInput: InputState;
+
+      if (this.useGPUMode && this.lastGPUPrediction && this.gpuPredictionAge < this.GPU_PREDICTION_TIMEOUT) {
+        // Use GPU prediction - convert to InputState format
+        aiInput = {
+          steer: this.lastGPUPrediction.steering,
+          throttle: this.lastGPUPrediction.throttle !== undefined
+            ? this.lastGPUPrediction.throttle > 0.3
+            : true, // Default to throttle if not provided
+          brake: this.lastGPUPrediction.brake !== undefined
+            ? this.lastGPUPrediction.brake > 0.3
+            : false,
+        };
+      } else {
+        // Use local AIController as fallback
+        aiInput = this.aiController.compute();
+      }
+
       this.aiCar.update(aiInput, delta);
     }
 
@@ -560,6 +649,169 @@ export class RaceScene extends Phaser.Scene {
   }
 
   /**
+   * Emit AI car game state for GPU processing
+   *
+   * This is called every frame when racing with an AI car.
+   * React will throttle the actual GPU sends to 10Hz.
+   *
+   * Uses game.events (not scene.events) for cross-boundary communication.
+   */
+  private emitAIGameState(): void {
+    if (!this.aiCar || !this.aiController) {
+      return;
+    }
+
+    const aiCarState = this.aiCar.getState();
+
+    // Calculate position and curvature using AIController's internal methods
+    // We need to access the track-relative position for the GPU model
+    // Since AIController.calculateTrackPosition is private, we'll compute it here
+    const position = this.calculateAITrackPosition(aiCarState);
+    const curvature = this.calculateAICurvature(aiCarState);
+
+    // Emit via game.events for React to receive
+    this.game.events.emit('aiGameState', {
+      position,
+      speed: aiCarState.speed,
+      curvature,
+    });
+  }
+
+  /**
+   * Calculate AI car's position relative to track centerline
+   * @returns -1 (left edge) to 1 (right edge), 0 = on centerline
+   */
+  private calculateAITrackPosition(carState: { x: number; y: number }): number {
+    const centerLine = this.trackData.centerLine;
+    if (centerLine.length < 2) {
+      return 0;
+    }
+
+    // Find closest segment and signed distance
+    let closestDist = Infinity;
+    let signedDist = 0;
+
+    for (let i = 0; i < centerLine.length - 1; i++) {
+      const p1 = centerLine[i];
+      const p2 = centerLine[i + 1];
+
+      const { distance, signed } = this.projectPointOnSegment(
+        { x: carState.x, y: carState.y },
+        p1,
+        p2
+      );
+
+      if (distance < closestDist) {
+        closestDist = distance;
+        signedDist = signed;
+      }
+    }
+
+    // Normalize to -1 to 1 based on track half-width
+    const halfWidth = this.trackData.width / 2;
+    const normalizedPosition = signedDist / halfWidth;
+    return Math.max(-1, Math.min(1, normalizedPosition));
+  }
+
+  /**
+   * Calculate upcoming track curvature for AI car
+   * @returns Negative = left curve, positive = right curve, 0 = straight
+   */
+  private calculateAICurvature(carState: { x: number; y: number }): number {
+    const centerLine = this.trackData.centerLine;
+    if (centerLine.length < 3) {
+      return 0;
+    }
+
+    // Find closest segment
+    let closestDist = Infinity;
+    let closestSegment = 0;
+
+    for (let i = 0; i < centerLine.length - 1; i++) {
+      const p1 = centerLine[i];
+      const p2 = centerLine[i + 1];
+      const { distance } = this.projectPointOnSegment(
+        { x: carState.x, y: carState.y },
+        p1,
+        p2
+      );
+      if (distance < closestDist) {
+        closestDist = distance;
+        closestSegment = i;
+      }
+    }
+
+    // Look at upcoming segments
+    let totalAngleChange = 0;
+    let sampleCount = 0;
+    const curvatureSamples = 5;
+
+    for (
+      let i = closestSegment;
+      i < Math.min(closestSegment + curvatureSamples, centerLine.length - 2);
+      i++
+    ) {
+      const p1 = centerLine[i];
+      const p2 = centerLine[i + 1];
+      const p3 = centerLine[Math.min(i + 2, centerLine.length - 1)];
+
+      const angle1 = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+      const angle2 = Math.atan2(p3.y - p2.y, p3.x - p2.x);
+
+      let angleChange = angle2 - angle1;
+      while (angleChange > Math.PI) angleChange -= 2 * Math.PI;
+      while (angleChange < -Math.PI) angleChange += 2 * Math.PI;
+
+      totalAngleChange += angleChange;
+      sampleCount++;
+    }
+
+    if (sampleCount === 0) {
+      return 0;
+    }
+
+    const avgCurvature = totalAngleChange / sampleCount;
+    return Math.max(-1, Math.min(1, avgCurvature * 2));
+  }
+
+  /**
+   * Project a point onto a line segment
+   */
+  private projectPointOnSegment(
+    point: { x: number; y: number },
+    segStart: { x: number; y: number },
+    segEnd: { x: number; y: number }
+  ): { point: { x: number; y: number }; distance: number; signed: number } {
+    const dx = segEnd.x - segStart.x;
+    const dy = segEnd.y - segStart.y;
+    const lengthSq = dx * dx + dy * dy;
+
+    if (lengthSq === 0) {
+      const dist = Math.sqrt(
+        Math.pow(point.x - segStart.x, 2) + Math.pow(point.y - segStart.y, 2)
+      );
+      return { point: { x: segStart.x, y: segStart.y }, distance: dist, signed: 0 };
+    }
+
+    let t =
+      ((point.x - segStart.x) * dx + (point.y - segStart.y) * dy) / lengthSq;
+    t = Math.max(0, Math.min(1, t));
+
+    const projX = segStart.x + t * dx;
+    const projY = segStart.y + t * dy;
+
+    const distance = Math.sqrt(
+      Math.pow(point.x - projX, 2) + Math.pow(point.y - projY, 2)
+    );
+
+    // Signed distance: positive = right of segment, negative = left
+    const cross = dx * (point.y - segStart.y) - dy * (point.x - segStart.x);
+    const signed = cross >= 0 ? distance : -distance;
+
+    return { point: { x: projX, y: projY }, distance, signed };
+  }
+
+  /**
    * Set external input from React mobile controls
    */
   setExternalInput(input: InputState | null): void {
@@ -597,6 +849,10 @@ export class RaceScene extends Phaser.Scene {
    * Clean up when scene shuts down
    */
   shutdown(): void {
+    // Clean up GPU event listeners
+    this.game.events.off('setGPUMode');
+    this.game.events.off('gpuPrediction');
+
     this.inputManager?.destroy();
     this.player?.destroy();
     this.aiCar?.destroy();

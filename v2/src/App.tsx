@@ -361,6 +361,12 @@ function App() {
             difficulty={getDifficulty()}
             isMobile={isMobile}
             onRaceComplete={handleRaceComplete}
+            gpuConnection={state.useRealGPU ? {
+              useRealGPU: state.useRealGPU,
+              isConnected: gpu.isConnected,
+              sendGameState: gpu.sendGameState,
+              lastPrediction: gpu.lastPrediction,
+            } : undefined}
           />
         </div>
       )}

@@ -1,4 +1,4 @@
-export { GameContainer } from './GameContainer';
+export { GameContainer, type GPUConnectionProps } from './GameContainer';
 export { GameHUD } from './GameHUD';
 export { CountdownOverlay } from './CountdownOverlay';
 export { ControlsHint } from './ControlsHint';
