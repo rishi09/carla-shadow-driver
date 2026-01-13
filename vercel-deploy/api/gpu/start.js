@@ -151,21 +151,44 @@ fi
 
 echo "=== Starting Cloudflare Tunnel ==="
 report_status "tunneling" "Starting Cloudflare tunnel"
-# Start cloudflared and capture the URL
-cloudflared tunnel --url http://localhost:5001 2>&1 | while read line; do
-    echo "$line"
-    # Look for the tunnel URL in the output (try multiple patterns)
-    if echo "$line" | grep -q "trycloudflare.com"; then
-        # Extract URL - try different patterns
-        TUNNEL_URL=$(echo "$line" | grep -oE 'https://[^[:space:]]+trycloudflare.com[^[:space:]]*' | head -1)
-        if [ -n "$TUNNEL_URL" ]; then
-            echo "=== Found Tunnel URL: $TUNNEL_URL ==="
-            # Report URL to callback endpoint (single line to avoid escaping issues)
-            curl -s -X POST "https://carla-shadow-driver.vercel.app/api/gpu/callback" -H "Content-Type: application/json" -d "{\\"instance_id\\":\\"$INSTANCE_ID\\",\\"tunnel_url\\":\\"$TUNNEL_URL\\"}"
-            echo "=== Callback sent for $INSTANCE_ID ==="
-        fi
-    fi
-done &
+
+# Start cloudflared and capture ALL output to a file (much more reliable than while loop)
+cloudflared tunnel --url http://localhost:5001 > /tmp/cloudflared.log 2>&1 &
+CF_PID=$!
+
+# Wait for cloudflared to establish tunnel and output URL (usually takes 5-10 seconds)
+sleep 15
+
+# Check if cloudflared is still running
+if ! kill -0 $CF_PID 2>/dev/null; then
+    echo "ERROR: cloudflared died"
+    report_status "error" "cloudflared failed to start"
+    cat /tmp/cloudflared.log
+    exit 1
+fi
+
+# Parse the log file for tunnel URL
+echo "=== Cloudflared output ==="
+cat /tmp/cloudflared.log
+
+# Try to extract tunnel URL from log
+TUNNEL_URL=$(grep -oE 'https://[a-zA-Z0-9.-]+\\.trycloudflare\\.com' /tmp/cloudflared.log | head -1)
+
+if [ -z "$TUNNEL_URL" ]; then
+    # Try alternate pattern (just look for trycloudflare.com anywhere)
+    TUNNEL_URL=$(grep -oE 'https://[^[:space:]]+trycloudflare[^[:space:]]*' /tmp/cloudflared.log | head -1)
+fi
+
+if [ -n "$TUNNEL_URL" ]; then
+    echo "=== Found Tunnel URL: $TUNNEL_URL ==="
+    curl -s -X POST "https://carla-shadow-driver.vercel.app/api/gpu/callback" -H "Content-Type: application/json" -d "{\\"instance_id\\":\\"$INSTANCE_ID\\",\\"tunnel_url\\":\\"$TUNNEL_URL\\"}"
+    echo "=== Tunnel URL reported! ==="
+else
+    # Report failure with first 500 chars of log so we can debug
+    LOG_PREVIEW=$(head -c 500 /tmp/cloudflared.log | tr '\\n' ' ' | tr '"' "'")
+    echo "=== No tunnel URL found. Log preview: $LOG_PREVIEW ==="
+    report_status "error" "No tunnel URL found. Log: $LOG_PREVIEW"
+fi
 
 # Keep container running
 wait $WS_PID
