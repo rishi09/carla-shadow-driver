@@ -154,15 +154,15 @@ report_status "tunneling" "Starting Cloudflare tunnel"
 # Start cloudflared and capture the URL
 cloudflared tunnel --url http://localhost:5001 2>&1 | while read line; do
     echo "$line"
-    # Look for the tunnel URL in the output
+    # Look for the tunnel URL in the output (try multiple patterns)
     if echo "$line" | grep -q "trycloudflare.com"; then
-        TUNNEL_URL=$(echo "$line" | grep -oE 'https://[a-zA-Z0-9-]+\\.trycloudflare\\.com')
+        # Extract URL - try different patterns
+        TUNNEL_URL=$(echo "$line" | grep -oE 'https://[^[:space:]]+trycloudflare.com[^[:space:]]*' | head -1)
         if [ -n "$TUNNEL_URL" ]; then
-            echo "=== Tunnel URL: $TUNNEL_URL ==="
-            # Report URL to callback endpoint
-            curl -X POST "https://carla-shadow-driver.vercel.app/api/gpu/callback" \\
-                -H "Content-Type: application/json" \\
-                -d "{\\"instance_id\\":\\"$INSTANCE_ID\\",\\"tunnel_url\\":\\"$TUNNEL_URL\\"}" || true
+            echo "=== Found Tunnel URL: $TUNNEL_URL ==="
+            # Report URL to callback endpoint (single line to avoid escaping issues)
+            curl -s -X POST "https://carla-shadow-driver.vercel.app/api/gpu/callback" -H "Content-Type: application/json" -d "{\\"instance_id\\":\\"$INSTANCE_ID\\",\\"tunnel_url\\":\\"$TUNNEL_URL\\"}"
+            echo "=== Callback sent for $INSTANCE_ID ==="
         fi
     fi
 done &
