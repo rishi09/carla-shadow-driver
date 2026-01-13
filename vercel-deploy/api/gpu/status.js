@@ -1,5 +1,5 @@
 // Check GPU instance status on Vast.ai
-// Also checks for tunnel URL from callback store
+// Also checks for tunnel URL and setup status from callback store
 
 // Access the shared tunnel URL store
 if (!global.tunnelUrls) {
@@ -20,7 +20,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { instance_id } = req.query;
+  const { instance_id, offer_id } = req.query;
 
   if (!instance_id) {
     return res.status(400).json({ error: 'instance_id query parameter is required' });
@@ -55,14 +55,34 @@ export default async function handler(req, res) {
       });
     }
 
-    // Check for tunnel URL from callback store
-    // The GPU reports its Cloudflare tunnel URL to /api/gpu/callback
-    const tunnel_url = global.tunnelUrls[instance_id] || null;
+    // Check for tunnel URL and status from callback store
+    // Try multiple keys: instance_id, offer_id, or check all entries
+    let callbackData = global.tunnelUrls[instance_id];
+
+    // Also try with offer_id if provided
+    if (!callbackData && offer_id) {
+      callbackData = global.tunnelUrls[offer_id];
+    }
+
+    // Extract tunnel info
+    let tunnel_url = null;
+    let setup_status = null;
+    let setup_message = null;
+
+    if (callbackData && typeof callbackData === 'object') {
+      tunnel_url = callbackData.tunnel_url || null;
+      setup_status = callbackData.status || null;
+      setup_message = callbackData.message || null;
+    } else if (typeof callbackData === 'string') {
+      tunnel_url = callbackData;
+    }
 
     return res.status(200).json({
       instance_id: instance_id,
       status: instance.cur_state || instance.actual_status || instance.status_msg || 'unknown',
       tunnel_url: tunnel_url,
+      setup_status: setup_status,
+      setup_message: setup_message,
       public_ip: instance.public_ipaddr,
       gpu_name: instance.gpu_name || instance.machine_id,
       cost_so_far: instance.total_cost || 0,
