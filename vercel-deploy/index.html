@@ -362,6 +362,95 @@
         .gpu-help a {
             color: #6366f1;
         }
+        /* Auto-provision GPU styles */
+        .gpu-auto-section {
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.2) 0%, rgba(139, 92, 246, 0.2) 100%);
+            border: 1px solid rgba(99, 102, 241, 0.3);
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+        .gpu-auto-section h3 {
+            margin: 0 0 10px 0;
+            font-size: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .gpu-auto-buttons {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        .gpu-play-btn {
+            flex: 1;
+            padding: 12px;
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            font-weight: bold;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .gpu-play-btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);
+        }
+        .gpu-play-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .gpu-stop-btn {
+            flex: 1;
+            padding: 12px;
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            font-weight: bold;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .gpu-stop-btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(239, 68, 68, 0.3);
+        }
+        .gpu-stop-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .gpu-provision-status {
+            background: rgba(0,0,0,0.2);
+            border-radius: 6px;
+            padding: 10px;
+            font-size: 0.85rem;
+        }
+        .gpu-provision-status .status-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+        }
+        .gpu-provision-status .status-label {
+            color: #888;
+        }
+        .gpu-provision-status .status-value {
+            color: #fff;
+            font-weight: bold;
+        }
+        .gpu-provision-status .status-value.running {
+            color: #10b981;
+        }
+        .gpu-provision-status .status-value.starting {
+            color: #f59e0b;
+        }
+        .gpu-divider {
+            border: none;
+            border-top: 1px solid rgba(255,255,255,0.1);
+            margin: 15px 0;
+        }
     </style>
 </head>
 <body>
@@ -465,8 +554,47 @@
             <span class="modal-close" onclick="closeGPUModal()">&times;</span>
             <h2>🖥️ Connect to Real AI</h2>
 
+            <!-- Auto-provision section -->
+            <div class="gpu-auto-section">
+                <h3>⚡ Auto-Provision GPU (Vast.ai)</h3>
+                <p style="font-size: 0.85rem; color: #ccc; margin-bottom: 10px;">
+                    Automatically rent and configure a GPU with one click!
+                </p>
+
+                <div class="gpu-auto-buttons">
+                    <button class="gpu-play-btn" onclick="startGPU()" id="play-gpu">
+                        ▶ Start Real AI (~$0.50/hr)
+                    </button>
+                    <button class="gpu-stop-btn" onclick="stopGPU()" id="stop-gpu" disabled>
+                        ⬛ Stop GPU
+                    </button>
+                </div>
+
+                <div class="gpu-provision-status" id="provision-status" style="display: none;">
+                    <div class="status-row">
+                        <span class="status-label">Status:</span>
+                        <span class="status-value" id="gpu-status-text">Idle</span>
+                    </div>
+                    <div class="status-row">
+                        <span class="status-label">GPU:</span>
+                        <span class="status-value" id="gpu-name-text">—</span>
+                    </div>
+                    <div class="status-row">
+                        <span class="status-label">Cost:</span>
+                        <span class="status-value" id="gpu-cost-text">$0.00</span>
+                    </div>
+                    <div class="status-row">
+                        <span class="status-label">Uptime:</span>
+                        <span class="status-value" id="gpu-uptime-text">0s</span>
+                    </div>
+                </div>
+            </div>
+
+            <hr class="gpu-divider">
+
+            <!-- Manual connection section -->
             <div class="gpu-info">
-                <p>Connect to a GPU running CARLA + NVIDIA Alpamayo for real neural network inference.</p>
+                <p><strong>Or connect manually:</strong> Connect to your own GPU running CARLA + NVIDIA Alpamayo.</p>
 
                 <h3>Quick Start:</h3>
                 <ol>
@@ -1068,6 +1196,177 @@
             update();
             draw();
             requestAnimationFrame(gameLoop);
+        }
+
+        // ======================
+        // GPU Auto-Provision System
+        // ======================
+        let autoProvision = {
+            instanceId: null,
+            pollInterval: null,
+            startTime: null
+        };
+
+        async function startGPU() {
+            const playBtn = document.getElementById('play-gpu');
+            const stopBtn = document.getElementById('stop-gpu');
+            const statusPanel = document.getElementById('provision-status');
+            const statusText = document.getElementById('gpu-status-text');
+
+            // Disable play button
+            playBtn.disabled = true;
+            playBtn.textContent = '⏳ Starting GPU...';
+
+            // Show status panel
+            statusPanel.style.display = 'block';
+            statusText.textContent = 'Provisioning...';
+            statusText.className = 'status-value starting';
+
+            try {
+                const response = await fetch('/api/gpu/start', { method: 'POST' });
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to start GPU');
+                }
+
+                autoProvision.instanceId = data.instance_id;
+                autoProvision.startTime = Date.now();
+
+                // Update UI
+                document.getElementById('gpu-name-text').textContent = data.gpu_name || 'Unknown';
+                statusText.textContent = 'Starting... (~2-3 min)';
+
+                // Enable stop button
+                stopBtn.disabled = false;
+
+                // Start polling for status
+                autoProvision.pollInterval = setInterval(pollGPUStatus, 5000);
+
+            } catch (error) {
+                console.error('Error starting GPU:', error);
+                alert('Failed to start GPU: ' + error.message);
+
+                // Reset UI
+                playBtn.disabled = false;
+                playBtn.textContent = '▶ Start Real AI (~$0.50/hr)';
+                statusPanel.style.display = 'none';
+            }
+        }
+
+        async function pollGPUStatus() {
+            if (!autoProvision.instanceId) return;
+
+            try {
+                // Poll instance status
+                const statusResponse = await fetch(`/api/gpu/status?instance_id=${autoProvision.instanceId}`);
+                const statusData = await statusResponse.json();
+
+                // Update status display
+                const statusText = document.getElementById('gpu-status-text');
+                const costText = document.getElementById('gpu-cost-text');
+                const uptimeText = document.getElementById('gpu-uptime-text');
+
+                statusText.textContent = statusData.status || 'unknown';
+                statusText.className = 'status-value ' + (statusData.status === 'running' ? 'running' : 'starting');
+
+                costText.textContent = '$' + (statusData.cost_so_far || 0).toFixed(3);
+                uptimeText.textContent = Math.floor((statusData.uptime_seconds || 0)) + 's';
+
+                // Check for ngrok URL
+                const callbackResponse = await fetch(`/api/gpu/callback?instance_id=${autoProvision.instanceId}`);
+                const callbackData = await callbackResponse.json();
+
+                if (callbackData.ngrok_url && statusData.status === 'running') {
+                    // Stop polling
+                    clearInterval(autoProvision.pollInterval);
+                    autoProvision.pollInterval = null;
+
+                    // Auto-connect!
+                    statusText.textContent = 'Connected!';
+                    statusText.className = 'status-value running';
+
+                    // Parse ngrok URL (format: tcp://0.tcp.ngrok.io:12345)
+                    const url = callbackData.ngrok_url;
+                    const match = url.match(/tcp:\/\/([^:]+):(\d+)/);
+
+                    if (match) {
+                        const host = match[1];
+                        const port = match[2];
+
+                        // Auto-fill and connect
+                        document.getElementById('gpu-host').value = host;
+                        document.getElementById('gpu-port').value = port;
+
+                        // Trigger connection
+                        setTimeout(() => {
+                            connectToGPU();
+                        }, 1000);
+                    }
+                }
+
+            } catch (error) {
+                console.error('Error polling GPU status:', error);
+            }
+        }
+
+        async function stopGPU() {
+            if (!autoProvision.instanceId) return;
+
+            const playBtn = document.getElementById('play-gpu');
+            const stopBtn = document.getElementById('stop-gpu');
+            const statusText = document.getElementById('gpu-status-text');
+
+            // Confirm
+            if (!confirm('Stop the GPU instance? This will destroy the instance and disconnect.')) {
+                return;
+            }
+
+            statusText.textContent = 'Stopping...';
+            stopBtn.disabled = true;
+
+            try {
+                // Stop polling
+                if (autoProvision.pollInterval) {
+                    clearInterval(autoProvision.pollInterval);
+                    autoProvision.pollInterval = null;
+                }
+
+                // Disconnect WebSocket if connected
+                if (gpuConnection.connected) {
+                    disconnectFromGPU();
+                }
+
+                // Destroy instance
+                const response = await fetch('/api/gpu/stop', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ instance_id: autoProvision.instanceId })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to stop GPU');
+                }
+
+                // Reset UI
+                statusText.textContent = 'Stopped';
+                statusText.className = 'status-value';
+                document.getElementById('provision-status').style.display = 'none';
+
+                playBtn.disabled = false;
+                playBtn.textContent = '▶ Start Real AI (~$0.50/hr)';
+                stopBtn.disabled = true;
+
+                autoProvision.instanceId = null;
+                autoProvision.startTime = null;
+
+            } catch (error) {
+                console.error('Error stopping GPU:', error);
+                alert('Failed to stop GPU: ' + error.message);
+                stopBtn.disabled = false;
+            }
         }
 
         // ======================
