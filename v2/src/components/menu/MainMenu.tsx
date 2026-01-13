@@ -64,8 +64,8 @@ export function MainMenu({ onSelectMode }: MainMenuProps) {
         {/* Head-to-Head Mode */}
         <ModeCard
           mode="head-to-head"
-          title="Head to Head"
-          description="Race against the AI in real-time. Your ghost versus their predictions."
+          title="Race Against Computer"
+          description="Drive side-by-side with the computer. First car to finish 3 laps wins!"
           icon={<HeadToHeadIcon />}
           primaryColor="human"
           secondaryColor="ai"
@@ -74,14 +74,14 @@ export function MainMenu({ onSelectMode }: MainMenuProps) {
           onHover={() => setIsHovering('head-to-head')}
           onLeave={() => setIsHovering(null)}
           onSelect={() => handleModeSelect('head-to-head')}
-          features={['Real-time competition', 'Side-by-side view', 'Instant results']}
+          features={['Two cars racing at once', 'See who is faster', 'Fun competition']}
         />
 
         {/* Time Trial Mode */}
         <ModeCard
           mode="time-trial"
-          title="Time Trial"
-          description="Set your best lap time. Challenge the leaderboard."
+          title="Practice Mode"
+          description="Drive alone at your own pace. No pressure, just practice and improve!"
           icon={<TimeTrialIcon />}
           primaryColor="accent"
           secondaryColor="accent"
@@ -90,7 +90,7 @@ export function MainMenu({ onSelectMode }: MainMenuProps) {
           onHover={() => setIsHovering('time-trial')}
           onLeave={() => setIsHovering(null)}
           onSelect={() => handleModeSelect('time-trial')}
-          features={['Personal best tracking', 'Global leaderboard', 'Ghost replay']}
+          features={['Drive at your own speed', 'Save your best times', 'Great for beginners']}
         />
       </div>
 
@@ -100,21 +100,38 @@ export function MainMenu({ onSelectMode }: MainMenuProps) {
           variant={selectedMode ? 'primary' : 'ghost'}
           size="lg"
           disabled={!selectedMode}
-          className="min-w-[200px]"
+          className="min-w-[200px] text-lg"
           rightIcon={
             <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
               <path d="M8 5v14l11-7z" />
             </svg>
           }
         >
-          {selectedMode ? 'Select Track' : 'Choose a Mode'}
+          {selectedMode ? 'Choose a Track' : 'Select a Mode First'}
         </Button>
 
         {selectedMode && (
-          <p className="text-sm text-white/40 animate-pulse">
-            Press Enter or click to continue
+          <p className="text-base text-white/40 animate-pulse">
+            Click the button above to continue
           </p>
         )}
+
+        {/* How to Play Button */}
+        <Button
+          variant="ghost"
+          size="md"
+          onClick={() => setShowHowToPlay(true)}
+          className="mt-4"
+          leftIcon={
+            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+              <line x1="12" y1="17" x2="12.01" y2="17" />
+            </svg>
+          }
+        >
+          How to Play (Help)
+        </Button>
       </div>
     </div>
   );
@@ -180,6 +197,10 @@ function ModeCard({
     <Card
       variant="interactive"
       padding="none"
+      role="button"
+      aria-label={`Select ${title} mode. ${description}`}
+      aria-pressed={isSelected}
+      tabIndex={0}
       className={`
         relative overflow-hidden cursor-pointer
         transition-all duration-300 ease-out
@@ -189,6 +210,12 @@ function ModeCard({
       onMouseEnter={onHover}
       onMouseLeave={onLeave}
       onClick={onSelect}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onSelect();
+        }
+      }}
     >
       {/* Gradient overlay */}
       <div
