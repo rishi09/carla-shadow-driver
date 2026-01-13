@@ -168,20 +168,20 @@ function LeaderboardDisplay({
   return (
     <Card variant="default" className="w-full max-w-md">
       <CardHeader>
-        <CardTitle className="text-center">LEADERBOARD</CardTitle>
+        <CardTitle className="text-center text-xl">Your Best Times</CardTitle>
       </CardHeader>
       <CardContent>
         {displayEntries.length === 0 ? (
-          <p className="text-center text-white/60">No entries yet</p>
+          <p className="text-center text-white/60 text-base py-4">No saved times yet - this is your first race!</p>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-3">
             {displayEntries.map((entry, index) => {
               const isCurrentPlayer =
                 entry.playerName === playerName && entry.time === currentTime;
               return (
                 <div
                   key={entry.id}
-                  className={`flex justify-between items-center py-2 px-3 rounded ${
+                  className={`flex justify-between items-center py-3 px-4 rounded ${
                     isCurrentPlayer
                       ? 'bg-accent/20 border border-accent/50'
                       : 'bg-white/5'
@@ -189,7 +189,7 @@ function LeaderboardDisplay({
                 >
                   <div className="flex items-center gap-3">
                     <span
-                      className={`w-6 text-center font-bold ${
+                      className={`w-8 text-center font-bold text-lg ${
                         index === 0
                           ? 'text-accent'
                           : index === 1
@@ -201,14 +201,14 @@ function LeaderboardDisplay({
                     >
                       {index + 1}.
                     </span>
-                    <span className="text-white">{entry.playerName}</span>
+                    <span className="text-white text-base">{entry.playerName}</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="font-mono text-white/80">
+                    <span className="font-mono text-white/80 text-base">
                       {formatTime(entry.time)}
                     </span>
                     {isCurrentPlayer && isNewRecord && (
-                      <span className="text-accent text-xs font-semibold animate-pulse">
+                      <span className="text-accent text-sm font-semibold animate-pulse">
                         NEW!
                       </span>
                     )}
@@ -277,23 +277,26 @@ export function ResultsScreen({
       <div className="text-center mb-8">
         {mode === 'head-to-head' ? (
           <>
-            <h1 className="text-4xl sm:text-5xl md:text-6xl font-bold mb-2">
-              <span className="text-accent">(Trophy)</span> WINNER!{' '}
-              <span className="text-accent">(Trophy)</span>
+            <h1 className="text-4xl sm:text-5xl md:text-6xl font-bold mb-4 text-white">
+              Race Finished!
             </h1>
             <p
-              className={`text-2xl sm:text-3xl font-semibold ${
+              className={`text-3xl sm:text-4xl font-bold ${
                 playerWins ? 'text-human' : 'text-ai'
               }`}
             >
-              {playerWins ? 'YOU' : 'AI'}
+              {playerWins ? 'You Won!' : 'Computer Won'}
+            </p>
+            <p className="text-lg text-white/60 mt-2">
+              {playerWins ? 'Congratulations!' : 'Try again - you can do it!'}
             </p>
           </>
         ) : (
           <>
-            <h1 className="text-4xl sm:text-5xl md:text-6xl font-bold text-white mb-2">
-              RACE COMPLETE!
+            <h1 className="text-4xl sm:text-5xl md:text-6xl font-bold text-white mb-4">
+              Race Finished!
             </h1>
+            <p className="text-lg text-white/60 mb-4">Your time:</p>
             <div className="text-5xl sm:text-6xl md:text-7xl font-bold font-mono text-white mb-4">
               {formatTime(playerResult.totalTime)}
             </div>
@@ -303,8 +306,8 @@ export function ResultsScreen({
               </div>
             )}
             {isNewRecord && (
-              <div className="mt-2 text-accent font-semibold animate-pulse text-lg">
-                (Star) NEW PERSONAL BEST! (Star)
+              <div className="mt-3 text-accent font-semibold animate-pulse text-xl">
+                New Personal Best!
               </div>
             )}
           </>
@@ -400,11 +403,11 @@ export function ResultsScreen({
 
       {/* Action Buttons */}
       <div className="flex flex-col sm:flex-row gap-4 w-full max-w-md">
-        <Button variant="primary" size="lg" fullWidth onClick={onPlayAgain}>
-          RACE AGAIN
+        <Button variant="primary" size="lg" fullWidth onClick={onPlayAgain} className="text-lg">
+          Play Again
         </Button>
-        <Button variant="ghost" size="lg" fullWidth onClick={onMainMenu}>
-          MAIN MENU
+        <Button variant="ghost" size="lg" fullWidth onClick={onMainMenu} className="text-lg">
+          Back to Home
         </Button>
       </div>
     </div>

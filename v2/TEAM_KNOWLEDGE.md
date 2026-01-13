@@ -1091,4 +1091,87 @@ If 3D development takes too long, pre-recorded video mode could work:
 - `src/components/game/GameHUD.tsx` - Empty checkpoints handling
 - `src/components/game/MobileControls.tsx` - Accessibility labels
 - `src/components/results/ResultsScreen.tsx` - Edge case fixes
+
+---
+
+## UX Lessons Learned
+
+### UX-001: Accessibility Audit - Designing for Non-Tech-Savvy Users
+**Date:** 2026-01-12
+**Persona:** 70-year-old immigrant father with limited tech/gaming experience
+
+**Key Issues Identified:**
+
+#### Severity: HIGH (Must Fix)
+| Issue | Original | Fix Applied |
+|-------|----------|-------------|
+| No control hints | Users didn't know how to drive | Created `ControlsHint.tsx` with visual keyboard display |
+| Game jargon | "Head to Head", "Time Trial", "Par Time" | Changed to "Race Against Computer", "Practice Mode", "Target Time" |
+| Small text | 12-14px throughout | Minimum 16px for all readable text |
+| No tutorial | Users launched game without knowing rules | Created `HowToPlay.tsx` modal with 4-page walkthrough |
+| Difficulty labels | "EASY/MEDIUM/HARD" | Changed to "BEGINNER/NORMAL/EXPERT" with descriptions |
+
+#### Severity: MEDIUM (Should Fix)
+| Issue | Original | Fix Applied |
+|-------|----------|-------------|
+| Unclear buttons | "Select Track", "Choose a Mode" | Changed to "Choose This Track", "Select a Mode First" |
+| Technical times | "Par Time", "Gold Time" | Changed to "Target Time", "Best Possible (Gold)" |
+| No first-race detection | Controls shown every race | Added localStorage flag for first-race detection |
+| Cryptic results | "RACE COMPLETE!", "AI" | Changed to "Race Finished!", "Computer Won" |
+| Missing encouragement | No feedback on loss | Added "Try again - you can do it!" message |
+
+#### Severity: LOW (Nice to Have)
+- High contrast mode option (not implemented)
+- Slower "Relaxed" AI mode (not implemented)
+- Larger touch targets for mobile (partially addressed)
+
+**Files Created:**
+- `/src/components/game/ControlsHint.tsx` - On-screen control hints overlay
+- `/src/components/menu/HowToPlay.tsx` - Step-by-step tutorial modal
+
+**Files Modified:**
+- `MainMenu.tsx` - Added Help button, simplified language, larger text
+- `TrackSelect.tsx` - Clearer difficulty labels, simplified time labels
+- `GameHUD.tsx` - Larger fonts, better accessibility labels
+- `GameContainer.tsx` - Integrated ControlsHint component
+- `ResultsScreen.tsx` - Simplified language, larger text, clearer labels
+
+---
+
+### UX Accessibility Checklist (for future features)
+
+Use this checklist when designing new features:
+
+**Text & Readability:**
+- [ ] Minimum font size 16px for body text
+- [ ] High contrast (white text on dark background, or vice versa)
+- [ ] Avoid ALL CAPS for long phrases (harder to read)
+- [ ] Use simple language (avoid jargon, technical terms)
+
+**Controls & Interaction:**
+- [ ] Touch targets minimum 44x44px (iOS/Android guidelines)
+- [ ] Keyboard navigation support (Tab, Enter, Space)
+- [ ] Clear focus indicators for keyboard users
+- [ ] Controls explained visually for first-time users
+
+**Feedback & Guidance:**
+- [ ] Clear success/failure messages
+- [ ] Positive encouragement on failure ("Try again!")
+- [ ] Progress indicators for multi-step processes
+- [ ] "How to Play" or help always accessible
+
+**Language Guidelines for Non-Native Speakers:**
+- [ ] Use simple, common words (avoid idioms)
+- [ ] Short sentences (one idea per sentence)
+- [ ] Consistent terminology throughout
+- [ ] Avoid abbreviations without explanation
+
+**Testing Protocol:**
+1. Read all text aloud - does it sound natural?
+2. Increase font size to 24px - does layout break?
+3. Ask: "Would my grandparent understand this?"
+4. Test with keyboard-only navigation
+5. Test on mobile with thumb-only interaction
+
+---
 - `src/hooks/useLeaderboard.ts` - Deprecated method fix, validation

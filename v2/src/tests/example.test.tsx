@@ -8,7 +8,7 @@
  * - Mocking Phaser-dependent components
  */
 
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import { jest } from '@jest/globals';
 
 // Mock Phaser entirely - it requires canvas which jsdom doesn't support
@@ -64,72 +64,73 @@ describe('App Component', () => {
 });
 
 describe('Game Mode Selection', () => {
-  it('navigates to track selection when head-to-head is selected', () => {
+  it('navigates to track selection when head-to-head is selected', async () => {
     render(<App />);
 
-    // Find the card containing "Race Against Computer" and click it
-    // The card has role="button" with aria-label containing the title
-    const modeCards = screen.getAllByRole('button');
-    const headToHeadCard = modeCards.find(card =>
-      card.getAttribute('aria-label')?.toLowerCase().includes('race against computer')
-    );
-
-    if (headToHeadCard) {
-      fireEvent.click(headToHeadCard);
-    } else {
-      // Fallback: click on the text element's parent
-      const text = screen.getByText(/race against computer/i);
-      fireEvent.click(text.closest('[role="button"]') || text.parentElement || text);
-    }
+    // The ModeCard has role="button" with aria-label containing the mode name
+    // Find and click the mode card directly
+    const modeCard = screen.getByRole('button', { name: /race against computer/i });
+    await act(async () => {
+      fireEvent.click(modeCard);
+    });
 
     // Should now show track selection screen
     expect(screen.getByText(/select your track/i)).toBeInTheDocument();
   });
 
-  it('shows back button in track selection view', () => {
+  it('shows back button in track selection view', async () => {
     render(<App />);
 
-    // Navigate to track selection - click on parent with role=button
-    const text = screen.getByText(/race against computer/i);
-    const card = text.closest('[role="button"]') || text.parentElement;
-    if (card) fireEvent.click(card);
+    // Click the mode card
+    const modeCard = screen.getByRole('button', { name: /race against computer/i });
+    await act(async () => {
+      fireEvent.click(modeCard);
+    });
 
     // Check for back button
     expect(screen.getByText(/back to mode select/i)).toBeInTheDocument();
   });
 
-  it('can navigate back to menu from track selection', () => {
+  it('can navigate back to menu from track selection', async () => {
     render(<App />);
 
     // Navigate to track selection
-    const text = screen.getByText(/race against computer/i);
-    const card = text.closest('[role="button"]') || text.parentElement;
-    if (card) fireEvent.click(card);
+    const modeCard = screen.getByRole('button', { name: /race against computer/i });
+    await act(async () => {
+      fireEvent.click(modeCard);
+    });
 
     // Click back button
     const backButton = screen.getByText(/back to mode select/i);
-    fireEvent.click(backButton);
+    await act(async () => {
+      fireEvent.click(backButton);
+    });
 
     // Should be back on menu
     expect(screen.getByText(/race against computer/i)).toBeInTheDocument();
     expect(screen.queryByText(/select your track/i)).not.toBeInTheDocument();
   });
 
-  it('navigates to game when track is selected', () => {
+  it('navigates to game when track is selected', async () => {
     render(<App />);
 
     // Navigate to track selection
-    const text = screen.getByText(/race against computer/i);
-    const card = text.closest('[role="button"]') || text.parentElement;
-    if (card) fireEvent.click(card);
+    const modeCard = screen.getByRole('button', { name: /race against computer/i });
+    await act(async () => {
+      fireEvent.click(modeCard);
+    });
 
     // Select a track
     const trackCard = screen.getByText(/sunset speedway/i);
-    fireEvent.click(trackCard);
+    await act(async () => {
+      fireEvent.click(trackCard);
+    });
 
     // Click start race button
     const startButton = screen.getByText(/start race/i);
-    fireEvent.click(startButton);
+    await act(async () => {
+      fireEvent.click(startButton);
+    });
 
     // Game container should now be visible
     expect(screen.getByTestId('game-container')).toBeInTheDocument();
