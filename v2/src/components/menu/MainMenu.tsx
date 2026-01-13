@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Card } from '../common/Card';
 import { Button } from '../common/Button';
+import { HowToPlay } from './HowToPlay';
 
 type GameMode = 'head-to-head' | 'time-trial';
 
@@ -11,6 +12,7 @@ interface MainMenuProps {
 export function MainMenu({ onSelectMode }: MainMenuProps) {
   const [selectedMode, setSelectedMode] = useState<GameMode | null>(null);
   const [isHovering, setIsHovering] = useState<GameMode | null>(null);
+  const [showHowToPlay, setShowHowToPlay] = useState(false);
 
   const handleModeSelect = (mode: GameMode) => {
     setSelectedMode(mode);
@@ -19,6 +21,12 @@ export function MainMenu({ onSelectMode }: MainMenuProps) {
 
   return (
     <div className="flex-1 flex flex-col items-center justify-center px-6 py-12">
+      {/* How to Play Modal */}
+      <HowToPlay
+        isOpen={showHowToPlay}
+        onClose={() => setShowHowToPlay(false)}
+      />
+
       {/* Hero Section */}
       <div className="text-center mb-16">
         {/* Animated Title */}
@@ -40,7 +48,7 @@ export function MainMenu({ onSelectMode }: MainMenuProps) {
 
         {/* Tagline with animation */}
         <p className="text-xl md:text-2xl text-white/60 font-light animate-pulse-slow">
-          Can you beat the AI?
+          A Racing Game - Drive and Beat the Computer!
         </p>
 
         {/* Decorative line */}
