@@ -141,6 +141,9 @@ export function useGPUConnection(): UseGPUConnectionReturn {
   // Keep track of mounted state to prevent state updates after unmount
   const isMountedRef = useRef(true);
 
+  // Ref to hold stopGPUInternal for use in timers (avoids circular dependency)
+  const stopGPUInternalRef = useRef<() => Promise<void>>(() => Promise.resolve());
+
   // ----- Cleanup Helpers -----
 
   const clearPolling = useCallback(() => {
@@ -189,8 +192,8 @@ export function useGPUConnection(): UseGPUConnectionReturn {
       inactivityDisconnectTimerRef.current = setTimeout(() => {
         if (isMountedRef.current) {
           console.warn('[useGPUConnection] Auto-disconnecting due to 5 minutes of inactivity.');
-          // Will call stopGPU which handles cleanup
-          stopGPUInternal();
+          // Use ref to avoid stale closure issue
+          stopGPUInternalRef.current();
         }
       }, INACTIVITY_DISCONNECT_TIMEOUT);
     }
@@ -499,6 +502,11 @@ export function useGPUConnection(): UseGPUConnectionReturn {
       setInactivityWarning(false);
     }
   }, [instanceData.instance_id, clearPolling, closeWebSocket, clearInactivityTimers]);
+
+  // Keep the ref updated with the latest stopGPUInternal
+  useEffect(() => {
+    stopGPUInternalRef.current = stopGPUInternal;
+  }, [stopGPUInternal]);
 
   const stopGPU = useCallback(async () => {
     await stopGPUInternal();

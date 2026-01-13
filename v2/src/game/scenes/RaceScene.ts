@@ -101,6 +101,10 @@ export class RaceScene extends Phaser.Scene {
   private gpuPredictionAge: number = 0; // ms since last prediction
   private readonly GPU_PREDICTION_TIMEOUT = 500; // Fallback to local AI if no prediction in 500ms
 
+  // Bound event handlers for cleanup (stored to use with game.events.off)
+  private handleSetGPUMode?: (data: { enabled: boolean }) => void;
+  private handleGPUPrediction?: (prediction: GPUPrediction) => void;
+
   constructor() {
     super({ key: 'RaceScene' });
   }
@@ -206,8 +210,8 @@ export class RaceScene extends Phaser.Scene {
    * Uses game.events for cross-boundary communication with React
    */
   private setupGPUEventListeners(): void {
-    // Listen for GPU mode toggle from React
-    this.game.events.on('setGPUMode', (data: { enabled: boolean }) => {
+    // Store handlers for proper cleanup in shutdown()
+    this.handleSetGPUMode = (data: { enabled: boolean }) => {
       this.useGPUMode = data.enabled;
       console.log(`[RaceScene] GPU mode ${data.enabled ? 'enabled' : 'disabled'}`);
 
@@ -216,13 +220,18 @@ export class RaceScene extends Phaser.Scene {
         this.lastGPUPrediction = null;
         this.gpuPredictionAge = 0;
       }
-    });
+    };
 
-    // Listen for GPU predictions from React
-    this.game.events.on('gpuPrediction', (prediction: GPUPrediction) => {
+    this.handleGPUPrediction = (prediction: GPUPrediction) => {
       this.lastGPUPrediction = prediction;
       this.gpuPredictionAge = 0; // Reset age on new prediction
-    });
+    };
+
+    // Listen for GPU mode toggle from React
+    this.game.events.on('setGPUMode', this.handleSetGPUMode);
+
+    // Listen for GPU predictions from React
+    this.game.events.on('gpuPrediction', this.handleGPUPrediction);
   }
 
   /**
@@ -849,9 +858,13 @@ export class RaceScene extends Phaser.Scene {
    * Clean up when scene shuts down
    */
   shutdown(): void {
-    // Clean up GPU event listeners
-    this.game.events.off('setGPUMode');
-    this.game.events.off('gpuPrediction');
+    // Clean up GPU event listeners with specific handlers
+    if (this.handleSetGPUMode) {
+      this.game.events.off('setGPUMode', this.handleSetGPUMode);
+    }
+    if (this.handleGPUPrediction) {
+      this.game.events.off('gpuPrediction', this.handleGPUPrediction);
+    }
 
     this.inputManager?.destroy();
     this.player?.destroy();
