@@ -1,4 +1,4 @@
-import { useMemo, useEffect } from 'react';
+import { useMemo, useEffect, useRef } from 'react';
 import { Button } from '../common/Button';
 import { Card, CardHeader, CardTitle, CardContent } from '../common/Card';
 import { useLeaderboard, type LeaderboardEntry } from '../../hooks/useLeaderboard';
@@ -88,7 +88,9 @@ interface ResultCardProps {
 }
 
 function ResultCard({ title, result, variant, isWinner }: ResultCardProps) {
-  const bestLapIndex = result.lapTimes.indexOf(Math.min(...result.lapTimes));
+  const bestLapIndex = result.lapTimes.length > 0
+    ? result.lapTimes.indexOf(Math.min(...result.lapTimes))
+    : -1;
 
   return (
     <Card variant={variant} className="flex-1 min-w-[280px]">
@@ -248,8 +250,14 @@ export function ResultsScreen({
     return playerResult.totalTime < previousBest.time;
   }, [playerResult, getPlayerBest]);
 
-  // Add entry to leaderboard on mount
+  // Track if entry was already added to prevent duplicates
+  const entryAddedRef = useRef(false);
+
+  // Add entry to leaderboard on mount (only once)
   useEffect(() => {
+    if (entryAddedRef.current) return;
+    entryAddedRef.current = true;
+
     addEntry({
       playerName: playerResult.playerName,
       time: playerResult.totalTime,
@@ -324,30 +332,34 @@ export function ResultsScreen({
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
-                {playerResult.lapTimes.map((lapTime, index) => {
-                  const isBest =
-                    lapTime === Math.min(...playerResult.lapTimes);
-                  return (
-                    <div
-                      key={index}
-                      className={`flex justify-between items-center py-2 px-4 rounded ${
-                        isBest ? 'bg-accent/20' : 'bg-white/5'
-                      }`}
-                    >
-                      <span className="text-white/80">Lap {index + 1}:</span>
-                      <span
-                        className={`font-mono text-lg ${
-                          isBest ? 'text-accent font-bold' : 'text-white'
+                {playerResult.lapTimes.length === 0 ? (
+                  <p className="text-white/60 text-center py-4">No lap data available</p>
+                ) : (
+                  playerResult.lapTimes.map((lapTime, index) => {
+                    const minLapTime = Math.min(...playerResult.lapTimes);
+                    const isBest = lapTime === minLapTime;
+                    return (
+                      <div
+                        key={index}
+                        className={`flex justify-between items-center py-2 px-4 rounded ${
+                          isBest ? 'bg-accent/20' : 'bg-white/5'
                         }`}
                       >
-                        {formatTime(lapTime)}
-                        {isBest && (
-                          <span className="ml-2 text-sm">(Star) BEST</span>
-                        )}
-                      </span>
-                    </div>
-                  );
-                })}
+                        <span className="text-white/80">Lap {index + 1}:</span>
+                        <span
+                          className={`font-mono text-lg ${
+                            isBest ? 'text-accent font-bold' : 'text-white'
+                          }`}
+                        >
+                          {formatTime(lapTime)}
+                          {isBest && (
+                            <span className="ml-2 text-sm">(Star) BEST</span>
+                          )}
+                        </span>
+                      </div>
+                    );
+                  })
+                )}
               </div>
 
               {/* Penalties & Bonuses */}

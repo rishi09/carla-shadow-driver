@@ -194,10 +194,15 @@ export function GameContainer({
       return false;
     };
 
+    // Track intervals/timeouts for cleanup
+    let checkInterval: ReturnType<typeof setInterval> | null = null;
+    let safetyTimeout: ReturnType<typeof setTimeout> | null = null;
+    let delayTimeout: ReturnType<typeof setTimeout> | null = null;
+
     // Start the race after boot scene completes
     game.events.once('bootComplete', () => {
       // Wait a short delay for scene to be fully ready
-      setTimeout(() => {
+      delayTimeout = setTimeout(() => {
         game.events.emit('startRace', {
           trackId,
           mode,
@@ -205,19 +210,28 @@ export function GameContainer({
         });
 
         // Try to get reference to race scene
-        const checkInterval = setInterval(() => {
+        checkInterval = setInterval(() => {
           if (checkSceneReady()) {
-            clearInterval(checkInterval);
+            if (checkInterval) clearInterval(checkInterval);
+            checkInterval = null;
           }
         }, 100);
 
         // Clear interval after 5 seconds as safety
-        setTimeout(() => clearInterval(checkInterval), 5000);
+        safetyTimeout = setTimeout(() => {
+          if (checkInterval) clearInterval(checkInterval);
+          checkInterval = null;
+        }, 5000);
       }, 100);
     });
 
     // Cleanup on unmount
     return () => {
+      // Clean up all timers
+      if (checkInterval) clearInterval(checkInterval);
+      if (safetyTimeout) clearTimeout(safetyTimeout);
+      if (delayTimeout) clearTimeout(delayTimeout);
+
       if (raceSceneRef.current) {
         raceSceneRef.current.events.off('gameState');
         raceSceneRef.current.events.off('raceStart');
