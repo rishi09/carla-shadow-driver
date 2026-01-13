@@ -126,7 +126,18 @@ Analyze each layer of defense that failed:
 | Manual Testing | SKIPPED | [No one ran the app before deployment] |
 | Staging Environment | N/A | [Was it deployed to staging first?] |
 | Monitoring/Alerts | N/A | [No alerts configured] |
+| **Deployment Topology** | N/A | [Were API URLs pointing to correct domains?] |
+| **Smoke Test Post-Deploy** | SKIPPED | [Did anyone curl the API after deploy?] |
 ```
+
+**Deployment-Specific Checks:**
+If the bug involved API calls or cross-project communication:
+- [ ] Are all API URLs absolute (not relative)?
+- [ ] Do frontend and API live on the same domain?
+- [ ] Was the API tested with curl after deploy?
+- [ ] Did anyone check browser Network tab?
+
+See `deployment-contract-validator.md` for full checklist.
 
 ---
 

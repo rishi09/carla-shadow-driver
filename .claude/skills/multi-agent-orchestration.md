@@ -255,7 +255,25 @@ Files changed:
 - [ ] Event contracts between components verified
 - [ ] API contracts between services verified
 
-### 4. Edge Cases
+### 4. MANDATORY: API Smoke Test (DO NOT SKIP)
+**You MUST curl every API endpoint after deploy. This takes 30 seconds and catches 90% of integration bugs.**
+
+```bash
+# For each API endpoint your frontend calls:
+curl -X POST https://YOUR-DEPLOYED-DOMAIN/api/endpoint | head -1
+
+# If response starts with '{' or '[' = JSON = GOOD
+# If response starts with '<' or 'The page' = HTML = WRONG URL
+```
+
+- [ ] List all API endpoints the frontend calls
+- [ ] curl each one from the DEPLOYED frontend domain
+- [ ] Verify each returns JSON, not HTML
+- [ ] If any return HTML, the URL is pointing to wrong domain
+
+**Why this catches bugs:** Build passes, tests pass, deploy succeeds - but relative URLs resolve to the wrong domain. Only a real HTTP request reveals this.
+
+### 5. Edge Cases
 - [ ] Test with empty/null inputs
 - [ ] Test error states
 - [ ] Test offline/network failure modes
