@@ -878,3 +878,118 @@ const TRACK_TIMINGS = {
 4. GameContainer already integrates MobileControls, no need to duplicate in App
 5. Layout `showHeader/showFooter` props enable immersive game view
 
+### CARLA Emulator / Realistic Mode Research (Innovation Lead)
+**Date:** 2026-01-12
+**Task:** Research CARLA simulator integration for "Realistic Mode" with improved graphics
+
+**Research Findings:**
+
+#### 1. CARLA M1 Mac Compatibility
+**Verdict: NOT RECOMMENDED**
+
+CARLA officially supports only:
+- Windows 10/11
+- Ubuntu 20.04/22.04
+- Requires NVIDIA GPU with 8GB+ VRAM (RTX 2070 or better)
+- Uses ~20GB disk space
+
+CARLA has **no official Mac or ARM support**. Running via Docker with Rosetta 2 is problematic because:
+- CARLA requires GPU acceleration (OpenGL/Vulkan) which doesn't work well through Docker on M1
+- Emulation performance would be extremely poor
+- The Docker image `carlasim/carla:0.9.14` is x86_64 only
+
+**Sources:**
+- [CARLA Quick Start](https://carla.readthedocs.io/en/latest/start_quickstart/)
+- [Docker ARM64 Issues](https://github.com/docker/for-mac/issues/7137)
+
+#### 2. Lightweight CARLA Visual Options
+
+| Option | Feasibility | Notes |
+|--------|-------------|-------|
+| Full CARLA Docker | NOT VIABLE | No GPU passthrough on M1 Mac |
+| CARLA + VNC | NOT VIABLE | Same GPU issues |
+| Carlaviz Web Viewer | LIMITED | Shows 3D wireframe view only, not full graphics |
+| Pre-recorded Footage | POSSIBLE | Would need access to Windows/Linux machine with GPU |
+
+**Carlaviz Plugin:**
+- Provides web-based visualization at http://127.0.0.1:8080/
+- Shows actors, sensors, LIDAR data in simplified 3D view
+- NOT suitable for game-quality visuals (debug/visualization tool only)
+
+#### 3. RECOMMENDED APPROACH: React Three Fiber
+
+**Best Option: Browser-native 3D with React Three Fiber**
+
+| Criteria | React Three Fiber | CARLA Docker | Pre-recorded Video |
+|----------|-------------------|--------------|-------------------|
+| M1 Mac Compatible | YES | NO | YES |
+| Interactive | YES | YES | NO |
+| Setup Complexity | LOW | HIGH | MEDIUM |
+| Visual Quality | GOOD | EXCELLENT | EXCELLENT |
+| Development Time | 15-20 hours | N/A | 8-10 hours |
+| File Size Impact | ~500KB | N/A | ~100MB/track |
+
+**Tech Stack for Realistic Mode:**
+```bash
+npm install three @react-three/fiber @react-three/drei @react-three/cannon
+npm install -D @types/three
+```
+
+**Existing Reference Projects:**
+- [react-threejs-car-racing](https://github.com/sctlcd/react-threejs-car-racing) - Live demo at react-threejs-car-racing.vercel.app
+- [super-car-racing-three](https://github.com/hamidrezaghanbari/super-car-racing-three) - Live demo at supercar-racing.vercel.app
+
+**Free 3D Assets:**
+- Cars: [Low Poly Racing Cars on Sketchfab](https://sketchfab.com/3d-models/low-poly-racing-cars-polyscript-084ba9104ae74586b349e94db894c0fa)
+- Textures: [ambientCG.com](https://ambientcg.com/) for PBR road/asphalt
+- HDRI Skyboxes: [Poly Haven](https://polyhaven.com/)
+
+#### 4. Implementation Plan
+
+**Phase 1: Basic 3D Scene (2-3 hours)**
+- Install React Three Fiber dependencies
+- Create Canvas with perspective camera
+- Add ground plane and placeholder car
+- Add chase camera following car
+
+**Phase 2: Car Model & Physics (3-4 hours)**
+- Load GLTF car model
+- Add wheel rotation animation
+- Implement raycast vehicle physics
+- Add steering animation
+
+**Phase 3: Track Environment (4-5 hours)**
+- Generate road from existing centerLine data
+- Add PBR materials (asphalt texture, normals)
+- Add guardrails/barriers from boundary data
+- Add environment decorations
+
+**Phase 4: Effects & Polish (3-4 hours)**
+- Post-processing (bloom, motion blur)
+- Particle effects (tire smoke)
+- Skid marks/tire trails
+- Camera shake on collision
+
+**Phase 5: Integration (2-3 hours)**
+- Bridge with existing InputState
+- Reuse GameHUD overlay
+- Sync with ScoringSystem
+- Add 2D/3D toggle in settings
+
+**Files Created:**
+- `src/components/game/RealisticMode.tsx` - Placeholder component with detailed implementation plan
+
+**Decision:**
+Proceed with React Three Fiber approach. This provides:
+1. Full browser compatibility (no server/Docker needed)
+2. Works on M1 Mac development machine
+3. Interactive 3D with physics
+4. Reuses existing track data and game systems
+5. Reasonable development time (15-20 hours)
+
+**Alternative (Fallback):**
+If 3D development takes too long, pre-recorded video mode could work:
+- Record CARLA gameplay on a Windows/Linux machine
+- Sync video playback with game progress
+- Less interactive but achieves "impressive graphics" goal
+
