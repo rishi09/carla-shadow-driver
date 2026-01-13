@@ -220,6 +220,75 @@ Files changed:
 4. **Parallel integration** - Always do final merge sequentially
 5. **Skipping knowledge sharing** - Repeats mistakes
 6. **Long-running agents without checkpoints** - Risk of context loss
+7. **Skipping tests and declaring "done"** - Skipped tests are hidden bugs
+8. **Manager trusting without verifying** - Run the product manually before completion
+9. **Undocumented event contracts** - When components communicate via events, document the contract
+
+---
+
+## Pattern 9: Manager Verification Phase
+
+**Problem:** Multi-agent teams can declare completion while critical bugs remain.
+
+**Context:** During the Shadow Driver v2 project, 5+ agents worked in parallel. All tests passed, deployment succeeded, but the game didn't work because of an event emitter mismatch between Phaser and React. The bug was only discovered when a human actually tried to play the game.
+
+**Solution:** Add an explicit Manager Verification Phase before declaring any project complete.
+
+**Manager Verification Checklist:**
+```markdown
+## Pre-Completion Verification
+
+### 1. Test Results Audit
+- [ ] All tests pass (no failures)
+- [ ] No tests skipped without documented follow-up
+- [ ] Code coverage meets threshold
+
+### 2. Manual E2E Testing
+- [ ] Run the application in a real browser
+- [ ] Click through the entire primary user flow
+- [ ] Click through secondary flows
+- [ ] Take screenshots at each step
+- [ ] Test on mobile (if applicable)
+
+### 3. Integration Verification
+- [ ] All component interfaces documented
+- [ ] Event contracts between components verified
+- [ ] API contracts between services verified
+
+### 4. Edge Cases
+- [ ] Test with empty/null inputs
+- [ ] Test error states
+- [ ] Test offline/network failure modes
+
+### 5. Documentation
+- [ ] README updated
+- [ ] TEAM_KNOWLEDGE.md updated with learnings
+- [ ] Skills extracted for reuse
+```
+
+**Key Rule:** If you can't personally verify it works, it's not done.
+
+---
+
+## Pattern 10: Event Contract Documentation
+
+**Problem:** When multiple agents write code that communicates via events, mismatches occur.
+
+**Solution:** Create an Event Contract Registry in TEAM_KNOWLEDGE.md.
+
+**Template:**
+```markdown
+## Event Contract: [ComponentA] ↔ [ComponentB]
+
+| Event | Emitter | Emitter Object | Listener | Listener Object | Payload |
+|-------|---------|----------------|----------|-----------------|---------|
+| eventName | ComponentA | this.events / game.events | ComponentB | same | { type: Interface } |
+```
+
+**Rule:** Before implementing events:
+1. Document the contract first
+2. Both sides agree on the emitter object
+3. Write a simple test: emit → receive → log
 
 ---
 

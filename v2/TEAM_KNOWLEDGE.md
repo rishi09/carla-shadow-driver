@@ -1354,3 +1354,142 @@ These scenarios require manual browser testing:
 - Unit Tests: 209/213 passing (4 skipped)
 - Integration: Navigation tests need attention (Playwright recommended)
 - Cross-browser/Mobile: Checklists created for manual testing
+
+---
+
+## Post-Mortem: Critical Event Emitter Bug (F-007)
+
+### Incident Summary
+**Date:** 2026-01-12
+**Severity:** CRITICAL (Game would not start after selecting track)
+**Impact:** 100% of users could not play the game
+**Time to Discovery:** ~1 hour after "completion" declaration
+**Time to Fix:** 15 minutes once discovered
+
+### What Happened
+After the team declared the v2 game "complete" and deployed to Vercel, the game failed to start when a user selected a track. The Phaser canvas showed "Select a track to begin." even though a track had been selected.
+
+**Root Cause:** Event emitter mismatch between Phaser and React.
+
+```typescript
+// BootScene.ts (WRONG)
+this.events.emit('bootComplete');  // Scene-level emitter
+
+// GameContainer.tsx (Expected)
+game.events.once('bootComplete', ...)  // Game-level emitter
+```
+
+BootScene emitted `bootComplete` on `this.events` (scene's EventEmitter), but GameContainer was listening on `game.events` (game's EventEmitter). Different objects. Event never connected. Race never started.
+
+### Who Made the Mistake?
+
+| Role | Contribution to Bug | Accountability Level |
+|------|---------------------|----------------------|
+| **Technical Architect (RaceScene author)** | Used correct `this.game.events` pattern in RaceScene for some events but didn't review BootScene | LOW |
+| **Game Engine Specialist (BootScene author)** | Used `this.events` instead of `this.game.events` | **HIGH - Primary** |
+| **Integration Architect (GameContainer author)** | Assumed event contract without verification | **MEDIUM** |
+| **QA Integration Lead** | Skipped navigation tests citing "ESM module issues" | **HIGH** |
+| **Manager (Orchestrator)** | Declared completion without manual E2E verification | **HIGH - Ultimate** |
+
+### Why It Wasn't Caught
+
+1. **Unit Tests Passed**: All 209 unit tests passed because they mocked Phaser entirely
+2. **Integration Tests Skipped**: The QA agent skipped 4 navigation tests with the note "ESM module isolation issues with jest.unstable_mockModule"
+3. **No Browser E2E Testing**: No agent actually ran the game in a browser
+4. **No Event Contract Documentation**: The event API between BootScene ↔ GameContainer was never explicitly documented
+5. **Parallel Work Without Handoff**: BootScene and GameContainer were written by different agents without explicit contract verification
+6. **Manager Trust Without Verify**: The manager trusted test results without manual verification
+
+### Fix Applied
+
+```typescript
+// BootScene.ts (FIXED)
+// IMPORTANT: Use game.events (not this.events) so React can receive it
+this.game.events.emit('bootComplete');
+```
+
+### Lessons Learned
+
+#### For the Organization
+
+1. **Never Skip Tests**: If tests are skipped, document WHY and create a follow-up task. Skipped tests are hidden bugs.
+
+2. **Event Contracts Must Be Documented**: When multiple components communicate via events:
+   ```markdown
+   ## Event Contract: BootScene ↔ React
+   | Event | Emitter | Listener | Payload |
+   |-------|---------|----------|---------|
+   | bootComplete | game.events | GameContainer | none |
+   | startRace | game.events | BootScene | RaceSceneData |
+   ```
+
+3. **Browser E2E Testing is Non-Negotiable**: Unit tests are not sufficient. Before declaring any UI project complete:
+   - Run the app in a real browser
+   - Click through the entire user flow
+   - Take screenshots at each step
+
+4. **Trust But Verify**: Managers must:
+   - Run the product themselves before declaring completion
+   - Not accept "tests pass" as proof of functionality
+   - Question any skipped or disabled tests
+
+5. **Phaser Event Emitter Patterns**:
+   - `this.events` = Scene's event emitter (visible to other Phaser code in same scene)
+   - `this.game.events` = Game's global event emitter (visible to React and all scenes)
+   - For React ↔ Phaser communication, ALWAYS use `game.events`
+
+#### For Individual Agents
+
+**Game Engine Specialists:**
+- When emitting events for external consumers, use `this.game.events`
+- Document which events you emit and on which emitter
+
+**Integration Architects:**
+- Verify event contracts with a simple test: emit → receive → log
+- Don't assume the event contract; read the source
+
+**QA Leads:**
+- Never mark tests as "skipped" without a follow-up plan
+- If you can't test something, escalate to manager immediately
+- Browser testing > Unit testing for UI
+
+**Managers:**
+- Run the product yourself before declaring done
+- Treat skipped tests as bugs, not exceptions
+- Add "Manager Manual Verification" as a required phase
+
+### Action Items
+
+1. **[COMPLETED]** Fix the event emitter bug
+2. **[COMPLETED]** Deploy fix to Vercel
+3. **[PENDING]** Add Playwright E2E tests to CI/CD pipeline
+4. **[PENDING]** Create "Event Contract" section in TEAM_KNOWLEDGE.md for future projects
+5. **[PENDING]** Update multi-agent-orchestration skill with "Manager Verification Phase"
+
+### Skill/Agent Improvements Needed
+
+| Improvement | Priority | Description |
+|-------------|----------|-------------|
+| **E2E Browser Testing Agent** | HIGH | A dedicated agent that uses Playwright/Puppeteer to run through user flows before deployment |
+| **Event Contract Validator** | MEDIUM | An agent that verifies all inter-component events are correctly wired |
+| **Manager Verification Checklist** | HIGH | Explicit checklist requiring manual testing before "done" |
+| **Integration Contract Template** | MEDIUM | Standard template for documenting component APIs |
+
+---
+
+## Event Contract Registry
+
+### Phaser ↔ React Communication
+
+| Event | Emitter | Listener | Payload | Notes |
+|-------|---------|----------|---------|-------|
+| `bootComplete` | `game.events` | GameContainer | none | Signals assets loaded |
+| `startRace` | `game.events` | BootScene | `RaceSceneData` | Triggers scene transition |
+| `gameState` | `raceScene.events` | GameContainer | `RaceHUDState` | Updates HUD every frame |
+| `raceStart` | `raceScene.events` | GameContainer | none | Race begins |
+| `raceComplete` | `raceScene.events` | GameContainer | `{ playerResult, aiResult, winner }` | Race ends |
+| `countdownUpdate` | `raceScene.events` | - | `string` | Countdown value |
+| `checkpointHit` | `raceScene.events` | - | `{ player, checkpointId }` | Checkpoint crossed |
+| `lapComplete` | `raceScene.events` | - | `{ player, lap }` | Lap finished |
+
+**CRITICAL**: For events crossing from Phaser to React, use `game.events` (global). For events within Phaser scenes, `scene.events` (local) is acceptable.
