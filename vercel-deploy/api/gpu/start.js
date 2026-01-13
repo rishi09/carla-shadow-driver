@@ -46,18 +46,35 @@ export default async function handler(req, res) {
       });
     }
 
+    // Get ngrok authtoken from environment
+    const NGROK_AUTHTOKEN = process.env.NGROK_AUTHTOKEN;
+    if (!NGROK_AUTHTOKEN) {
+      return res.status(500).json({
+        error: 'NGROK_AUTHTOKEN not configured',
+        hint: 'Add your ngrok authtoken to Vercel environment variables. Get one free at https://dashboard.ngrok.com/get-started/your-authtoken'
+      });
+    }
+
     // Startup script that runs when the instance boots
     const onstart = `#!/bin/bash
 set -e
 
+# Install system dependencies for OpenCV
+apt-get update && apt-get install -y libgl1-mesa-glx libglib2.0-0 --no-install-recommends
+
 cd /workspace
 git clone https://github.com/rishi09/carla-shadow-driver.git
 cd carla-shadow-driver
+
+# Install Python dependencies
 pip install -r requirements.txt
 pip install pyngrok
 
 # Download the model
 python scripts/download_model.py pilotnet
+
+# Configure ngrok authtoken
+ngrok config add-authtoken ${NGROK_AUTHTOKEN}
 
 # Start ngrok tunnel and save URL
 python -c "

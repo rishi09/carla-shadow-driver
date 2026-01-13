@@ -42,3 +42,5 @@ logs/
 # Keep directory structure
 !data/recordings/.gitkeep
 !models/.gitkeep
+.vercel
+.env*.local
