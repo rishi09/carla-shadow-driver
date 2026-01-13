@@ -56,14 +56,13 @@ export default async function handler(req, res) {
 
     return res.status(200).json({
       instance_id: instance_id,
-      status: instance.actual_status || instance.status_msg || 'unknown',
+      status: instance.cur_state || instance.actual_status || instance.status_msg || 'unknown',
       ngrok_url: ngrok_url,
       gpu_name: instance.gpu_name || instance.machine_id,
       cost_so_far: instance.total_cost || 0,
       uptime_seconds: instance.duration || 0,
       ssh_host: instance.ssh_host,
-      ssh_port: instance.ssh_port,
-      cur_state: instance.cur_state
+      ssh_port: instance.ssh_port
     });
 
   } catch (error) {
