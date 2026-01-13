@@ -5,6 +5,8 @@
 
 **An interactive autonomous driving simulator with shadow mode** - compare your driving to AI in real-time.
 
+> **New: Shadow Driver v2** - A complete game overhaul with React, TypeScript, Phaser.js, and modern UI. See [v2/README.md](v2/README.md) for details.
+
 ## Live Demo
 
 **[Try it now](https://carla-shadow-driver.vercel.app)** - No installation required!

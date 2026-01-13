@@ -1,73 +1,108 @@
-# React + TypeScript + Vite
+# Shadow Driver v2
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A complete game overhaul of the CARLA Shadow Driver racing game with modern web technologies.
 
-Currently, two official plugins are available:
+## Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+### Game Modes
+- **Head-to-Head** - Race against AI opponents in real-time
+- **Time Trial** - Beat your personal best and compete on leaderboards
 
-## React Compiler
+### Tracks
+| Track | Difficulty | Checkpoints | Description |
+|-------|------------|-------------|-------------|
+| Sunset Speedway | Easy | 3 | Wide oval for beginners |
+| Mountain Pass | Medium | 5 | S-curves with cones |
+| Nightmare Circuit | Hard | 7 | Hairpins with barriers |
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+### AI Personalities
+| Model | Style | Behavior |
+|-------|-------|----------|
+| PilotNet | Smooth | NVIDIA-style end-to-end driving |
+| Alpamayo | Anticipatory | Early obstacle detection |
+| Aggressive | Fast | Tight corners, late braking |
+| Cautious | Safe | Wide margins, early reactions |
+| Drunk | Chaotic | Wobbly, unpredictable (for fun!) |
 
-## Expanding the ESLint configuration
+### Core Features
+- Arcade-style car physics with damage system
+- Collision detection with crash penalties
+- Scoring system with bonuses for perfect laps
+- Checkpoint validation (no route cutting!)
+- Persistent leaderboards via localStorage
+- Mobile touch controls with virtual joystick
+- Procedural audio (engine, collisions, checkpoints)
+- Glass-morphism UI design
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+## Tech Stack
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+- **React 19** - UI framework
+- **TypeScript** - Type safety
+- **Vite** - Build tool
+- **Phaser 3** - Game engine
+- **Tailwind CSS v4** - Styling
+- **Jest** - Testing
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+## Quick Start
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+# Install dependencies
+npm install
+
+# Start development server
+npm run dev
+
+# Run tests
+npm test
+
+# Build for production
+npm run build
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Project Structure
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
 ```
+v2/
+├── src/
+│   ├── components/       # React UI components
+│   │   ├── game/        # GameHUD, MobileControls, etc.
+│   │   ├── layout/      # Header, Footer, Layout
+│   │   ├── menu/        # MainMenu, TrackSelect
+│   │   └── results/     # ResultsScreen
+│   ├── game/            # Phaser game code
+│   │   ├── objects/     # Car, TrackRenderer
+│   │   ├── scenes/      # BootScene, RaceScene
+│   │   └── systems/     # AI, Collision, Scoring, Audio
+│   ├── hooks/           # Custom React hooks
+│   ├── tests/           # Jest test files
+│   └── types/           # TypeScript definitions
+├── public/
+│   └── assets/
+│       └── tracks/      # Track JSON files
+└── TEAM_KNOWLEDGE.md    # Architecture decisions log
+```
+
+## Architecture Highlights
+
+- **Phaser + React Integration**: Uses refs and factory pattern for lifecycle management
+- **Event-Driven Communication**: Phaser scenes emit events to React for HUD updates
+- **Tailwind v4**: CSS-first configuration with `@theme` directive
+- **Procedural Audio**: Web Audio API synthesis (no audio files needed)
+
+## Deployment
+
+The game builds to static files and can be deployed to any static host:
+
+```bash
+npm run build
+# Output in dist/
+```
+
+Recommended hosts:
+- Vercel (zero config)
+- Netlify
+- GitHub Pages
+
+## License
+
+MIT License
