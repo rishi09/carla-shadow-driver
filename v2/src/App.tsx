@@ -3,16 +3,16 @@ import { Layout, type NavigationPage } from './components/layout';
 import { MainMenu } from './components/menu';
 import { TrackSelect } from './components/menu/TrackSelect';
 import { HowToPlay } from './components/menu/HowToPlay';
-import { GameContainer } from './components/game/GameContainer';
+import { GameContainer, GPUConnectionModal } from './components/game';
 import { ResultsScreen, type RaceResult } from './components/results/ResultsScreen';
-import { useMobileDetect } from './hooks';
+import { useMobileDetect, useGPUConnection } from './hooks';
 import type { GameMode, Difficulty } from './types/game';
 import './index.css';
 
 /**
  * Navigation view states for the application
  */
-type View = 'menu' | 'track-select' | 'game' | 'results' | 'leaderboard' | 'how-to-play';
+type View = 'menu' | 'track-select' | 'gpu-select' | 'game' | 'results' | 'leaderboard' | 'how-to-play';
 
 /**
  * Track timing data for medal calculations
@@ -46,6 +46,7 @@ interface AppState {
   raceResult: RaceResult | null;
   aiResult: RaceResult | null;
   winner: 'player' | 'ai' | null;
+  useRealGPU: boolean; // Whether to use real GPU for AI
 }
 
 /**
@@ -58,6 +59,7 @@ const initialState: AppState = {
   raceResult: null,
   aiResult: null,
   winner: null,
+  useRealGPU: false,
 };
 
 /**
@@ -76,6 +78,9 @@ function App() {
   const [state, setState] = useState<AppState>(initialState);
   const isMobile = useMobileDetect();
 
+  // GPU connection hook for real AI racing
+  const gpu = useGPUConnection();
+
   /**
    * Handle mode selection from MainMenu
    * Navigates to track selection screen
@@ -90,18 +95,33 @@ function App() {
 
   /**
    * Handle track selection from TrackSelect
-   * Navigates to game view
+   * For head-to-head, shows GPU selection modal first
+   * For time-trial, goes directly to game
    */
   const handleTrackSelect = useCallback((trackId: string) => {
-    setState(s => ({
-      ...s,
-      selectedTrack: trackId,
-      currentView: 'game',
-      // Clear previous results when starting new race
-      raceResult: null,
-      aiResult: null,
-      winner: null,
-    }));
+    setState(s => {
+      // For head-to-head mode, show GPU selection first
+      if (s.selectedMode === 'head-to-head') {
+        return {
+          ...s,
+          selectedTrack: trackId,
+          currentView: 'gpu-select' as View,
+          raceResult: null,
+          aiResult: null,
+          winner: null,
+        };
+      }
+      // For time-trial, go directly to game
+      return {
+        ...s,
+        selectedTrack: trackId,
+        currentView: 'game' as View,
+        raceResult: null,
+        aiResult: null,
+        winner: null,
+        useRealGPU: false,
+      };
+    });
   }, []);
 
   /**
@@ -157,6 +177,56 @@ function App() {
   }, []);
 
   /**
+   * Handle starting GPU from GPU modal
+   */
+  const handleStartGPU = useCallback(async () => {
+    await gpu.startGPU();
+  }, [gpu]);
+
+  /**
+   * Handle stopping GPU from GPU modal
+   */
+  const handleStopGPU = useCallback(async () => {
+    await gpu.stopGPU();
+  }, [gpu]);
+
+  /**
+   * Handle proceeding with real GPU after connection
+   */
+  const handleProceedWithGPU = useCallback(() => {
+    setState(s => ({
+      ...s,
+      currentView: 'game' as View,
+      useRealGPU: true,
+    }));
+  }, []);
+
+  /**
+   * Handle proceeding with local AI (no GPU)
+   */
+  const handleProceedWithLocalAI = useCallback(() => {
+    setState(s => ({
+      ...s,
+      currentView: 'game' as View,
+      useRealGPU: false,
+    }));
+  }, []);
+
+  /**
+   * Handle closing GPU modal (back to track select)
+   */
+  const handleCloseGPUModal = useCallback(() => {
+    // If GPU was started but user cancels, stop it
+    if (gpu.provisioningState !== 'idle') {
+      gpu.stopGPU();
+    }
+    setState(s => ({
+      ...s,
+      currentView: 'track-select' as View,
+    }));
+  }, [gpu]);
+
+  /**
    * Handle header navigation
    */
   const handleHeaderNavigate = useCallback((page: NavigationPage) => {
@@ -202,9 +272,18 @@ function App() {
     ? getTrackTiming(state.selectedTrack)
     : { parTime: 60000, goldTime: 45000 };
 
+  /**
+   * Get GPU status for footer display
+   */
+  const getGPUStatus = (): 'connected' | 'disconnected' | 'connecting' => {
+    if (gpu.isConnected) return 'connected';
+    if (gpu.provisioningState === 'starting' || gpu.connectionState === 'connecting') return 'connecting';
+    return 'disconnected';
+  };
+
   return (
     <Layout
-      gpuStatus="disconnected"
+      gpuStatus={getGPUStatus()}
       showHeader={state.currentView !== 'game'}
       showFooter={state.currentView !== 'game'}
       onNavigate={handleHeaderNavigate}
@@ -221,6 +300,28 @@ function App() {
           mode={state.selectedMode}
           onSelectTrack={handleTrackSelect}
           onBack={handleBackToMenu}
+        />
+      )}
+
+      {/* GPU Selection View (for head-to-head mode) */}
+      {state.currentView === 'gpu-select' && (
+        <GPUConnectionModal
+          isOpen={true}
+          onClose={handleCloseGPUModal}
+          gpuStatus={gpu.provisioningState}
+          wsStatus={gpu.connectionState}
+          gpuInfo={gpu.instanceData.gpu_name ? {
+            gpu_name: gpu.instanceData.gpu_name,
+            price_per_hour: gpu.instanceData.price_per_hour || 0,
+            cost_so_far: gpu.instanceData.cost_so_far,
+            uptime_seconds: gpu.instanceData.uptime_seconds,
+            tunnel_url: gpu.instanceData.tunnel_url || undefined,
+          } : null}
+          error={gpu.error?.message || null}
+          onStartGPU={handleStartGPU}
+          onStopGPU={handleStopGPU}
+          onProceedWithLocalAI={handleProceedWithLocalAI}
+          onProceedWithGPU={handleProceedWithGPU}
         />
       )}
 
