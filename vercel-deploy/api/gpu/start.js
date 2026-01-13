@@ -1,28 +1,47 @@
 // Provisions a new GPU instance on Vast.ai
-// Uses Vercel KV for persistent storage across cold starts
+// Uses Upstash Redis for persistent storage across cold starts
 
-import { kv } from '@vercel/kv';
+import { Redis } from '@upstash/redis';
 
-// Fallback to in-memory if KV not configured
-const useKV = process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN;
+// Lazy initialization for Redis client
+let redis = null;
+let useRedis = false;
+let initialized = false;
+
+function initRedis() {
+  if (initialized) return;
+  initialized = true;
+
+  if (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) {
+    redis = new Redis({
+      url: process.env.UPSTASH_REDIS_REST_URL,
+      token: process.env.UPSTASH_REDIS_REST_TOKEN,
+    });
+    useRedis = true;
+    console.log('[Redis] Upstash Redis initialized');
+  } else {
+    console.warn('[Redis] No Upstash credentials found, using in-memory fallback');
+  }
+}
 
 // In-memory fallback
 if (!global.tunnelUrls) {
   global.tunnelUrls = {};
 }
 
-// Helper to set data in KV or memory
+// Helper to set data in Redis or memory
 async function setData(key, data) {
-  if (useKV) {
+  initRedis();
+  if (useRedis) {
     try {
-      await kv.set(`gpu:${key}`, data, { ex: 3600 }); // 1 hour TTL
-      console.log(`[KV] Stored data for ${key}`);
+      await redis.set(`gpu:${key}`, JSON.stringify(data), { ex: 3600 }); // 1 hour TTL
+      console.log(`[Redis] Stored data for ${key}`);
     } catch (e) {
-      console.error('KV set error:', e);
+      console.error('Redis set error:', e);
       global.tunnelUrls[key] = data;
     }
   } else {
-    console.warn('[WARN] KV not configured, using in-memory (will lose data on cold start)');
+    console.warn('[WARN] Redis not configured, using in-memory (will lose data on cold start)');
     global.tunnelUrls[key] = data;
   }
 }
@@ -40,6 +59,9 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
+
+  // Initialize Redis on first request
+  initRedis();
 
   const VASTAI_API_KEY = process.env.VASTAI_API_KEY;
 
@@ -174,7 +196,7 @@ wait $WS_PID
           const instance = await createResponse.json();
           const instanceId = instance.new_contract;
 
-          // Store the offer ID -> instance ID mapping in KV for callback lookup
+          // Store the offer ID -> instance ID mapping in Redis for callback lookup
           await setData(`offer_${offer.id}`, { pending: true, instance_id: instanceId });
 
           return res.status(200).json({
@@ -184,7 +206,7 @@ wait $WS_PID
             gpu_name: offer.gpu_name,
             price_per_hour: offer.dph_total,
             estimated_ready: '2-3 minutes',
-            using_kv: useKV
+            using_redis: useRedis
           });
         }
 

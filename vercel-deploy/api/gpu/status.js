@@ -1,25 +1,44 @@
 // Check GPU instance status on Vast.ai
 // Also checks for tunnel URL and setup status from callback store
-// Uses Vercel KV for persistent storage across cold starts
+// Uses Upstash Redis for persistent storage across cold starts
 
-import { kv } from '@vercel/kv';
+import { Redis } from '@upstash/redis';
 
-// Fallback to in-memory if KV not configured
-const useKV = process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN;
+// Lazy initialization for Redis client
+let redis = null;
+let useRedis = false;
+let initialized = false;
+
+function initRedis() {
+  if (initialized) return;
+  initialized = true;
+
+  if (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) {
+    redis = new Redis({
+      url: process.env.UPSTASH_REDIS_REST_URL,
+      token: process.env.UPSTASH_REDIS_REST_TOKEN,
+    });
+    useRedis = true;
+    console.log('[Redis] Upstash Redis initialized');
+  } else {
+    console.warn('[Redis] No Upstash credentials found, using in-memory fallback');
+  }
+}
 
 // In-memory fallback
 if (!global.tunnelUrls) {
   global.tunnelUrls = {};
 }
 
-// Helper to get data from KV or memory
+// Helper to get data from Redis or memory
 async function getData(instanceId) {
-  if (useKV) {
+  initRedis();
+  if (useRedis) {
     try {
-      const data = await kv.get(`gpu:${instanceId}`);
+      const data = await redis.get(`gpu:${instanceId}`);
       return data || null;
     } catch (e) {
-      console.error('KV get error:', e);
+      console.error('Redis get error:', e);
       return global.tunnelUrls[instanceId] || null;
     }
   }
@@ -39,6 +58,9 @@ export default async function handler(req, res) {
   if (req.method !== 'GET') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
+
+  // Initialize Redis on first request
+  initRedis();
 
   const { instance_id, offer_id } = req.query;
 
@@ -75,13 +97,23 @@ export default async function handler(req, res) {
       });
     }
 
-    // Check for tunnel URL and status from KV or memory store
+    // Check for tunnel URL and status from Redis or memory store
     // Try instance_id first, then offer_id
     let callbackData = await getData(instance_id);
 
     // Also try with offer_id if provided and no data found
     if (!callbackData && offer_id) {
       callbackData = await getData(offer_id);
+    }
+
+    // Parse if string (legacy format or double-serialized)
+    if (typeof callbackData === 'string') {
+      try {
+        callbackData = JSON.parse(callbackData);
+      } catch (e) {
+        // If parse fails, it's just a URL string
+        callbackData = { tunnel_url: callbackData };
+      }
     }
 
     // Extract tunnel info
@@ -93,8 +125,6 @@ export default async function handler(req, res) {
       tunnel_url = callbackData.tunnel_url || null;
       setup_status = callbackData.status || null;
       setup_message = callbackData.message || null;
-    } else if (typeof callbackData === 'string') {
-      tunnel_url = callbackData;
     }
 
     return res.status(200).json({
@@ -109,7 +139,7 @@ export default async function handler(req, res) {
       uptime_seconds: instance.duration || 0,
       ssh_host: instance.ssh_host,
       ssh_port: instance.ssh_port,
-      using_kv: useKV
+      using_redis: useRedis
     });
 
   } catch (error) {
