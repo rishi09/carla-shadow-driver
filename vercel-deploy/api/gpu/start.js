@@ -1,4 +1,32 @@
 // Provisions a new GPU instance on Vast.ai
+// Uses Vercel KV for persistent storage across cold starts
+
+import { kv } from '@vercel/kv';
+
+// Fallback to in-memory if KV not configured
+const useKV = process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN;
+
+// In-memory fallback
+if (!global.tunnelUrls) {
+  global.tunnelUrls = {};
+}
+
+// Helper to set data in KV or memory
+async function setData(key, data) {
+  if (useKV) {
+    try {
+      await kv.set(`gpu:${key}`, data, { ex: 3600 }); // 1 hour TTL
+      console.log(`[KV] Stored data for ${key}`);
+    } catch (e) {
+      console.error('KV set error:', e);
+      global.tunnelUrls[key] = data;
+    }
+  } else {
+    console.warn('[WARN] KV not configured, using in-memory (will lose data on cold start)');
+    global.tunnelUrls[key] = data;
+  }
+}
+
 export default async function handler(req, res) {
   // Set CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -146,9 +174,8 @@ wait $WS_PID
           const instance = await createResponse.json();
           const instanceId = instance.new_contract;
 
-          // Also store the offer ID -> instance ID mapping for callback lookup
-          if (!global.tunnelUrls) global.tunnelUrls = {};
-          global.tunnelUrls[`offer_${offer.id}`] = { pending: true, instance_id: instanceId };
+          // Store the offer ID -> instance ID mapping in KV for callback lookup
+          await setData(`offer_${offer.id}`, { pending: true, instance_id: instanceId });
 
           return res.status(200).json({
             instance_id: instanceId,
@@ -156,7 +183,8 @@ wait $WS_PID
             status: 'starting',
             gpu_name: offer.gpu_name,
             price_per_hour: offer.dph_total,
-            estimated_ready: '2-3 minutes'
+            estimated_ready: '2-3 minutes',
+            using_kv: useKV
           });
         }
 

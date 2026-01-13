@@ -1493,3 +1493,108 @@ this.game.events.emit('bootComplete');
 | `lapComplete` | `raceScene.events` | - | `{ player, lap }` | Lap finished |
 
 **CRITICAL**: For events crossing from Phaser to React, use `game.events` (global). For events within Phaser scenes, `scene.events` (local) is acceptable.
+
+---
+
+## Infrastructure Lessons Learned
+
+### INFRA-001: Serverless Cold Start Bug (January 2025)
+
+**Incident:** GPU "Starting server..." spinner ran forever. User waited 5+ minutes.
+
+**Root Cause:** Vercel serverless functions use in-memory storage (`global.tunnelUrls`) which is lost on cold starts. GPU callback sent tunnel URL successfully, but by the time browser polled, the function had cold-started and lost the data.
+
+**Fix:** Replaced in-memory storage with Vercel KV (persistent key-value store).
+
+**Files Changed:**
+- `vercel-deploy/api/gpu/callback.js` - Added KV storage
+- `vercel-deploy/api/gpu/status.js` - Added KV reads
+- `vercel-deploy/api/gpu/start.js` - Added KV for offer mapping
+- `vercel-deploy/package.json` - Added @vercel/kv dependency
+
+**Pattern:**
+```javascript
+// ❌ WRONG - Data lost on cold start
+if (!global.tunnelUrls) global.tunnelUrls = {};
+global.tunnelUrls[id] = data;
+
+// ✅ CORRECT - Persists across cold starts
+import { kv } from '@vercel/kv';
+await kv.set(`gpu:${id}`, data, { ex: 3600 });
+```
+
+**Lesson:** In serverless, assume every function invocation starts with amnesia. Use external storage (KV, Redis, DB) for any state that must persist across requests.
+
+**Required Setup:** Set up Vercel KV in dashboard and connect to project.
+
+---
+
+### INFRA-002: API URL Resolution Bug (January 2025)
+
+**Incident:** "Unexpected token '<'" JSON parse error. Game wouldn't start GPU.
+
+**Root Cause:** Frontend used relative URL `/api/gpu/start` which resolved to wrong domain. Frontend at `v2-sigma-lemon.vercel.app`, API at `carla-shadow-driver.vercel.app`.
+
+**Fix:** Changed to absolute URLs with explicit API_BASE_URL.
+
+**File Changed:** `v2/src/hooks/useGPUConnection.ts`
+
+**Pattern:**
+```typescript
+// ❌ WRONG - Resolves to current domain
+fetch('/api/gpu/start');
+
+// ✅ CORRECT - Explicit domain
+const API_BASE_URL = 'https://carla-shadow-driver.vercel.app';
+fetch(`${API_BASE_URL}/api/gpu/start`);
+```
+
+**Lesson:** When frontend and API are separate Vercel projects, ALWAYS use absolute URLs. Verify with curl after deploy.
+
+---
+
+### INFRA-003: Incomplete Audit Pattern
+
+**Incident:** Fixed KV in callback.js and status.js, but missed start.js. Same bug pattern in 3rd file.
+
+**Root Cause:** No systematic audit process. Fixed files one-by-one without grepping for all instances.
+
+**Fix:** Created infrastructure-audit-agent template and grep-first workflow.
+
+**Pattern:**
+```bash
+# BEFORE fixing anything, find ALL instances
+grep -r "global\." vercel-deploy/
+grep -r "in-memory" vercel-deploy/
+
+# Then fix ALL files, not just the one that broke
+```
+
+**Lesson:** When fixing a pattern bug, grep for ALL instances first. Don't assume the bug only exists in the file where it was discovered.
+
+---
+
+## Organizational Patterns
+
+### ORG-001: Mandatory Pre-Deploy Checklist
+
+Before declaring any work complete, run through `.claude/CLAUDE.md` checklist:
+1. API Smoke Test - curl every endpoint
+2. Serverless State Check - verify KV enabled
+3. Async Flow Check - test multi-step operations
+4. Failure Mode Questions - ask "what if?"
+
+### ORG-002: Skill Consultation Before Work
+
+Before starting implementation:
+1. Read TEAM_KNOWLEDGE.md for context
+2. Consult relevant skills (serverless-patterns, deployment-contract, etc.)
+3. Run failure-mode-checklist questions
+
+### ORG-003: Infrastructure Audit Agent
+
+For any serverless code changes, spawn infrastructure-audit-agent to:
+1. Grep for anti-patterns (`global.`, in-memory storage, relative URLs)
+2. Verify state persistence strategy
+3. Check for cold start resilience
+4. Validate cross-project API contracts

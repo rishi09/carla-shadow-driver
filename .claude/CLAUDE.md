@@ -64,8 +64,41 @@ Use these skills during development:
 | `serverless-patterns.md` | Working with Vercel functions, state storage |
 | `deployment-contract-validator.md` | Cross-project API integration |
 | `e2e-browser-testing.md` | Testing complete user flows |
+| `infrastructure-audit-agent.md` | Auditing serverless code for anti-patterns |
 | `multi-agent-orchestration.md` | Managing parallel agent work |
 | `retrospective-agent.md` | After bugs are discovered |
+
+---
+
+## Agent Team Structure
+
+When spawning multiple agents, ALWAYS include these roles:
+
+| Role | Responsibility | When to Spawn |
+|------|----------------|---------------|
+| **Game Engine Lead** | Core logic, physics, AI | Game feature work |
+| **UI/UX Lead** | Components, styling | Frontend changes |
+| **QA Lead** | Testing, bug fixes | Always |
+| **Infrastructure Audit** | Serverless patterns, state, URLs | Any API/serverless work |
+
+**CRITICAL:** The Infrastructure Audit agent must run for ANY serverless code changes. It prevented 3 bugs from shipping (cold start × 3 files).
+
+### Agent Workflow
+
+1. **Before Implementation:**
+   - Read TEAM_KNOWLEDGE.md (v2/TEAM_KNOWLEDGE.md)
+   - Read relevant skills
+   - Run failure-mode-checklist questions
+
+2. **During Implementation:**
+   - Update TEAM_KNOWLEDGE.md with decisions
+   - Commit frequently (every 30-60 min)
+
+3. **Before Declaring Done:**
+   - Run infrastructure audit (grep for anti-patterns)
+   - Run pre-deploy checklist (this file)
+   - Curl all API endpoints
+   - Click through user flow in browser
 
 ---
 
