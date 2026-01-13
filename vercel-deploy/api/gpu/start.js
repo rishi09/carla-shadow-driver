@@ -32,11 +32,11 @@ export default async function handler(req, res) {
 
     const offers = await searchResponse.json();
 
-    // Filter for suitable GPUs (24GB+ VRAM, good reliability, reasonable price)
+    // Filter for suitable GPUs (16GB+ VRAM, decent reliability, reasonable price)
     const suitable = (offers.offers || []).filter(o =>
-      o.gpu_ram >= 24000 &&
-      o.reliability >= 0.95 &&
-      o.dph_total < 0.80  // Max $0.80/hr
+      o.gpu_ram >= 16000 &&
+      o.reliability >= 0.90 &&
+      o.dph_total < 1.00  // Max $1.00/hr
     ).sort((a, b) => a.dph_total - b.dph_total);
 
     if (suitable.length === 0) {
@@ -45,8 +45,6 @@ export default async function handler(req, res) {
         hint: 'Try again in a few minutes or adjust requirements'
       });
     }
-
-    const cheapest = suitable[0];
 
     // Startup script that runs when the instance boots
     const onstart = `#!/bin/bash
@@ -96,34 +94,54 @@ sleep 5
 python src/shadow_mode.py --websocket --port 5001
 `;
 
-    // Create instance
-    const createResponse = await fetch(`https://console.vast.ai/api/v0/asks/${cheapest.id}/`, {
-      method: 'PUT',
-      headers: {
-        'Authorization': `Bearer ${VASTAI_API_KEY}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        client_id: 'carla-shadow-driver',
-        image: 'pytorch/pytorch:2.1.0-cuda12.1-cudnn8-runtime',
-        disk: 20,
-        onstart: onstart
-      })
-    });
+    // Try up to 5 different offers in case some are already taken
+    const maxRetries = Math.min(5, suitable.length);
+    let lastError = null;
 
-    if (!createResponse.ok) {
-      const errorText = await createResponse.text();
-      return res.status(502).json({ error: 'Failed to create instance', details: errorText });
+    for (let i = 0; i < maxRetries; i++) {
+      const offer = suitable[i];
+
+      try {
+        const createResponse = await fetch(`https://console.vast.ai/api/v0/asks/${offer.id}/`, {
+          method: 'PUT',
+          headers: {
+            'Authorization': `Bearer ${VASTAI_API_KEY}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            client_id: 'carla-shadow-driver',
+            image: 'pytorch/pytorch:2.1.0-cuda12.1-cudnn8-runtime',
+            disk: 20,
+            onstart: onstart
+          })
+        });
+
+        if (createResponse.ok) {
+          const instance = await createResponse.json();
+          return res.status(200).json({
+            instance_id: instance.new_contract,
+            status: 'starting',
+            gpu_name: offer.gpu_name,
+            price_per_hour: offer.dph_total,
+            estimated_ready: '2-3 minutes'
+          });
+        }
+
+        // If this offer failed, save error and try next
+        lastError = await createResponse.text();
+        console.log(`Offer ${offer.id} failed, trying next...`);
+
+      } catch (e) {
+        lastError = e.message;
+        console.log(`Offer ${offer.id} error: ${e.message}, trying next...`);
+      }
     }
 
-    const instance = await createResponse.json();
-
-    return res.status(200).json({
-      instance_id: instance.new_contract,
-      status: 'starting',
-      gpu_name: cheapest.gpu_name,
-      price_per_hour: cheapest.dph_total,
-      estimated_ready: '2-3 minutes'
+    // All retries failed
+    return res.status(502).json({
+      error: 'Failed to create instance after multiple attempts',
+      details: lastError,
+      hint: 'GPU offers are being claimed quickly. Please try again.'
     });
 
   } catch (error) {
