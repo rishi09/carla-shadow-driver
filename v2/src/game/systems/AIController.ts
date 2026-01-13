@@ -431,9 +431,11 @@ export class AIController {
     const adjustedThrottle = output.throttle * speedMod;
 
     // Convert to boolean throttle/brake (threshold-based)
+    // NOTE: Threshold lowered to 0.25 to ensure throttle works with
+    // difficulty speed modifiers (e.g., easy = 0.7, medium = 0.85)
     return {
       steer: clampSteer(steer),
-      throttle: adjustedThrottle > 0.4,
+      throttle: adjustedThrottle > 0.25,
       brake: output.brake > 0.3,
     };
   }

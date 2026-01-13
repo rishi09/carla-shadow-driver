@@ -2,9 +2,11 @@ import { useState } from 'react';
 
 interface HeaderProps {
   className?: string;
+  onNavigate?: (page: 'home' | 'leaderboard' | 'how-to-play') => void;
+  currentPage?: 'home' | 'leaderboard' | 'how-to-play';
 }
 
-export function Header({ className = '' }: HeaderProps) {
+export function Header({ className = '', onNavigate, currentPage = 'home' }: HeaderProps) {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   return (
@@ -44,21 +46,39 @@ export function Header({ className = '' }: HeaderProps) {
               <div className="absolute inset-0 rounded-full bg-gradient-to-br from-human to-ai opacity-50 animate-ping" />
             </div>
 
-            <div>
+            <button
+              onClick={() => onNavigate?.('home')}
+              className="text-left"
+            >
               <h1 className="text-xl font-bold text-white tracking-tight">
                 Shadow Driver
               </h1>
               <p className="text-xs text-white/50">
                 Human vs AI Racing
               </p>
-            </div>
+            </button>
           </div>
 
           {/* Navigation */}
           <nav className="hidden md:flex items-center gap-8">
-            <NavLink href="#" active>Home</NavLink>
-            <NavLink href="#">Leaderboard</NavLink>
-            <NavLink href="#">How to Play</NavLink>
+            <NavButton
+              onClick={() => onNavigate?.('home')}
+              active={currentPage === 'home'}
+            >
+              Home
+            </NavButton>
+            <NavButton
+              onClick={() => onNavigate?.('leaderboard')}
+              active={currentPage === 'leaderboard'}
+            >
+              Leaderboard
+            </NavButton>
+            <NavButton
+              onClick={() => onNavigate?.('how-to-play')}
+              active={currentPage === 'how-to-play'}
+            >
+              How to Play
+            </NavButton>
           </nav>
 
           {/* Settings Button */}
@@ -92,16 +112,16 @@ export function Header({ className = '' }: HeaderProps) {
   );
 }
 
-interface NavLinkProps {
-  href: string;
+interface NavButtonProps {
+  onClick: () => void;
   children: React.ReactNode;
   active?: boolean;
 }
 
-function NavLink({ href, children, active = false }: NavLinkProps) {
+function NavButton({ onClick, children, active = false }: NavButtonProps) {
   return (
-    <a
-      href={href}
+    <button
+      onClick={onClick}
       className={`
         relative text-sm font-medium
         transition-colors duration-200
@@ -112,6 +132,6 @@ function NavLink({ href, children, active = false }: NavLinkProps) {
       {active && (
         <span className="absolute -bottom-1 left-0 right-0 h-0.5 bg-gradient-to-r from-human to-ai rounded-full" />
       )}
-    </a>
+    </button>
   );
 }

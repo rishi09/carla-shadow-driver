@@ -1,7 +1,8 @@
 import { useState, useCallback } from 'react';
-import { Layout } from './components/layout';
+import { Layout, type NavigationPage } from './components/layout';
 import { MainMenu } from './components/menu';
 import { TrackSelect } from './components/menu/TrackSelect';
+import { HowToPlay } from './components/menu/HowToPlay';
 import { GameContainer } from './components/game/GameContainer';
 import { ResultsScreen, type RaceResult } from './components/results/ResultsScreen';
 import { useMobileDetect } from './hooks';
@@ -11,7 +12,7 @@ import './index.css';
 /**
  * Navigation view states for the application
  */
-type View = 'menu' | 'track-select' | 'game' | 'results';
+type View = 'menu' | 'track-select' | 'game' | 'results' | 'leaderboard' | 'how-to-play';
 
 /**
  * Track timing data for medal calculations
@@ -156,6 +157,28 @@ function App() {
   }, []);
 
   /**
+   * Handle header navigation
+   */
+  const handleHeaderNavigate = useCallback((page: NavigationPage) => {
+    if (page === 'home') {
+      setState(initialState);
+    } else if (page === 'leaderboard') {
+      setState(s => ({ ...s, currentView: 'leaderboard' }));
+    } else if (page === 'how-to-play') {
+      setState(s => ({ ...s, currentView: 'how-to-play' }));
+    }
+  }, []);
+
+  /**
+   * Get current page for header navigation highlighting
+   */
+  const getCurrentPage = (): NavigationPage => {
+    if (state.currentView === 'leaderboard') return 'leaderboard';
+    if (state.currentView === 'how-to-play') return 'how-to-play';
+    return 'home';
+  };
+
+  /**
    * Get difficulty based on selected track
    * Maps track difficulty to AI difficulty setting
    */
@@ -184,6 +207,8 @@ function App() {
       gpuStatus="disconnected"
       showHeader={state.currentView !== 'game'}
       showFooter={state.currentView !== 'game'}
+      onNavigate={handleHeaderNavigate}
+      currentPage={getCurrentPage()}
     >
       {/* Main Menu View */}
       {state.currentView === 'menu' && (
@@ -251,6 +276,32 @@ function App() {
           onPlayAgain={handlePlayAgain}
           onMainMenu={handleMainMenu}
         />
+      )}
+
+      {/* Leaderboard View */}
+      {state.currentView === 'leaderboard' && (
+        <div className="flex-1 flex flex-col items-center justify-center p-8">
+          <div className="max-w-2xl w-full">
+            <h2 className="text-3xl font-bold text-white mb-6 text-center">Leaderboard</h2>
+            <div className="bg-dark-300/50 rounded-xl p-6 border border-white/10">
+              <p className="text-white/60 text-center mb-4">Top Times - Coming Soon</p>
+              <p className="text-white/40 text-sm text-center">
+                Complete races in Time Trial mode to record your best times.
+              </p>
+            </div>
+            <button
+              onClick={handleMainMenu}
+              className="mt-6 w-full py-3 px-6 bg-gradient-to-r from-human to-ai rounded-lg text-white font-medium hover:opacity-90 transition-opacity"
+            >
+              Back to Menu
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* How to Play View */}
+      {state.currentView === 'how-to-play' && (
+        <HowToPlay isOpen={true} onClose={handleMainMenu} onStartPlaying={handleMainMenu} />
       )}
     </Layout>
   );
