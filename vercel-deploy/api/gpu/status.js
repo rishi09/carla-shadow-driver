@@ -26,36 +26,44 @@ export default async function handler(req, res) {
   }
 
   try {
-    const response = await fetch(`https://console.vast.ai/api/v0/instances/${instance_id}/`, {
+    // Get all instances and find the one we want
+    const response = await fetch('https://console.vast.ai/api/v0/instances/', {
       headers: { 'Authorization': `Bearer ${VASTAI_API_KEY}` }
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      return res.status(502).json({ error: 'Failed to get instance status', details: errorText });
+      return res.status(502).json({ error: 'Failed to get instances', details: errorText });
     }
 
-    const instance = await response.json();
+    const data = await response.json();
+    const instances = data.instances || [];
+    const instance = instances.find(i => String(i.id) === String(instance_id));
+
+    if (!instance) {
+      return res.status(404).json({
+        error: 'Instance not found',
+        instance_id: instance_id,
+        hint: 'Instance may have been destroyed or not yet created'
+      });
+    }
 
     // Check if we have a stored ngrok URL for this instance
-    // In production, this would come from a KV store
-    // For now, we'll include placeholder logic
     let ngrok_url = null;
-
-    // Try to get ngrok URL from global store (set by callback endpoint)
     if (global.ngrokUrls && global.ngrokUrls[instance_id]) {
       ngrok_url = global.ngrokUrls[instance_id];
     }
 
     return res.status(200).json({
       instance_id: instance_id,
-      status: instance.actual_status || instance.status,
+      status: instance.actual_status || instance.status_msg || 'unknown',
       ngrok_url: ngrok_url,
-      gpu_name: instance.gpu_name,
+      gpu_name: instance.gpu_name || instance.machine_id,
       cost_so_far: instance.total_cost || 0,
       uptime_seconds: instance.duration || 0,
       ssh_host: instance.ssh_host,
-      ssh_port: instance.ssh_port
+      ssh_port: instance.ssh_port,
+      cur_state: instance.cur_state
     });
 
   } catch (error) {
