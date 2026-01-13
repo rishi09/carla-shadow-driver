@@ -64,42 +64,61 @@ describe('App Component', () => {
 });
 
 describe('Game Mode Selection', () => {
-  it('navigates to game when head-to-head is selected', () => {
+  it('navigates to track selection when head-to-head is selected', () => {
     render(<App />);
 
-    // Find and click the head-to-head button
+    // Find and click the head-to-head card
     const headToHeadButton = screen.getByText(/head to head/i);
     fireEvent.click(headToHeadButton);
 
-    // Game container should now be visible
-    expect(screen.getByTestId('game-container')).toBeInTheDocument();
+    // Should now show track selection screen
+    expect(screen.getByText(/select your track/i)).toBeInTheDocument();
   });
 
-  it('shows back button when in game view', () => {
+  it('shows back button in track selection view', () => {
     render(<App />);
 
-    // Navigate to game
+    // Navigate to track selection
     const headToHeadButton = screen.getByText(/head to head/i);
     fireEvent.click(headToHeadButton);
 
     // Check for back button
-    expect(screen.getByText(/back to menu/i)).toBeInTheDocument();
+    expect(screen.getByText(/back to mode select/i)).toBeInTheDocument();
   });
 
-  it('can navigate back to menu from game', () => {
+  it('can navigate back to menu from track selection', () => {
     render(<App />);
 
-    // Navigate to game
+    // Navigate to track selection
     const headToHeadButton = screen.getByText(/head to head/i);
     fireEvent.click(headToHeadButton);
 
     // Click back button
-    const backButton = screen.getByText(/back to menu/i);
+    const backButton = screen.getByText(/back to mode select/i);
     fireEvent.click(backButton);
 
     // Should be back on menu
     expect(screen.getByText(/head to head/i)).toBeInTheDocument();
-    expect(screen.queryByTestId('game-container')).not.toBeInTheDocument();
+    expect(screen.queryByText(/select your track/i)).not.toBeInTheDocument();
+  });
+
+  it('navigates to game when track is selected', () => {
+    render(<App />);
+
+    // Navigate to track selection
+    const headToHeadButton = screen.getByText(/head to head/i);
+    fireEvent.click(headToHeadButton);
+
+    // Select a track
+    const trackCard = screen.getByText(/sunset speedway/i);
+    fireEvent.click(trackCard);
+
+    // Click start race button
+    const startButton = screen.getByText(/start race/i);
+    fireEvent.click(startButton);
+
+    // Game container should now be visible
+    expect(screen.getByTestId('game-container')).toBeInTheDocument();
   });
 });
 
