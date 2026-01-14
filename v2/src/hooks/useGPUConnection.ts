@@ -97,6 +97,9 @@ export interface UseGPUConnectionReturn {
 /** Polling interval for GPU status (ms) */
 const POLL_INTERVAL = 5000;
 
+/** Maximum polling duration before timeout (ms) - 5 minutes */
+const POLL_TIMEOUT = 5 * 60 * 1000;
+
 /** Warning timeout for inactivity (ms) - 2 minutes */
 const INACTIVITY_WARNING_TIMEOUT = 2 * 60 * 1000;
 
@@ -135,6 +138,7 @@ export function useGPUConnection(): UseGPUConnectionReturn {
   // ----- Refs -----
   const wsRef = useRef<WebSocket | null>(null);
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollStartTimeRef = useRef<number | null>(null);
   const pingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastActivityRef = useRef<number>(Date.now());
   const inactivityWarningTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -154,6 +158,7 @@ export function useGPUConnection(): UseGPUConnectionReturn {
       clearInterval(pollIntervalRef.current);
       pollIntervalRef.current = null;
     }
+    pollStartTimeRef.current = null;
   }, []);
 
   const clearPingInterval = useCallback(() => {
@@ -343,6 +348,23 @@ export function useGPUConnection(): UseGPUConnectionReturn {
       return;
     }
 
+    // Check for polling timeout (5 minutes)
+    if (pollStartTimeRef.current) {
+      const elapsedTime = Date.now() - pollStartTimeRef.current;
+      if (elapsedTime > POLL_TIMEOUT) {
+        console.error('[useGPUConnection] Polling timeout after 5 minutes');
+        clearPolling();
+        if (isMountedRef.current) {
+          setProvisioningState('error');
+          setError({
+            message: 'GPU setup timed out after 5 minutes. The server may have failed to start.',
+            code: 'POLL_TIMEOUT',
+          });
+        }
+        return;
+      }
+    }
+
     try {
       const params = new URLSearchParams({ instance_id: currentInstanceId });
       if (currentOfferId) {
@@ -370,6 +392,18 @@ export function useGPUConnection(): UseGPUConnectionReturn {
         gpu_name: data.gpu_name ?? prev.gpu_name,
       }));
 
+      // Check for error status from GPU setup
+      if (data.setup_status === 'error') {
+        console.error('[useGPUConnection] GPU setup error:', data.setup_message);
+        clearPolling();
+        setProvisioningState('error');
+        setError({
+          message: data.setup_message || 'GPU setup failed',
+          code: 'SETUP_ERROR',
+        });
+        return;
+      }
+
       // Check if tunnel is ready and we should connect
       if (data.tunnel_url && data.status === 'running' && connectionState === 'disconnected') {
         console.log('[useGPUConnection] Tunnel ready, connecting...');
@@ -391,6 +425,8 @@ export function useGPUConnection(): UseGPUConnectionReturn {
 
   const startPolling = useCallback(() => {
     clearPolling();
+    // Record when polling started for timeout tracking
+    pollStartTimeRef.current = Date.now();
     // Poll immediately, then at interval
     pollGPUStatus();
     pollIntervalRef.current = setInterval(pollGPUStatus, POLL_INTERVAL);

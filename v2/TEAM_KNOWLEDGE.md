@@ -1598,3 +1598,170 @@ For any serverless code changes, spawn infrastructure-audit-agent to:
 2. Verify state persistence strategy
 3. Check for cold start resilience
 4. Validate cross-project API contracts
+
+---
+
+### INFRA-004: GPU INSTANCE_ID Mismatch (January 2026)
+
+**Incident:** GPU provisioning appeared to hang forever at "Starting server..." step.
+
+**Root Cause:** The start.js script passes `offer.id` as INSTANCE_ID to the GPU, but returns `new_contract` as `instance_id` to the frontend. The GPU reports status using `offer.id`, but the frontend polls using `new_contract`. Data was stored under wrong key.
+
+**Flow Before Fix:**
+```
+GPU (offer.id=123) → callback stores gpu:123
+Frontend (instance_id=456) → status looks for gpu:456 → NOT FOUND!
+```
+
+**Fix:** Modified callback.js to store data under BOTH IDs. Also looks up the mapping created by start.js and stores under the real instance_id.
+
+**Files Changed:**
+- `vercel-deploy/api/gpu/callback.js` - Store under both IDs
+- `api/gpu/callback.js` - Kept in sync
+
+**Pattern:**
+```javascript
+// Store under the ID GPU reports (offer.id)
+await setData(`gpu:${instance_id}`, data);
+
+// Also store under mapped instance_id (new_contract)
+const mapping = await getData(`offer_${instance_id}`);
+if (mapping && mapping.instance_id) {
+  await setData(`gpu:${mapping.instance_id}`, data);
+}
+```
+
+**Lesson:** When multiple IDs are in play (offer_id vs instance_id), store under ALL IDs or use a canonical mapping. Document the ID relationship clearly.
+
+---
+
+### INFRA-005: Silent GPU Script Failures (January 2026)
+
+**Incident:** GPU setup would fail but user saw no error, just endless "Starting server...".
+
+**Root Cause:** The onstart script had `set -e` which exits on error, but errors weren't reported back to the callback endpoint before exit.
+
+**Fix:** 
+1. Added `report_error()` function that POSTs error status before exiting
+2. Wrapped each critical step with error reporting
+3. Added 5-minute polling timeout in frontend
+4. Added check for `setup_status: "error"` in frontend polling
+
+**Files Changed:**
+- `vercel-deploy/api/gpu/start.js` - Error handling in onstart script
+- `v2/src/hooks/useGPUConnection.ts` - Timeout and error status check
+
+**Pattern:**
+```bash
+# onstart script
+report_error() {
+    curl -s -X POST "$CALLBACK_URL" \
+        -H "Content-Type: application/json" \
+        -d "{\"instance_id\":\"$INSTANCE_ID\",\"status\":\"error\",\"message\":\"$1\"}"
+    exit 1
+}
+
+apt-get update || report_error "apt-get update failed"
+```
+
+**Lesson:** Every step in a multi-step async process should report its failure. The frontend should have timeouts and check for error states.
+
+---
+
+### INFRA-006: Cloudflared Tunnel URL Capture (January 2026)
+
+**Incident:** Tunnel URL sometimes not captured, leaving user stuck.
+
+**Root Cause:** 
+1. Single 15-second sleep was insufficient for slow network/instances
+2. Grep pattern could miss URL if output contained ANSI escape codes
+
+**Fix:**
+1. Added retry loop (6 attempts, 10 seconds each = 60 seconds total)
+2. Added ANSI code stripping before grep
+3. Report status for each retry attempt
+
+**Pattern:**
+```bash
+# Clean ANSI codes before grepping
+sed -i 's/\\x1b\\[[0-9;]*m//g' /tmp/cloudflared.log
+
+# Retry loop
+for i in 1 2 3 4 5 6; do
+    sleep 10
+    TUNNEL_URL=$(grep -oE 'https://[a-zA-Z0-9.-]+\.trycloudflare\.com' /tmp/cloudflared.log | head -1)
+    if [ -n "$TUNNEL_URL" ]; then break; fi
+    report_status "tunneling" "Waiting for tunnel URL (attempt $i/6)"
+done
+```
+
+**Lesson:** Async operations with external services need retry loops. Clean output before parsing. Report progress during long waits.
+
+---
+
+### UX-002: GameHUD Covering Track (January 2026)
+
+**Incident:** GameHUD (Lap, Time, Speed display) was covering parts of the racing track, especially on Nightmare Circuit.
+
+**Root Cause:** HUD used `absolute` positioning inside the 600px track container. Track content extended to y=20 (near top) and y=560 (near bottom), overlapping with HUD bars.
+
+**Fix:** 
+1. Split GameHUD into TopHUD and BottomHUD components
+2. Changed from absolute overlay to flex column layout
+3. HUD now sits OUTSIDE the track container (above and below)
+
+**Layout Before:**
+```
+┌──────────────────────────────────┐
+│  [HUD TOP - overlaid]            │
+│  ┌────────────────────────────┐  │
+│  │     Track Canvas (600px)   │  │
+│  └────────────────────────────┘  │
+│  [HUD BOTTOM - overlaid]         │
+└──────────────────────────────────┘
+```
+
+**Layout After:**
+```
+┌──────────────────────────────────┐
+│  TopHUD (60px)                   │
+├──────────────────────────────────┤
+│  Track Canvas (600px)            │
+├──────────────────────────────────┤
+│  BottomHUD (60px)                │
+└──────────────────────────────────┘
+Total: ~720px
+```
+
+**Files Changed:**
+- `v2/src/components/game/GameHUD.tsx` - Split into TopHUD/BottomHUD
+- `v2/src/components/game/GameContainer.tsx` - Flex column layout
+
+**Lesson:** Overlays are fine for temporary UI (countdown, modals) but persistent HUD elements should not occlude gameplay content. Use flow layout when possible.
+
+---
+
+### ORG-004: Visual Regression Testing (January 2026)
+
+**Gap Identified:** UI bugs were being missed because there was no visual testing.
+
+**Fix:**
+1. Installed Playwright for E2E testing
+2. Created visual regression tests for HUD layout, main menu, track selection, GPU modal
+3. Added UI visual testing skill to `.claude/skills/`
+
+**Files Added:**
+- `v2/playwright.config.ts` - Playwright configuration
+- `v2/e2e/visual.spec.ts` - Visual regression tests
+- `.claude/skills/ui-visual-testing.md` - Testing skill documentation
+
+**Commands:**
+```bash
+# Run visual tests
+cd v2 && npx playwright test
+
+# Update snapshots after intentional changes
+cd v2 && npx playwright test --update-snapshots
+```
+
+**Lesson:** Unit tests prove code works. Visual tests prove the UI looks correct. Both are needed for comprehensive quality assurance.

@@ -305,7 +305,143 @@ function PenaltyIndicator({ show }: { show: boolean }) {
 }
 
 /**
+ * Props for TopHUD component
+ */
+export interface TopHUDProps {
+  lapNumber: number;
+  totalLaps: number;
+  currentLapTime: number;
+  bestLapTime: number | null;
+}
+
+/**
+ * TopHUD - Displays lap info and times above the game canvas
+ * This is a flow-layout component (not absolutely positioned)
+ */
+export function TopHUD({
+  lapNumber,
+  totalLaps,
+  currentLapTime,
+  bestLapTime,
+}: TopHUDProps) {
+  return (
+    <div className="w-full py-2 px-3 pointer-events-none select-none">
+      <div
+        className="
+          mx-auto max-w-3xl
+          bg-dark-200/80 backdrop-blur-md
+          border border-white/10 rounded-lg
+          shadow-card
+          px-6 py-3
+        "
+      >
+        <div className="flex items-center justify-between">
+          {/* Lap counter */}
+          <LapCounter lapNumber={lapNumber} totalLaps={totalLaps} />
+
+          {/* Divider */}
+          <div className="h-8 w-px bg-white/10" />
+
+          {/* Current lap time */}
+          <TimeDisplay label="Current" time={currentLapTime} />
+
+          {/* Divider */}
+          <div className="h-8 w-px bg-white/10" />
+
+          {/* Best lap time */}
+          <TimeDisplay label="Best" time={bestLapTime} variant="best" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Props for BottomHUD component
+ */
+export interface BottomHUDProps {
+  speed: number;
+  checkpoints: boolean[];
+  position: 1 | 2 | null;
+  gameMode: GameMode;
+}
+
+/**
+ * BottomHUD - Displays speed, checkpoints, and position below the game canvas
+ * This is a flow-layout component (not absolutely positioned)
+ */
+export function BottomHUD({
+  speed,
+  checkpoints,
+  position,
+  gameMode,
+}: BottomHUDProps) {
+  const [positionAnimate, setPositionAnimate] = useState(false);
+  const prevPosition = useRef(position);
+
+  // Animate position changes
+  useEffect(() => {
+    if (prevPosition.current !== position && position !== null) {
+      setPositionAnimate(true);
+      const timer = setTimeout(() => setPositionAnimate(false), 300);
+      prevPosition.current = position;
+      return () => clearTimeout(timer);
+    }
+  }, [position]);
+
+  const isHeadToHead = gameMode === 'head-to-head';
+
+  return (
+    <div className="w-full py-2 px-3 pointer-events-none select-none">
+      <div
+        className="
+          mx-auto max-w-3xl
+          bg-dark-200/80 backdrop-blur-md
+          border border-white/10 rounded-lg
+          shadow-card
+          px-6 py-3
+        "
+      >
+        <div className="flex items-center justify-between">
+          {/* Speed gauge */}
+          <SpeedGauge speed={speed} />
+
+          {/* Checkpoint progress */}
+          <div className="flex flex-col items-center gap-1">
+            <span className="text-sm text-white/50 uppercase tracking-wider">
+              Checkpoints
+            </span>
+            <CheckpointProgress checkpoints={checkpoints} />
+          </div>
+
+          {/* Position (head-to-head) or empty space (time trial) */}
+          <div className="min-w-[120px] flex justify-end">
+            {isHeadToHead && position !== null ? (
+              <PositionIndicator position={position} animate={positionAnimate} />
+            ) : (
+              <div className="flex items-center gap-2 text-white/50">
+                <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <circle cx="12" cy="13" r="8" />
+                  <line x1="12" y1="9" x2="12" y2="13" />
+                  <line x1="12" y1="13" x2="15" y2="13" />
+                  <line x1="12" y1="5" x2="12" y2="3" />
+                  <line x1="9" y1="3" x2="15" y2="3" />
+                </svg>
+                <span className="text-base">Practice</span>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
  * GameHUD - Displays real-time game information overlaid on the Phaser canvas
+ *
+ * DEPRECATED: For new implementations, use TopHUD and BottomHUD separately
+ * to position HUD elements outside the game canvas.
  *
  * Features:
  * - Speed gauge with animated bar

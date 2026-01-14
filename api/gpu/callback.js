@@ -46,6 +46,24 @@ async function getData(instanceId) {
   return global.tunnelUrls[instanceId] || null;
 }
 
+// Helper to get offer_id -> instance_id mapping
+async function getOfferMapping(offerId) {
+  initRedis();
+  if (useRedis) {
+    try {
+      const data = await redis.get(`gpu:offer_${offerId}`);
+      if (data) {
+        return typeof data === 'string' ? JSON.parse(data) : data;
+      }
+      return null;
+    } catch (e) {
+      console.error('Redis get mapping error:', e);
+      return global.tunnelUrls[`offer_${offerId}`] || null;
+    }
+  }
+  return global.tunnelUrls[`offer_${offerId}`] || null;
+}
+
 // Helper to set data
 async function setData(instanceId, data) {
   initRedis();
@@ -124,8 +142,17 @@ export default async function handler(req, res) {
       console.log(`Status update for ${instance_id}: ${status} - ${message} (Redis: ${useRedis})`);
     }
 
-    // Save the data
+    // Save the data under the reported instance_id (which may be offer_id)
     await setData(instance_id, data);
+
+    // CRITICAL FIX: Check if this instance_id is actually an offer_id
+    // The GPU reports using offer.id (from env var), but frontend polls using new_contract
+    // Look up the mapping and also store under the real instance_id
+    const mapping = await getOfferMapping(instance_id);
+    if (mapping && mapping.instance_id && mapping.instance_id !== instance_id) {
+      console.log(`[Callback] Also storing data under mapped instance_id: ${mapping.instance_id}`);
+      await setData(mapping.instance_id, data);
+    }
 
     return res.status(200).json({
       status: 'ok',

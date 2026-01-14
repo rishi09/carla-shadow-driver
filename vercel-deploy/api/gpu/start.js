@@ -111,30 +111,52 @@ report_status() {
         -d "{\\"instance_id\\":\\"$INSTANCE_ID\\",\\"status\\":\\"$1\\",\\"message\\":\\"$2\\"}" || true
 }
 
+# Function to report error and exit
+report_error() {
+    echo "ERROR: $1"
+    report_status "error" "$1"
+    exit 1
+}
+
 echo "=== Installing system dependencies ==="
 report_status "installing" "Installing system dependencies"
-apt-get update && apt-get install -y libgl1-mesa-glx libglib2.0-0 curl --no-install-recommends
+if ! apt-get update; then
+    report_error "apt-get update failed"
+fi
+if ! apt-get install -y libgl1-mesa-glx libglib2.0-0 curl --no-install-recommends; then
+    report_error "apt-get install failed"
+fi
 
 echo "=== Installing cloudflared ==="
 report_status "installing" "Installing cloudflared"
-curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /usr/local/bin/cloudflared
+if ! curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /usr/local/bin/cloudflared; then
+    report_error "Failed to download cloudflared"
+fi
 chmod +x /usr/local/bin/cloudflared
 
 echo "=== Cloning repository ==="
 report_status "installing" "Cloning repository"
 cd /workspace
-git clone https://github.com/rishi09/carla-shadow-driver.git
+if ! git clone https://github.com/rishi09/carla-shadow-driver.git; then
+    report_error "Failed to clone repository"
+fi
 cd carla-shadow-driver
 
 echo "=== Installing Python dependencies ==="
 report_status "installing" "Installing Python dependencies"
 # Fix NumPy 2.x incompatibility with PyTorch
-pip install 'numpy<2'
-pip install -r requirements.txt
+if ! pip install 'numpy<2'; then
+    report_error "Failed to install numpy"
+fi
+if ! pip install -r requirements.txt; then
+    report_error "Failed to install Python dependencies"
+fi
 
 echo "=== Downloading model ==="
 report_status "installing" "Downloading model"
-python scripts/download_model.py pilotnet
+if ! python scripts/download_model.py pilotnet; then
+    report_error "Failed to download model"
+fi
 
 echo "=== Starting WebSocket server in background ==="
 report_status "starting" "Starting WebSocket server"
@@ -144,9 +166,7 @@ sleep 5  # Wait for server to start
 
 # Check if WebSocket server is running
 if ! kill -0 $WS_PID 2>/dev/null; then
-    echo "ERROR: WebSocket server failed to start"
-    report_status "error" "WebSocket server failed to start"
-    exit 1
+    report_error "WebSocket server failed to start"
 fi
 
 echo "=== Starting Cloudflare Tunnel ==="
@@ -156,38 +176,56 @@ report_status "tunneling" "Starting Cloudflare tunnel"
 cloudflared tunnel --url http://localhost:5001 > /tmp/cloudflared.log 2>&1 &
 CF_PID=$!
 
-# Wait for cloudflared to establish tunnel and output URL (usually takes 5-10 seconds)
-sleep 15
+# Retry loop: 6 attempts, 10 seconds each (total 60 seconds)
+MAX_ATTEMPTS=6
+ATTEMPT=1
+TUNNEL_URL=""
 
-# Check if cloudflared is still running
-if ! kill -0 $CF_PID 2>/dev/null; then
-    echo "ERROR: cloudflared died"
-    report_status "error" "cloudflared failed to start"
-    cat /tmp/cloudflared.log
-    exit 1
-fi
+while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
+    echo "=== Attempt $ATTEMPT of $MAX_ATTEMPTS: Waiting for tunnel URL ==="
+    report_status "tunneling" "Waiting for tunnel URL (attempt $ATTEMPT/$MAX_ATTEMPTS)"
 
-# Parse the log file for tunnel URL
+    sleep 10
+
+    # Check if cloudflared is still running
+    if ! kill -0 $CF_PID 2>/dev/null; then
+        echo "ERROR: cloudflared died on attempt $ATTEMPT"
+        cat /tmp/cloudflared.log
+        report_error "cloudflared failed to start"
+    fi
+
+    # Clean ANSI codes before grepping (fixes parsing issues)
+    sed -i 's/\\x1b\\[[0-9;]*m//g' /tmp/cloudflared.log 2>/dev/null || true
+
+    # Try to extract tunnel URL from log
+    TUNNEL_URL=$(grep -oE 'https://[a-zA-Z0-9.-]+\\.trycloudflare\\.com' /tmp/cloudflared.log | head -1)
+
+    if [ -z "$TUNNEL_URL" ]; then
+        # Try alternate pattern (just look for trycloudflare.com anywhere)
+        TUNNEL_URL=$(grep -oE 'https://[^[:space:]]+trycloudflare[^[:space:]]*' /tmp/cloudflared.log | head -1)
+    fi
+
+    if [ -n "$TUNNEL_URL" ]; then
+        echo "=== Found Tunnel URL on attempt $ATTEMPT: $TUNNEL_URL ==="
+        break
+    fi
+
+    ATTEMPT=$((ATTEMPT + 1))
+done
+
+# Parse the log file for tunnel URL (final output for debugging)
 echo "=== Cloudflared output ==="
 cat /tmp/cloudflared.log
 
-# Try to extract tunnel URL from log
-TUNNEL_URL=$(grep -oE 'https://[a-zA-Z0-9.-]+\\.trycloudflare\\.com' /tmp/cloudflared.log | head -1)
-
-if [ -z "$TUNNEL_URL" ]; then
-    # Try alternate pattern (just look for trycloudflare.com anywhere)
-    TUNNEL_URL=$(grep -oE 'https://[^[:space:]]+trycloudflare[^[:space:]]*' /tmp/cloudflared.log | head -1)
-fi
-
 if [ -n "$TUNNEL_URL" ]; then
-    echo "=== Found Tunnel URL: $TUNNEL_URL ==="
+    echo "=== Reporting Tunnel URL: $TUNNEL_URL ==="
     curl -s -X POST "https://carla-shadow-driver.vercel.app/api/gpu/callback" -H "Content-Type: application/json" -d "{\\"instance_id\\":\\"$INSTANCE_ID\\",\\"tunnel_url\\":\\"$TUNNEL_URL\\"}"
     echo "=== Tunnel URL reported! ==="
 else
     # Report failure with first 500 chars of log so we can debug
     LOG_PREVIEW=$(head -c 500 /tmp/cloudflared.log | tr '\\n' ' ' | tr '"' "'")
-    echo "=== No tunnel URL found. Log preview: $LOG_PREVIEW ==="
-    report_status "error" "No tunnel URL found. Log: $LOG_PREVIEW"
+    echo "=== No tunnel URL found after $MAX_ATTEMPTS attempts. Log preview: $LOG_PREVIEW ==="
+    report_status "error" "No tunnel URL found after $MAX_ATTEMPTS attempts. Log: $LOG_PREVIEW"
 fi
 
 # Keep container running

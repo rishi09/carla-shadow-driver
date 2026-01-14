@@ -1,7 +1,7 @@
 import { useRef, useEffect, useState, useCallback } from 'react';
 import Phaser from 'phaser';
 import { createPhaserGame, destroyPhaserGame } from '../../game/PhaserGame';
-import { GameHUD } from './GameHUD';
+import { TopHUD, BottomHUD } from './GameHUD';
 import { CountdownOverlay } from './CountdownOverlay';
 import { ControlsHint } from './ControlsHint';
 import type { GameMode, Difficulty, RaceHUDState, InputState } from '../../types/game';
@@ -382,55 +382,62 @@ export function GameContainer({
   }, [gpuConnection?.useRealGPU, gpuConnection?.isConnected]);
 
   return (
-    <div className="relative" style={{ width: `${width}px`, height: `${height}px` }}>
-      {/* Phaser canvas container */}
-      <div
-        ref={containerRef}
-        style={{
-          width: '100%',
-          height: '100%',
-        }}
-      />
-
-      {/* Countdown overlay */}
-      {showCountdown && !raceStarted && (
-        <CountdownOverlay
-          onComplete={handleCountdownComplete}
-          onTick={handleCountdownTick}
-        />
-      )}
-
-      {/* Game HUD overlay - show during racing */}
+    <div className="flex flex-col" style={{ width: `${width}px` }}>
+      {/* Top HUD - above canvas */}
       {!showCountdown && hudState.raceState === 'racing' && (
-        <GameHUD
-          speed={hudState.speed}
+        <TopHUD
           lapNumber={hudState.lapNumber}
           totalLaps={hudState.totalLaps}
           currentLapTime={hudState.currentLapTime}
           bestLapTime={hudState.bestLapTime}
-          position={mode === 'head-to-head' ? hudState.position : null}
+        />
+      )}
+
+      {/* Phaser canvas container */}
+      <div className="relative" style={{ width: `${width}px`, height: `${height}px` }}>
+        <div
+          ref={containerRef}
+          style={{
+            width: '100%',
+            height: '100%',
+          }}
+        />
+
+        {/* Countdown overlay - stays inside canvas container for full-screen effect */}
+        {showCountdown && !raceStarted && (
+          <CountdownOverlay
+            onComplete={handleCountdownComplete}
+            onTick={handleCountdownTick}
+          />
+        )}
+
+        {/* Controls Hint overlay - show during first race or after countdown */}
+        {!showCountdown && hudState.raceState === 'racing' && showControlsHint && !isMobile && (
+          <ControlsHint
+            visible={showControlsHint}
+            onDismiss={() => {
+              setShowControlsHint(false);
+              markAsPlayed();
+            }}
+            autoHideSeconds={12}
+            isFirstRace={isFirstRace()}
+          />
+        )}
+
+        {/* Mobile controls placeholder - to be implemented by MobileControls.tsx */}
+        {isMobile && !showCountdown && hudState.raceState === 'racing' && (
+          <MobileControlsPlaceholder onInput={handleMobileInput} />
+        )}
+      </div>
+
+      {/* Bottom HUD - below canvas */}
+      {!showCountdown && hudState.raceState === 'racing' && (
+        <BottomHUD
+          speed={hudState.speed}
           checkpoints={createCheckpointsArray(hudState.checkpoints, hudState.totalCheckpoints)}
-          penaltyFlash={hudState.penaltyFlash}
+          position={mode === 'head-to-head' ? hudState.position : null}
           gameMode={hudState.gameMode}
         />
-      )}
-
-      {/* Controls Hint overlay - show during first race or after countdown */}
-      {!showCountdown && hudState.raceState === 'racing' && showControlsHint && !isMobile && (
-        <ControlsHint
-          visible={showControlsHint}
-          onDismiss={() => {
-            setShowControlsHint(false);
-            markAsPlayed();
-          }}
-          autoHideSeconds={12}
-          isFirstRace={isFirstRace()}
-        />
-      )}
-
-      {/* Mobile controls placeholder - to be implemented by MobileControls.tsx */}
-      {isMobile && !showCountdown && hudState.raceState === 'racing' && (
-        <MobileControlsPlaceholder onInput={handleMobileInput} />
       )}
     </div>
   );

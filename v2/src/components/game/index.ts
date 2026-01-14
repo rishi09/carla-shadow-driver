@@ -1,5 +1,5 @@
 export { GameContainer, type GPUConnectionProps } from './GameContainer';
-export { GameHUD } from './GameHUD';
+export { GameHUD, TopHUD, BottomHUD, type TopHUDProps, type BottomHUDProps } from './GameHUD';
 export { CountdownOverlay } from './CountdownOverlay';
 export { ControlsHint } from './ControlsHint';
 export { MobileControls } from './MobileControls';
