@@ -84,14 +84,37 @@ export default async function handler(req, res) {
 
     const offers = await searchResponse.json();
 
-    // Filter for suitable GPUs (16GB+ VRAM, verified, high reliability, reasonable price)
-    // IMPORTANT: Filter out deverified hosts which have broken GPU/Docker configs
+    // Debug: Log sample of offers to understand verification field values
+    const sampleOffers = (offers.offers || []).slice(0, 5).map(o => ({
+      id: o.id,
+      gpu_name: o.gpu_name,
+      verified: o.verified,
+      verification: o.verification,
+      dph_total: o.dph_total,
+      reliability: o.reliability
+    }));
+    console.log('[GPU Start] Sample offers:', JSON.stringify(sampleOffers));
+
+    // Filter for suitable GPUs (16GB+ VRAM, not deverified, high reliability, reasonable price)
+    // IMPORTANT: Exclude deverified hosts - they have broken GPU/Docker configs
+    // verified can be: true (verified), false (deverified), undefined/null (unverified)
+    // We exclude only explicitly deverified (verified === false), allowing unverified
     const suitable = (offers.offers || []).filter(o =>
       o.gpu_ram >= 16000 &&
-      o.verified !== false &&     // Exclude explicitly deverified hosts
-      o.reliability >= 0.95 &&    // Higher reliability threshold (was 0.90)
-      o.dph_total < 1.00  // Max $1.00/hr
+      o.verified !== false &&       // Exclude deverified hosts (allow verified + unverified)
+      o.reliability >= 0.95 &&      // High reliability threshold
+      o.dph_total < 1.00            // Max $1.00/hr
     ).sort((a, b) => a.dph_total - b.dph_total);
+
+    console.log('[GPU Start] Suitable offers count:', suitable.length);
+    if (suitable.length > 0) {
+      console.log('[GPU Start] First suitable:', JSON.stringify({
+        id: suitable[0].id,
+        gpu_name: suitable[0].gpu_name,
+        verified: suitable[0].verified,
+        reliability: suitable[0].reliability
+      }));
+    }
 
     if (suitable.length === 0) {
       return res.status(503).json({
