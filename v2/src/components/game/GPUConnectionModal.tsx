@@ -11,6 +11,8 @@ interface GPUInfo {
   cost_so_far: number;
   uptime_seconds: number;
   tunnel_url?: string;
+  setup_status?: string | null;
+  setup_message?: string | null;
 }
 
 interface GPUConnectionModalProps {
@@ -26,6 +28,10 @@ interface GPUConnectionModalProps {
   gpuInfo: GPUInfo | null;
   /** Error message if any */
   error: string | null;
+  /** Current retry count */
+  retryCount?: number;
+  /** Maximum retry attempts */
+  maxRetries?: number;
   /** Callback to start GPU provisioning */
   onStartGPU: () => void;
   /** Callback to stop GPU instance */
@@ -52,32 +58,27 @@ export function GPUConnectionModal({
   wsStatus,
   gpuInfo,
   error,
+  retryCount = 0,
+  maxRetries = 3,
   onStartGPU,
   onStopGPU,
   onProceedWithLocalAI,
   onProceedWithGPU,
 }: GPUConnectionModalProps) {
-  // Track startup progress for animation
-  const [startupStep, setStartupStep] = useState(0);
+  // Track elapsed time for display
   const [elapsedTime, setElapsedTime] = useState(0);
 
-  // Simulate startup steps when starting
+  // Track elapsed time when starting
   useEffect(() => {
     if (gpuStatus === 'starting') {
-      const stepInterval = setInterval(() => {
-        setStartupStep((prev) => Math.min(prev + 1, 2));
-      }, 30000); // Progress every 30 seconds
-
       const timeInterval = setInterval(() => {
         setElapsedTime((prev) => prev + 1);
       }, 1000);
 
       return () => {
-        clearInterval(stepInterval);
         clearInterval(timeInterval);
       };
     } else {
-      setStartupStep(0);
       setElapsedTime(0);
     }
   }, [gpuStatus]);
@@ -85,7 +86,6 @@ export function GPUConnectionModal({
   // Reset when modal closes
   useEffect(() => {
     if (!isOpen) {
-      setStartupStep(0);
       setElapsedTime(0);
     }
   }, [isOpen]);
@@ -157,11 +157,32 @@ export function GPUConnectionModal({
 
     // Starting state
     if (gpuStatus === 'starting') {
-      const steps = [
-        { label: 'Provisioning GPU...', done: startupStep >= 1 },
-        { label: 'Installing dependencies...', done: startupStep >= 2 },
-        { label: 'Starting server...', done: wsStatus === 'connected' },
-      ];
+      // Get real status from GPU or use defaults
+      const setupStatus = gpuInfo?.setup_status || 'provisioning';
+      const setupMessage = gpuInfo?.setup_message || 'Finding an available GPU...';
+      const isRetrying = setupStatus === 'retrying';
+
+      // Status explainer mapping - tells user what's happening
+      const getStatusExplainer = (status: string): string => {
+        switch (status) {
+          case 'provisioning':
+            return 'Searching the GPU marketplace for an available machine with enough power to run the AI model.';
+          case 'booting':
+            return 'The GPU server is starting up. This includes loading the operating system and GPU drivers.';
+          case 'installing':
+            return 'Installing Python dependencies and downloading the neural network model (~500MB).';
+          case 'tunneling':
+            return 'Creating a secure tunnel so your browser can communicate with the GPU server.';
+          case 'starting':
+            return 'Launching the AI inference server and preparing for WebSocket connections.';
+          case 'retrying':
+            return 'The previous GPU had issues. Automatically trying a different one...';
+          case 'ready':
+            return 'GPU is ready! Connecting now...';
+          default:
+            return 'Setting up the cloud GPU environment for real-time AI inference.';
+        }
+      };
 
       return (
         <>
@@ -169,84 +190,93 @@ export function GPUConnectionModal({
             <div className="w-16 h-16 mx-auto mb-4 relative">
               {/* Spinning loader */}
               <div className="absolute inset-0 rounded-full border-4 border-accent/20" />
-              <div className="absolute inset-0 rounded-full border-4 border-transparent border-t-accent animate-spin" />
+              <div className={`absolute inset-0 rounded-full border-4 border-transparent border-t-accent animate-spin ${isRetrying ? 'border-t-yellow-500' : ''}`} />
               <div className="absolute inset-0 flex items-center justify-center">
-                <svg
-                  className="w-6 h-6 text-accent"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
-                  <rect x="4" y="4" width="16" height="16" rx="2" />
-                  <rect x="9" y="9" width="6" height="6" />
-                </svg>
+                {isRetrying ? (
+                  <svg
+                    className="w-6 h-6 text-yellow-500"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  >
+                    <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                    <path d="M3 3v5h5" />
+                    <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
+                    <path d="M16 21h5v-5" />
+                  </svg>
+                ) : (
+                  <svg
+                    className="w-6 h-6 text-accent"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  >
+                    <rect x="4" y="4" width="16" height="16" rx="2" />
+                    <rect x="9" y="9" width="6" height="6" />
+                  </svg>
+                )}
               </div>
             </div>
-            <h2 className="text-2xl font-bold text-white mb-2">Starting GPU...</h2>
+            <h2 className="text-2xl font-bold text-white mb-2">
+              {isRetrying ? 'Trying Another GPU...' : 'Starting GPU...'}
+            </h2>
+            {retryCount > 0 && (
+              <p className="text-yellow-400 text-sm mb-1">
+                Attempt {retryCount + 1} of {maxRetries + 1}
+              </p>
+            )}
             <p className="text-white/60">{getEstimatedTimeRemaining()}</p>
           </div>
 
-          <div className="space-y-3 mb-6">
-            {steps.map((step, index) => (
-              <div
-                key={index}
-                className={`flex items-center gap-3 p-3 rounded-lg transition-colors ${
-                  step.done
-                    ? 'bg-green-500/10 border border-green-500/30'
-                    : index === startupStep
-                    ? 'bg-accent/10 border border-accent/30'
-                    : 'bg-dark-400/50 border border-white/10'
-                }`}
-              >
-                <div
-                  className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${
-                    step.done
-                      ? 'bg-green-500'
-                      : index === startupStep
-                      ? 'bg-accent animate-pulse'
-                      : 'bg-white/20'
-                  }`}
-                >
-                  {step.done ? (
-                    <svg
-                      className="w-4 h-4 text-white"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="3"
-                    >
-                      <polyline points="20 6 9 17 4 12" />
-                    </svg>
-                  ) : index === startupStep ? (
-                    <div className="w-2 h-2 bg-white rounded-full" />
-                  ) : (
-                    <span className="text-xs text-white/40">{index + 1}</span>
-                  )}
-                </div>
-                <span
-                  className={`text-sm ${
-                    step.done
-                      ? 'text-green-400'
-                      : index === startupStep
-                      ? 'text-white'
-                      : 'text-white/40'
-                  }`}
-                >
-                  {step.label}
-                </span>
+          {/* Current status - real message from GPU */}
+          <div className="bg-accent/10 border border-accent/30 rounded-lg p-4 mb-4">
+            <div className="flex items-start gap-3">
+              <div className="w-2 h-2 mt-2 rounded-full bg-accent animate-pulse flex-shrink-0" />
+              <div>
+                <p className="text-white font-medium">{setupMessage}</p>
+                <p className="text-white/50 text-sm mt-1">{getStatusExplainer(setupStatus)}</p>
               </div>
-            ))}
+            </div>
           </div>
 
-          <div className="bg-dark-400/50 rounded-lg p-3 mb-4">
-            <div className="flex items-center gap-2 text-sm text-white/60">
-              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <circle cx="12" cy="12" r="10" />
-                <polyline points="12 6 12 12 16 14" />
-              </svg>
-              <span>Elapsed: {formatUptime(elapsedTime)}</span>
+          {/* GPU info if available */}
+          {gpuInfo?.gpu_name && (
+            <div className="bg-dark-400/50 rounded-lg p-3 mb-4">
+              <div className="flex justify-between items-center text-sm">
+                <span className="text-white/60">Selected GPU</span>
+                <span className="text-white font-medium">{gpuInfo.gpu_name}</span>
+              </div>
             </div>
+          )}
+
+          {/* Timer and info */}
+          <div className="bg-dark-400/50 rounded-lg p-4 mb-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2 text-white">
+                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10" />
+                  <polyline points="12 6 12 12 16 14" />
+                </svg>
+                <span className="text-lg font-mono">{formatUptime(elapsedTime)}</span>
+              </div>
+              <span className="text-white/40 text-sm">elapsed</span>
+            </div>
+            <div className="text-xs text-white/50">
+              <p>Typically takes 1-2 minutes. If it takes longer, the system will automatically try a different GPU.</p>
+            </div>
+          </div>
+
+          {/* What's happening explainer */}
+          <div className="bg-dark-400/30 rounded-lg p-3 mb-4 border border-white/5">
+            <h4 className="text-xs font-semibold text-white/40 uppercase tracking-wide mb-2">What's happening</h4>
+            <ol className="text-xs text-white/60 space-y-1">
+              <li className={setupStatus === 'provisioning' ? 'text-accent' : ''}>1. Find GPU on Vast.ai marketplace</li>
+              <li className={setupStatus === 'booting' || setupStatus === 'installing' ? 'text-accent' : ''}>2. Boot server &amp; install dependencies</li>
+              <li className={setupStatus === 'tunneling' ? 'text-accent' : ''}>3. Create secure tunnel connection</li>
+              <li className={setupStatus === 'starting' || setupStatus === 'ready' ? 'text-accent' : ''}>4. Start AI inference server</li>
+            </ol>
           </div>
 
           <Button variant="ghost" fullWidth onClick={onStopGPU}>

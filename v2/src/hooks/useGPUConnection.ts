@@ -79,6 +79,10 @@ export interface UseGPUConnectionReturn {
   // Inactivity warning state
   inactivityWarning: boolean;
 
+  // Retry info
+  retryCount: number;
+  maxRetries: number;
+
   // Actions
   startGPU: () => Promise<void>;
   stopGPU: () => Promise<void>;
@@ -99,6 +103,12 @@ const POLL_INTERVAL = 5000;
 
 /** Maximum polling duration before timeout (ms) - 5 minutes */
 const POLL_TIMEOUT = 5 * 60 * 1000;
+
+/** Maximum number of automatic retry attempts */
+const MAX_RETRIES = 3;
+
+/** Delay before retry (ms) */
+const RETRY_DELAY = 2000;
 
 /** Warning timeout for inactivity (ms) - 2 minutes */
 const INACTIVITY_WARNING_TIMEOUT = 2 * 60 * 1000;
@@ -134,6 +144,7 @@ export function useGPUConnection(): UseGPUConnectionReturn {
   const [error, setError] = useState<GPUError | null>(null);
   const [lastPrediction, setLastPrediction] = useState<AIPrediction | null>(null);
   const [inactivityWarning, setInactivityWarning] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
 
   // ----- Refs -----
   const wsRef = useRef<WebSocket | null>(null);
@@ -150,6 +161,12 @@ export function useGPUConnection(): UseGPUConnectionReturn {
 
   // Ref to hold stopGPUInternal for use in timers (avoids circular dependency)
   const stopGPUInternalRef = useRef<() => Promise<void>>(() => Promise.resolve());
+
+  // Ref to hold startGPUInternal for use in retry logic
+  const startGPUInternalRef = useRef<(isRetry: boolean) => Promise<void>>(() => Promise.resolve());
+
+  // Ref to track retry count (avoids stale closure in setTimeout)
+  const retryCountRef = useRef(0);
 
   // ----- Cleanup Helpers -----
 
@@ -396,10 +413,56 @@ export function useGPUConnection(): UseGPUConnectionReturn {
       if (data.setup_status === 'error') {
         console.error('[useGPUConnection] GPU setup error:', data.setup_message);
         clearPolling();
+
+        // Try automatic retry if we haven't exceeded max retries
+        if (retryCountRef.current < MAX_RETRIES) {
+          console.log(`[useGPUConnection] Retrying... (attempt ${retryCountRef.current + 1}/${MAX_RETRIES})`);
+          setInstanceData((prev) => ({
+            ...prev,
+            setup_status: 'retrying',
+            setup_message: `Attempt ${retryCountRef.current + 1} failed, trying another GPU...`,
+          }));
+          setTimeout(() => {
+            if (isMountedRef.current) {
+              startGPUInternalRef.current(true);
+            }
+          }, RETRY_DELAY);
+          return;
+        }
+
         setProvisioningState('error');
         setError({
           message: data.setup_message || 'GPU setup failed',
           code: 'SETUP_ERROR',
+        });
+        return;
+      }
+
+      // Check if GPU failed to start (status = "stopped" before we got a tunnel)
+      if (data.status === 'stopped' && !data.tunnel_url) {
+        console.error('[useGPUConnection] GPU instance stopped unexpectedly');
+        clearPolling();
+
+        // Try automatic retry if we haven't exceeded max retries
+        if (retryCountRef.current < MAX_RETRIES) {
+          console.log(`[useGPUConnection] GPU stopped, retrying... (attempt ${retryCountRef.current + 1}/${MAX_RETRIES})`);
+          setInstanceData((prev) => ({
+            ...prev,
+            setup_status: 'retrying',
+            setup_message: `GPU failed to start, trying another...`,
+          }));
+          setTimeout(() => {
+            if (isMountedRef.current) {
+              startGPUInternalRef.current(true);
+            }
+          }, RETRY_DELAY);
+          return;
+        }
+
+        setProvisioningState('error');
+        setError({
+          message: 'GPU instance failed to start. This may be due to a faulty host. Please try again.',
+          code: 'INSTANCE_STOPPED',
         });
         return;
       }
@@ -434,10 +497,22 @@ export function useGPUConnection(): UseGPUConnectionReturn {
 
   // ----- GPU Lifecycle -----
 
-  const startGPU = useCallback(async () => {
-    if (provisioningState === 'starting' || provisioningState === 'running') {
+  // Internal start function that handles both fresh starts and retries
+  const startGPUInternal = useCallback(async (isRetry: boolean = false) => {
+    if (!isRetry && (provisioningState === 'starting' || provisioningState === 'running')) {
       console.warn('[useGPUConnection] GPU already starting or running');
       return;
+    }
+
+    // Update retry count
+    if (isRetry) {
+      retryCountRef.current += 1;
+      setRetryCount(retryCountRef.current);
+      console.log(`[useGPUConnection] Retry attempt ${retryCountRef.current}/${MAX_RETRIES}`);
+    } else {
+      // Fresh start - reset retry count
+      retryCountRef.current = 0;
+      setRetryCount(0);
     }
 
     setProvisioningState('starting');
@@ -455,6 +530,7 @@ export function useGPUConnection(): UseGPUConnectionReturn {
       if (!isMountedRef.current) return;
 
       // Update instance data with initial info
+      const attemptText = retryCountRef.current > 0 ? ` (attempt ${retryCountRef.current + 1}/${MAX_RETRIES + 1})` : '';
       setInstanceData({
         instance_id: data.instance_id,
         offer_id: data.offer_id,
@@ -463,8 +539,8 @@ export function useGPUConnection(): UseGPUConnectionReturn {
         tunnel_url: null,
         cost_so_far: 0,
         uptime_seconds: 0,
-        setup_status: 'starting',
-        setup_message: 'Instance provisioned, waiting for setup...',
+        setup_status: 'provisioning',
+        setup_message: `Finding a GPU${attemptText}...`,
       });
 
       console.log(`[useGPUConnection] GPU instance started: ${data.instance_id}`);
@@ -474,6 +550,23 @@ export function useGPUConnection(): UseGPUConnectionReturn {
 
     } catch (e) {
       console.error('[useGPUConnection] Error starting GPU:', e);
+
+      // If we can retry, do it
+      if (retryCountRef.current < MAX_RETRIES) {
+        console.log(`[useGPUConnection] Start failed, retrying... (attempt ${retryCountRef.current + 1}/${MAX_RETRIES})`);
+        setInstanceData((prev) => ({
+          ...prev,
+          setup_status: 'retrying',
+          setup_message: 'Connection failed, trying another GPU...',
+        }));
+        setTimeout(() => {
+          if (isMountedRef.current) {
+            startGPUInternal(true);
+          }
+        }, RETRY_DELAY);
+        return;
+      }
+
       if (isMountedRef.current) {
         setProvisioningState('error');
         setError({
@@ -483,6 +576,16 @@ export function useGPUConnection(): UseGPUConnectionReturn {
       }
     }
   }, [provisioningState, startPolling]);
+
+  // Keep the ref updated with the latest startGPUInternal
+  useEffect(() => {
+    startGPUInternalRef.current = startGPUInternal;
+  }, [startGPUInternal]);
+
+  // Public startGPU function (fresh start, resets retries)
+  const startGPU = useCallback(async () => {
+    await startGPUInternal(false);
+  }, [startGPUInternal]);
 
   // Internal stop function (doesn't require confirmation)
   const stopGPUInternal = useCallback(async () => {
@@ -626,6 +729,10 @@ export function useGPUConnection(): UseGPUConnectionReturn {
     error,
     lastPrediction,
     inactivityWarning,
+
+    // Retry info
+    retryCount,
+    maxRetries: MAX_RETRIES,
 
     // Actions
     startGPU,

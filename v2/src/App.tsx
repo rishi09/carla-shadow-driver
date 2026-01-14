@@ -310,14 +310,18 @@ function App() {
           onClose={handleCloseGPUModal}
           gpuStatus={gpu.provisioningState}
           wsStatus={gpu.connectionState}
-          gpuInfo={gpu.instanceData.gpu_name ? {
-            gpu_name: gpu.instanceData.gpu_name,
+          gpuInfo={gpu.instanceData.gpu_name || gpu.instanceData.setup_status ? {
+            gpu_name: gpu.instanceData.gpu_name || '',
             price_per_hour: gpu.instanceData.price_per_hour || 0,
             cost_so_far: gpu.instanceData.cost_so_far,
             uptime_seconds: gpu.instanceData.uptime_seconds,
             tunnel_url: gpu.instanceData.tunnel_url || undefined,
+            setup_status: gpu.instanceData.setup_status,
+            setup_message: gpu.instanceData.setup_message,
           } : null}
           error={gpu.error?.message || null}
+          retryCount={gpu.retryCount}
+          maxRetries={gpu.maxRetries}
           onStartGPU={handleStartGPU}
           onStopGPU={handleStopGPU}
           onProceedWithLocalAI={handleProceedWithLocalAI}
