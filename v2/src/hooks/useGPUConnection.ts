@@ -168,6 +168,11 @@ export function useGPUConnection(): UseGPUConnectionReturn {
   // Ref to track retry count (avoids stale closure in setTimeout)
   const retryCountRef = useRef(0);
 
+  // Refs for instance/offer IDs to avoid stale closure in polling
+  // State updates are async, but refs update synchronously
+  const instanceIdRef = useRef<string | null>(null);
+  const offerIdRef = useRef<string | null>(null);
+
   // ----- Cleanup Helpers -----
 
   const clearPolling = useCallback(() => {
@@ -357,8 +362,10 @@ export function useGPUConnection(): UseGPUConnectionReturn {
   // ----- Status Polling -----
 
   const pollGPUStatus = useCallback(async () => {
-    const currentInstanceId = instanceData.instance_id;
-    const currentOfferId = instanceData.offer_id;
+    // Use refs for IDs to avoid stale closure issues
+    // (state may not be updated yet when polling starts)
+    const currentInstanceId = instanceIdRef.current;
+    const currentOfferId = offerIdRef.current;
 
     if (!currentInstanceId) {
       clearPolling();
@@ -484,7 +491,7 @@ export function useGPUConnection(): UseGPUConnectionReturn {
     } catch (e) {
       console.error('[useGPUConnection] Error polling status:', e);
     }
-  }, [instanceData.instance_id, instanceData.offer_id, connectionState, clearPolling, connectWebSocket]);
+  }, [connectionState, clearPolling, connectWebSocket]);
 
   const startPolling = useCallback(() => {
     clearPolling();
@@ -529,6 +536,10 @@ export function useGPUConnection(): UseGPUConnectionReturn {
 
       if (!isMountedRef.current) return;
 
+      // Update refs SYNCHRONOUSLY before state (polling uses refs)
+      instanceIdRef.current = data.instance_id;
+      offerIdRef.current = data.offer_id;
+
       // Update instance data with initial info
       const attemptText = retryCountRef.current > 0 ? ` (attempt ${retryCountRef.current + 1}/${MAX_RETRIES + 1})` : '';
       setInstanceData({
@@ -543,7 +554,7 @@ export function useGPUConnection(): UseGPUConnectionReturn {
         setup_message: `Finding a GPU${attemptText}...`,
       });
 
-      console.log(`[useGPUConnection] GPU instance started: ${data.instance_id}`);
+      console.log(`[useGPUConnection] GPU instance started: ${data.instance_id} (offer: ${data.offer_id})`);
 
       // Start polling for status
       startPolling();
@@ -625,6 +636,10 @@ export function useGPUConnection(): UseGPUConnectionReturn {
     }
 
     if (isMountedRef.current) {
+      // Clear refs
+      instanceIdRef.current = null;
+      offerIdRef.current = null;
+
       // Reset all state
       setProvisioningState('idle');
       setConnectionState('disconnected');
