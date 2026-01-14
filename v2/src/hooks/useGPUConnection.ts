@@ -418,7 +418,7 @@ export function useGPUConnection(): UseGPUConnectionReturn {
         clearInactivityTimers();
       };
 
-      ws.onerror = (event) => {
+      ws.onerror = (_event) => {
         // Note: The error event doesn't contain useful info in browsers for security reasons
         // The actual error details come through the onclose event
         console.error('[useGPUConnection] WebSocket error event (see onclose for details)');
