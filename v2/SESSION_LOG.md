@@ -66,6 +66,8 @@
 
 **Current Blocker:** safaridriver needs manual restart (requires authentication)
 
+**Waited for safaridriver:** ~45 minutes (multiple check intervals)
+
 ---
 
 ## Screenshots Evidence
