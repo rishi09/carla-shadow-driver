@@ -103,134 +103,53 @@ export default async function handler(req, res) {
     // Startup script that runs when the instance boots
     // Uses Cloudflare Tunnel for secure WebSocket access (no account required)
     // INSTANCE_ID is passed as environment variable for callback reporting
+    // NOTE: Must be under 4048 chars for Vast.ai
     const onstart = `#!/bin/bash
 set -e
+CB="https://carla-shadow-driver.vercel.app/api/gpu/callback"
+report() { curl -s -X POST "$CB" -H "Content-Type: application/json" -d "{\\"instance_id\\":\\"$INSTANCE_ID\\",\\"status\\":\\"$1\\",\\"message\\":\\"$2\\"}" || true; }
+die() { report "error" "$1"; exit 1; }
 
-# Function to report status to callback
-report_status() {
-    curl -s -X POST "https://carla-shadow-driver.vercel.app/api/gpu/callback" \\
-        -H "Content-Type: application/json" \\
-        -d "{\\"instance_id\\":\\"$INSTANCE_ID\\",\\"status\\":\\"$1\\",\\"message\\":\\"$2\\"}" || true
-}
+report "installing" "Installing system dependencies"
+apt-get update && apt-get install -y libgl1-mesa-glx libglib2.0-0 curl --no-install-recommends || die "apt-get failed"
 
-# Function to report error and exit
-report_error() {
-    echo "ERROR: $1"
-    report_status "error" "$1"
-    exit 1
-}
+report "installing" "Installing cloudflared"
+curl -sL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /usr/local/bin/cloudflared && chmod +x /usr/local/bin/cloudflared || die "cloudflared install failed"
 
-echo "=== Installing system dependencies ==="
-report_status "installing" "Installing system dependencies"
-if ! apt-get update; then
-    report_error "apt-get update failed"
-fi
-if ! apt-get install -y libgl1-mesa-glx libglib2.0-0 curl --no-install-recommends; then
-    report_error "apt-get install failed"
-fi
+report "installing" "Cloning repository"
+cd /workspace && git clone https://github.com/rishi09/carla-shadow-driver.git && cd carla-shadow-driver || die "git clone failed"
 
-echo "=== Installing cloudflared ==="
-report_status "installing" "Installing cloudflared"
-if ! curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /usr/local/bin/cloudflared; then
-    report_error "Failed to download cloudflared"
-fi
-chmod +x /usr/local/bin/cloudflared
+report "installing" "Installing Python dependencies"
+pip install 'numpy<2' && pip install -r requirements.txt || die "pip install failed"
 
-echo "=== Cloning repository ==="
-report_status "installing" "Cloning repository"
-cd /workspace
-if ! git clone https://github.com/rishi09/carla-shadow-driver.git; then
-    report_error "Failed to clone repository"
-fi
-cd carla-shadow-driver
+report "installing" "Downloading model"
+python scripts/download_model.py pilotnet || die "model download failed"
 
-echo "=== Installing Python dependencies ==="
-report_status "installing" "Installing Python dependencies"
-# Fix NumPy 2.x incompatibility with PyTorch
-if ! pip install 'numpy<2'; then
-    report_error "Failed to install numpy"
-fi
-if ! pip install -r requirements.txt; then
-    report_error "Failed to install Python dependencies"
-fi
-
-echo "=== Downloading model ==="
-report_status "installing" "Downloading model"
-if ! python scripts/download_model.py pilotnet; then
-    report_error "Failed to download model"
-fi
-
-echo "=== Starting WebSocket server in background ==="
-report_status "starting" "Starting WebSocket server"
+report "starting" "Starting WebSocket server"
 python src/shadow_mode.py --websocket --port 5001 &
 WS_PID=$!
-sleep 5  # Wait for server to start
+sleep 5
+kill -0 $WS_PID 2>/dev/null || die "WebSocket server failed to start"
 
-# Check if WebSocket server is running
-if ! kill -0 $WS_PID 2>/dev/null; then
-    report_error "WebSocket server failed to start"
-fi
-
-echo "=== Starting Cloudflare Tunnel ==="
-report_status "tunneling" "Starting Cloudflare tunnel"
-
-# Start cloudflared and capture ALL output to a file (much more reliable than while loop)
-cloudflared tunnel --url http://localhost:5001 > /tmp/cloudflared.log 2>&1 &
+report "tunneling" "Starting Cloudflare tunnel"
+cloudflared tunnel --url http://localhost:5001 > /tmp/cf.log 2>&1 &
 CF_PID=$!
 
-# Retry loop: 6 attempts, 10 seconds each (total 60 seconds)
-MAX_ATTEMPTS=6
-ATTEMPT=1
-TUNNEL_URL=""
-
-while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
-    echo "=== Attempt $ATTEMPT of $MAX_ATTEMPTS: Waiting for tunnel URL ==="
-    report_status "tunneling" "Waiting for tunnel URL (attempt $ATTEMPT/$MAX_ATTEMPTS)"
-
-    sleep 10
-
-    # Check if cloudflared is still running
-    if ! kill -0 $CF_PID 2>/dev/null; then
-        echo "ERROR: cloudflared died on attempt $ATTEMPT"
-        cat /tmp/cloudflared.log
-        report_error "cloudflared failed to start"
-    fi
-
-    # Clean ANSI codes before grepping (fixes parsing issues)
-    sed -i 's/\\x1b\\[[0-9;]*m//g' /tmp/cloudflared.log 2>/dev/null || true
-
-    # Try to extract tunnel URL from log
-    TUNNEL_URL=$(grep -oE 'https://[a-zA-Z0-9.-]+\\.trycloudflare\\.com' /tmp/cloudflared.log | head -1)
-
-    if [ -z "$TUNNEL_URL" ]; then
-        # Try alternate pattern (just look for trycloudflare.com anywhere)
-        TUNNEL_URL=$(grep -oE 'https://[^[:space:]]+trycloudflare[^[:space:]]*' /tmp/cloudflared.log | head -1)
-    fi
-
-    if [ -n "$TUNNEL_URL" ]; then
-        echo "=== Found Tunnel URL on attempt $ATTEMPT: $TUNNEL_URL ==="
-        break
-    fi
-
-    ATTEMPT=$((ATTEMPT + 1))
+for i in 1 2 3 4 5 6; do
+  sleep 10
+  kill -0 $CF_PID 2>/dev/null || die "cloudflared died"
+  URL=$(grep -oE 'https://[a-zA-Z0-9.-]+\\.trycloudflare\\.com' /tmp/cf.log | head -1)
+  [ -n "$URL" ] && break
+  report "tunneling" "Waiting for tunnel ($i/6)"
 done
 
-# Parse the log file for tunnel URL (final output for debugging)
-echo "=== Cloudflared output ==="
-cat /tmp/cloudflared.log
-
-if [ -n "$TUNNEL_URL" ]; then
-    echo "=== Reporting Tunnel URL: $TUNNEL_URL ==="
-    curl -s -X POST "https://carla-shadow-driver.vercel.app/api/gpu/callback" -H "Content-Type: application/json" -d "{\\"instance_id\\":\\"$INSTANCE_ID\\",\\"tunnel_url\\":\\"$TUNNEL_URL\\"}"
-    echo "=== Tunnel URL reported! ==="
+if [ -n "$URL" ]; then
+  curl -s -X POST "$CB" -H "Content-Type: application/json" -d "{\\"instance_id\\":\\"$INSTANCE_ID\\",\\"tunnel_url\\":\\"$URL\\"}"
+  report "ready" "Tunnel established"
 else
-    # Report failure with first 500 chars of log so we can debug
-    LOG_PREVIEW=$(head -c 500 /tmp/cloudflared.log | tr '\\n' ' ' | tr '"' "'")
-    echo "=== No tunnel URL found after $MAX_ATTEMPTS attempts. Log preview: $LOG_PREVIEW ==="
-    report_status "error" "No tunnel URL found after $MAX_ATTEMPTS attempts. Log: $LOG_PREVIEW"
+  die "No tunnel URL after 60s"
 fi
 
-# Keep container running
 wait $WS_PID
 `;
 
