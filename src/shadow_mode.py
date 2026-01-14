@@ -302,6 +302,16 @@ class WebSocketServer:
         if msg_type == 'ping':
             return {'type': 'pong', 'timestamp': time.time()}
 
+        if msg_type == 'handshake':
+            # Client connection handshake - acknowledge and return server info
+            return {
+                'type': 'handshake_ack',
+                'server': 'shadow-driver-ai',
+                'version': '1.0',
+                'model': self.model_mgr.current_model if hasattr(self.model_mgr, 'current_model') else 'pilotnet',
+                'status': 'ready'
+            }
+
         if msg_type in ('state_update', 'state'):
             # Extract state from browser - support both nested and flat formats
             state = data.get('state', data)

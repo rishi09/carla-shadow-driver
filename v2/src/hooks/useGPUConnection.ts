@@ -325,6 +325,8 @@ export function useGPUConnection(): UseGPUConnectionReturn {
           } else if (data.type === 'error') {
             console.error('[useGPUConnection] Error from server:', data.message);
             setError({ message: data.message, code: 'SERVER_ERROR' });
+          } else if (data.type === 'handshake_ack') {
+            console.log('[useGPUConnection] Handshake acknowledged:', data);
           }
         } catch (e) {
           console.error('[useGPUConnection] Error parsing message:', e);
