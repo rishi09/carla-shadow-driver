@@ -84,10 +84,12 @@ export default async function handler(req, res) {
 
     const offers = await searchResponse.json();
 
-    // Filter for suitable GPUs (16GB+ VRAM, decent reliability, reasonable price)
+    // Filter for suitable GPUs (16GB+ VRAM, verified, high reliability, reasonable price)
+    // IMPORTANT: Filter out deverified hosts which have broken GPU/Docker configs
     const suitable = (offers.offers || []).filter(o =>
       o.gpu_ram >= 16000 &&
-      o.reliability >= 0.90 &&
+      o.verified !== false &&     // Exclude explicitly deverified hosts
+      o.reliability >= 0.95 &&    // Higher reliability threshold (was 0.90)
       o.dph_total < 1.00  // Max $1.00/hr
     ).sort((a, b) => a.dph_total - b.dph_total);
 
