@@ -1829,3 +1829,142 @@ Our skills and checklists focused on OUR code, not external API edge cases. We h
 - Periodic manual testing with real services
 - Canary deployments that test with real traffic
 - Detailed domain-specific checklists that encode "what can go wrong"
+
+---
+
+## RETROSPECTIVE: GPU Provisioning Session (January 2026)
+
+### Summary
+
+A frustrating debugging session that required 3+ hours to get GPU provisioning working end-to-end. Multiple bugs were discovered sequentially, each blocking progress until fixed.
+
+### Bugs Encountered (in order)
+
+| # | Bug | Time to Discover | Time to Fix | What Should Have Caught It |
+|---|-----|------------------|-------------|---------------------------|
+| 1 | Dual-store type mismatch (number vs string comparison) | 30 min | 15 min | Integration test for callback storage |
+| 2 | Onstart script too long (4499 > 4048 chars) | 10 min | 15 min | Pre-deploy validation script |
+| 3 | Handshake message not handled by Python server | 5 min | 10 min | API contract documentation + test |
+
+### Root Cause Analysis
+
+#### Bug 1: Dual-store Type Mismatch
+
+**What:** `mapping.instance_id !== instance_id` always evaluated oddly because Redis stored instance_id as a number but the comparison was against a string.
+
+**Why it wasn't caught:**
+- No integration test for the callback → status polling flow
+- The "CRITICAL FIX" code was added but never tested
+- Skills mention dual-store but don't require testing it
+
+**Fix needed:**
+- Add integration test that POSTs to callback and GETs from status
+- Add type coercion in the comparison (`String(mapping.instance_id)`)
+
+#### Bug 2: Onstart Script Too Long
+
+**What:** Script was 4499 characters, Vast.ai limit is 4048.
+
+**Why it wasn't caught:**
+- No validation step for script length
+- Script grew organically with verbose error handling
+- gpu-provisioning-checklist.md doesn't mention length limits
+
+**Fix needed:**
+- Add comment in start.js: "// NOTE: Must be under 4048 chars for Vast.ai"
+- Add CI check or pre-commit hook to validate script length
+- Document the limit in gpu-provisioning-checklist.md
+
+#### Bug 3: Handshake Message Not Handled
+
+**What:** Frontend sends `{type: "handshake"}` on WebSocket connect, Python server returns error.
+
+**Why it wasn't caught:**
+- No API contract between frontend and GPU server
+- Frontend and server developed at different times
+- No integration test for WebSocket message types
+
+**Fix needed:**
+- Create WebSocket API contract documentation
+- Add handler for handshake in Python server
+- Add integration test that connects and sends handshake
+
+### Skill Gaps Identified
+
+| Gap | Skill Impact | Fix |
+|-----|-------------|-----|
+| No WebSocket API contract | Frontend/server mismatch | Create `websocket-api-contract.md` |
+| No script length validation | Vast.ai rejection | Add to `gpu-provisioning-checklist.md` |
+| No callback integration test | Dual-store bug | Add to testing requirements |
+| No end-to-end GPU test in CI | All GPU bugs | Manual test checklist (can't automate) |
+
+### Agent/Testing Gaps
+
+| Component | Current State | Gap |
+|-----------|--------------|-----|
+| **Unit tests** | 209 passing | ✅ Good for game logic |
+| **API tests** | curl commands | ❌ No automated test suite |
+| **Integration tests** | E2E navigation skipped | ❌ Critical path not tested |
+| **GPU integration** | None | ❌ No automated testing possible |
+| **WebSocket tests** | None | ❌ No contract verification |
+
+### Recommendations
+
+#### Immediate Actions
+
+1. **Add to gpu-provisioning-checklist.md:**
+   ```markdown
+   ### 7. Script Size Check
+   - [ ] Onstart script is under 4048 characters
+   - [ ] Run: `node -e "..." | grep 'characters'` to verify
+   ```
+
+2. **Create websocket-api-contract.md:**
+   ```markdown
+   ## WebSocket Message Types
+
+   ### Client → Server
+   | Type | Payload | Description |
+   |------|---------|-------------|
+   | handshake | {client, version} | Initial connection |
+   | ping | {timestamp} | Keepalive |
+   | state_update | {position, speed, curvature} | Game state |
+
+   ### Server → Client
+   | Type | Payload | Description |
+   |------|---------|-------------|
+   | handshake_ack | {server, version, model} | Connection confirmed |
+   | pong | {timestamp} | Keepalive response |
+   | prediction | {steering, confidence, ...} | AI prediction |
+   | error | {message} | Error occurred |
+   ```
+
+3. **Add pre-deploy integration test:**
+   ```bash
+   # Test callback flow
+   curl -X POST callback -d '{"instance_id":"test123",...}'
+   sleep 1
+   curl status?instance_id=test123 | grep 'found":true'
+   ```
+
+#### Long-term Improvements
+
+1. **Contract-First Development:** Before adding new message types, document them first
+2. **Script Size CI Check:** Add GitHub Action that validates onstart script length
+3. **Manual GPU Test Checklist:** Before any GPU-related release, run through a manual test with real Vast.ai
+4. **WebSocket Test Harness:** Create a simple test client that verifies all message types
+
+### Files to Update
+
+| File | Change |
+|------|--------|
+| `.claude/skills/gpu-provisioning-checklist.md` | Add script size check |
+| `.claude/skills/websocket-api-contract.md` | NEW - Document message types |
+| `vercel-deploy/api/gpu/start.js` | Add length limit comment |
+| `src/shadow_mode.py` | Document supported message types |
+
+### Conclusion
+
+The GPU provisioning flow crosses multiple systems (React frontend → Vercel API → Vast.ai → GPU Python server → Cloudflare tunnel → WebSocket back to frontend). Each boundary is a potential failure point. Our skills focused on individual components but missed the cross-boundary integration points.
+
+**Key Insight:** The bugs weren't in the "hard" logic - they were in the glue code between systems. We need better contract documentation and integration testing.

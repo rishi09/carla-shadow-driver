@@ -66,6 +66,50 @@ Vast.ai has TWO IDs:
 
 **Critical:** Store data under BOTH IDs so polling works regardless of which ID is used.
 
+### 6. Script Size Limit
+
+**CRITICAL:** Vast.ai has a 4048 character limit for the `onstart` script (and `args` parameter).
+
+Check script size before deploying:
+```bash
+node -e "
+const fs = require('fs');
+const content = fs.readFileSync('vercel-deploy/api/gpu/start.js', 'utf8');
+const match = content.match(/const onstart = \\\`([\\s\\S]*?)\\\`;/);
+if (match) {
+  console.log('Onstart script length:', match[1].length, 'characters');
+  console.log('Vast.ai limit: 4048 characters');
+  if (match[1].length > 4048) {
+    console.log('ERROR: Script is', match[1].length - 4048, 'chars over limit!');
+    process.exit(1);
+  }
+}
+"
+```
+
+If script is too long:
+- Remove verbose echo statements
+- Use shorter variable names
+- Remove debug output
+- Condense error handling
+
+### 7. WebSocket API Contract
+
+The frontend and GPU server must agree on message types:
+
+| Client → Server | Server → Client |
+|----------------|-----------------|
+| `handshake` | `handshake_ack` |
+| `ping` | `pong` |
+| `state_update` | `prediction` |
+| `switch_model` | `status` |
+| `get_status` | `error` |
+
+**Before adding new message types:**
+1. Document in both frontend and server
+2. Add handler in server before frontend sends
+3. Test with real connection
+
 ## Testing Checklist
 
 ### Manual Testing (Before Major Releases)
