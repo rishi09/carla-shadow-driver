@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "GPU provisioning API for Shadow Driver",
   "dependencies": {
-    "@upstash/redis": "^1.34.3"
+    "@upstash/redis": "^1.34.3",
+    "mcpbrowser": "^0.3.4"
   }
 }

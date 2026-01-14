@@ -1765,3 +1765,67 @@ cd v2 && npx playwright test --update-snapshots
 ```
 
 **Lesson:** Unit tests prove code works. Visual tests prove the UI looks correct. Both are needed for comprehensive quality assurance.
+
+---
+
+### INFRA-007: Deverified GPU Host Incident (January 2026)
+
+**Issue:** GPU provisioning failed with "OCI runtime create failed: failed to inject CDI devices"
+
+**Root Cause:** Vast.ai returned a GPU host that was marked "Deverified" - meaning Vast.ai knows the host has broken Docker/NVIDIA configuration. Our filter only checked `reliability >= 0.90`, which wasn't strict enough.
+
+**Symptoms:**
+- User clicks "Start GPU"
+- GPU instance is created successfully
+- Instance immediately shows status "stopped"
+- Frontend polls forever waiting for tunnel URL that will never come
+- In Vast.ai console: "Deverified" badge on the host
+
+**Fix:**
+1. Added `verified !== false` filter to GPU selection
+2. Increased reliability threshold from 0.90 to 0.95
+3. Added automatic retry logic (up to 3 attempts with different GPUs)
+4. Added detection of `status === 'stopped'` to trigger retry
+5. Improved UI to show real status messages and retry progress
+
+**Files Changed:**
+- `vercel-deploy/api/gpu/start.js` - Added verified filter
+- `v2/src/hooks/useGPUConnection.ts` - Added retry logic
+- `v2/src/components/game/GPUConnectionModal.tsx` - Real status messages
+
+**Organizational Gap Identified:**
+Our skills and checklists focused on OUR code, not external API edge cases. We had no skill that asked "what can go wrong with the third-party service?"
+
+**Skills Added:**
+- `.claude/skills/external-api-integration.md` - Checklist for external APIs
+- `.claude/skills/gpu-provisioning-checklist.md` - GPU-specific checklist
+
+**Lesson:** When integrating with external services that provide a pool of resources (GPUs, servers, instances), always:
+1. Check for quality/health indicators (verified, reliability)
+2. Implement retry with DIFFERENT resources
+3. Detect silent failures (resource exists but is broken)
+4. Log which resources are selected for debugging
+
+---
+
+### ORG-005: External API Testing Gap (January 2026)
+
+**Gap Identified:** All testing was mocked. We never provisioned a real GPU during development or CI, so we couldn't catch Vast.ai-specific edge cases.
+
+**Root Cause Analysis:**
+- Unit tests: Mocked
+- API tests: curl against our endpoints, but not real Vast.ai
+- UI tests: Simulated clicks, no real GPU
+- CI: Can't easily provision real GPUs
+
+**Partial Mitigation:**
+1. Created detailed checklists capturing Vast.ai domain knowledge
+2. Added retry logic to handle failures gracefully
+3. Improved error messages so users aren't stuck forever
+
+**Remaining Risk:** We still don't have automated tests against real Vast.ai. Manual testing with real GPUs is recommended before major releases.
+
+**Lesson:** For critical external integrations, consider:
+- Periodic manual testing with real services
+- Canary deployments that test with real traffic
+- Detailed domain-specific checklists that encode "what can go wrong"
