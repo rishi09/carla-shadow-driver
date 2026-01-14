@@ -119,6 +119,15 @@ const INACTIVITY_DISCONNECT_TIMEOUT = 5 * 60 * 1000;
 /** Ping interval for keepalive (ms) */
 const PING_INTERVAL = 30000;
 
+/** Delay before connecting WebSocket after tunnel ready (ms) */
+const WS_CONNECT_DELAY = 3000;
+
+/** Max WebSocket connection retries */
+const WS_MAX_RETRIES = 3;
+
+/** Delay between WebSocket retry attempts (ms) */
+const WS_RETRY_DELAY = 2000;
+
 /** API base URL - the GPU API is hosted on the main vercel-deploy project */
 const API_BASE_URL = 'https://carla-shadow-driver.vercel.app';
 
@@ -172,6 +181,12 @@ export function useGPUConnection(): UseGPUConnectionReturn {
   // State updates are async, but refs update synchronously
   const instanceIdRef = useRef<string | null>(null);
   const offerIdRef = useRef<string | null>(null);
+
+  // Ref for WebSocket connection retry count
+  const wsRetryCountRef = useRef(0);
+
+  // Ref to store tunnel URL for WebSocket retries
+  const tunnelUrlRef = useRef<string | null>(null);
 
   // ----- Cleanup Helpers -----
 
@@ -248,7 +263,15 @@ export function useGPUConnection(): UseGPUConnectionReturn {
     }
   }, [clearPingInterval]);
 
-  const connectWebSocket = useCallback((tunnelUrl: string) => {
+  const connectWebSocket = useCallback((tunnelUrl: string, isRetry: boolean = false) => {
+    // Store tunnel URL for potential retries
+    tunnelUrlRef.current = tunnelUrl;
+
+    // Reset retry count on fresh connection attempt
+    if (!isRetry) {
+      wsRetryCountRef.current = 0;
+    }
+
     // Close any existing connection
     closeWebSocket();
 
@@ -256,11 +279,20 @@ export function useGPUConnection(): UseGPUConnectionReturn {
 
     setConnectionState('connecting');
 
+    // Update status message for retries
+    if (isRetry) {
+      setInstanceData((prev) => ({
+        ...prev,
+        setup_status: 'connecting',
+        setup_message: `Connecting to AI (attempt ${wsRetryCountRef.current + 1}/${WS_MAX_RETRIES + 1})...`,
+      }));
+    }
+
     // Convert HTTPS tunnel URL to WSS for WebSocket
     // e.g., https://xxx.trycloudflare.com -> wss://xxx.trycloudflare.com
     const wsUrl = tunnelUrl.replace('https://', 'wss://').replace('http://', 'ws://');
 
-    console.log(`[useGPUConnection] Connecting to WebSocket: ${wsUrl}`);
+    console.log(`[useGPUConnection] Connecting to WebSocket: ${wsUrl}${isRetry ? ` (retry ${wsRetryCountRef.current})` : ''}`);
 
     try {
       const ws = new WebSocket(wsUrl);
@@ -275,6 +307,8 @@ export function useGPUConnection(): UseGPUConnectionReturn {
         console.log('[useGPUConnection] WebSocket connected');
         setConnectionState('connected');
         setError(null);
+        // Reset retry count on successful connection
+        wsRetryCountRef.current = 0;
 
         // Send handshake
         ws.send(JSON.stringify({
@@ -336,20 +370,59 @@ export function useGPUConnection(): UseGPUConnectionReturn {
       ws.onclose = (event) => {
         if (!isMountedRef.current) return;
 
-        console.log(`[useGPUConnection] WebSocket closed: ${event.code} ${event.reason}`);
+        // Log detailed close info for debugging
+        // Close codes: https://developer.mozilla.org/en-US/docs/Web/API/CloseEvent/code
+        // 1000 = Normal, 1001 = Going away, 1006 = Abnormal (no close frame), 1015 = TLS error
+        console.log(`[useGPUConnection] WebSocket closed:`, {
+          code: event.code,
+          reason: event.reason || '(no reason)',
+          wasClean: event.wasClean,
+          retryCount: wsRetryCountRef.current,
+        });
+
+        // Provide user-friendly error messages based on close code
+        let errorMessage = 'WebSocket connection closed';
+        if (event.code === 1006) {
+          errorMessage = 'Connection failed - server may not be ready or tunnel is down';
+        } else if (event.code === 1015) {
+          errorMessage = 'TLS/SSL handshake failed';
+        } else if (event.reason) {
+          errorMessage = `Connection closed: ${event.reason}`;
+        }
+
+        // Check if we should retry (on connection failure, not clean close)
+        const shouldRetry = !event.wasClean &&
+          event.code === 1006 &&
+          wsRetryCountRef.current < WS_MAX_RETRIES &&
+          tunnelUrlRef.current;
+
+        if (shouldRetry) {
+          wsRetryCountRef.current += 1;
+          console.log(`[useGPUConnection] Retrying WebSocket connection (${wsRetryCountRef.current}/${WS_MAX_RETRIES})...`);
+
+          // Schedule retry after delay
+          setTimeout(() => {
+            if (isMountedRef.current && tunnelUrlRef.current) {
+              connectWebSocket(tunnelUrlRef.current, true);
+            }
+          }, WS_RETRY_DELAY);
+          return;
+        }
+
+        // No more retries or clean close - set error and clean up
+        if (!event.wasClean) {
+          setError({ message: errorMessage, code: `WS_CLOSE_${event.code}` });
+        }
+
         closeWebSocket();
         clearInactivityTimers();
-
-        // If we were in 'running' state, the connection closed unexpectedly
-        // Don't auto-reconnect here as the user should manually restart if needed
       };
 
       ws.onerror = (event) => {
-        console.error('[useGPUConnection] WebSocket error:', event);
-        if (isMountedRef.current) {
-          setError({ message: 'WebSocket connection failed', code: 'WS_ERROR' });
-          setConnectionState('disconnected');
-        }
+        // Note: The error event doesn't contain useful info in browsers for security reasons
+        // The actual error details come through the onclose event
+        console.error('[useGPUConnection] WebSocket error event (see onclose for details)');
+        // Don't set error here - let onclose handle it with the close code
       };
 
     } catch (e) {
@@ -478,16 +551,16 @@ export function useGPUConnection(): UseGPUConnectionReturn {
 
       // Check if tunnel is ready and we should connect
       if (data.tunnel_url && data.status === 'running' && connectionState === 'disconnected') {
-        console.log('[useGPUConnection] Tunnel ready, connecting...');
+        console.log('[useGPUConnection] Tunnel ready, connecting after delay...');
         clearPolling();
         setProvisioningState('running');
 
-        // Small delay before connecting
+        // Delay before connecting to let tunnel stabilize
         setTimeout(() => {
           if (isMountedRef.current) {
             connectWebSocket(data.tunnel_url);
           }
-        }, 1000);
+        }, WS_CONNECT_DELAY);
       }
 
     } catch (e) {
