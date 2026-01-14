@@ -72,19 +72,19 @@
 
   "checkpoints": [
     {
-      "id": 1,
+      "id": 0,
       "position": { "x": 820, "y": 300 },
       "width": 120,
       "angle": 1.5708
     },
     {
-      "id": 2,
+      "id": 1,
       "position": { "x": 450, "y": 480 },
       "width": 120,
       "angle": 0
     },
     {
-      "id": 3,
+      "id": 2,
       "position": { "x": 80, "y": 300 },
       "width": 120,
       "angle": 1.5708
