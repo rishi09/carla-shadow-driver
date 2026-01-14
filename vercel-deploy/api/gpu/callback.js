@@ -149,16 +149,26 @@ export default async function handler(req, res) {
     // The GPU reports using offer.id (from env var), but frontend polls using new_contract
     // Look up the mapping and also store under the real instance_id
     const mapping = await getOfferMapping(instance_id);
-    if (mapping && mapping.instance_id && mapping.instance_id !== instance_id) {
-      console.log(`[Callback] Also storing data under mapped instance_id: ${mapping.instance_id}`);
-      await setData(mapping.instance_id, data);
+    let alsoStoredUnder = null;
+    if (mapping && mapping.instance_id) {
+      const mappedId = String(mapping.instance_id);
+      if (mappedId !== instance_id) {
+        console.log(`[Callback] Also storing data under mapped instance_id: ${mappedId}`);
+        await setData(mappedId, data);
+        alsoStoredUnder = mappedId;
+      }
     }
 
     return res.status(200).json({
       status: 'ok',
       instance_id,
       using_redis: useRedis,
-      data
+      data,
+      debug: {
+        mapping_found: !!mapping,
+        mapping,
+        also_stored_under: alsoStoredUnder
+      }
     });
   }
 
