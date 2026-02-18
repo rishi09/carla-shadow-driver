@@ -26,7 +26,6 @@ interface VastOffer {
 // - Installs cloudflared reliably
 // - Captures tunnel URL via grep
 const ONSTART_SCRIPT = `#!/bin/bash
-set -e
 
 # Instance ID: prefer VAST_CONTAINERLABEL (auto-set by vast.ai), fall back to env var
 INST_ID="\${VAST_CONTAINERLABEL:-\${INSTANCE_ID}}"
@@ -34,14 +33,14 @@ CALLBACK_URL="${CALLBACK_URL}"
 
 # Function to report status to callback
 report_status() {
-  curl -s -X POST "$CALLBACK_URL" \\
+  curl -s -X POST "\$CALLBACK_URL" \\
     -H "Content-Type: application/json" \\
-    -d "{\\"instance_id\\":\\"$INST_ID\\",\\"status\\":\\"$1\\",\\"message\\":\\"$2\\"}" || true
+    -d "{\\"instance_id\\":\\"\$INST_ID\\",\\"status\\":\\"\\$1\\",\\"message\\":\\"\\$2\\"}" || true
 }
 
 echo "=== Installing system dependencies ==="
 report_status "installing" "Installing system dependencies"
-apt-get update && apt-get install -y curl --no-install-recommends
+apt-get update -qq && apt-get install -y -qq curl --no-install-recommends || true
 
 echo "=== Installing cloudflared ==="
 report_status "installing" "Installing cloudflared"
@@ -50,7 +49,7 @@ chmod +x /usr/local/bin/cloudflared
 
 echo "=== Installing Python dependencies ==="
 report_status "installing" "Installing Python dependencies"
-pip install websockets numpy torch --quiet
+pip install websockets --quiet
 
 echo "=== Starting WebSocket AI server ==="
 report_status "starting" "Starting AI server"
