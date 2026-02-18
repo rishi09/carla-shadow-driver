@@ -128,8 +128,8 @@ const WS_MAX_RETRIES = 3;
 /** Delay between WebSocket retry attempts (ms) */
 const WS_RETRY_DELAY = 2000;
 
-/** API base URL - the GPU API is hosted on the main vercel-deploy project */
-const API_BASE_URL = 'https://carla-shadow-driver.vercel.app';
+/** API base URL - empty string means same origin (v2 has its own API routes) */
+const API_BASE_URL = '';
 
 // ============================================================================
 // Hook Implementation

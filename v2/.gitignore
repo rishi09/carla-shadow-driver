@@ -1,26 +1,51 @@
-# Logs
-logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
 
-node_modules
-dist
-dist-ssr
-coverage
-*.local
+# Virtual environment
+venv/
+env/
+.venv/
 
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
-.idea
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
 .DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
+Thumbs.db
+
+# Recordings (large data files)
+data/recordings/*/images/
+*.mp4
+*.avi
+
+# Model weights (download separately)
+models/*.pt
+models/*.pth
+models/*.onnx
+
+# Logs
+*.log
+logs/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Temporary files
+*.tmp
+*.temp
+
+# Keep directory structure
+!data/recordings/.gitkeep
+!models/.gitkeep
 .vercel
+.env*.local
+node_modules/
+dist/
+coverage/
+test-results/
+playwright-report/
