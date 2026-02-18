@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { useGPUConnection } from '../hooks/useGPUConnection.ts';
 import { useEngineSound } from '../hooks/useEngineSound.ts';
+import { useBackgroundMusic } from '../hooks/useBackgroundMusic.ts';
 import { VideoCanvas } from '../components/VideoCanvas.tsx';
 import { RaceHUD } from '../components/RaceHUD.tsx';
 import { SpeedEffects } from '../components/SpeedEffects.tsx';
@@ -21,14 +22,23 @@ export function Race() {
   const keysRef = useRef<KeyState>({ w: false, a: false, s: false, d: false, space: false });
   const keyIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const respawnTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cameraIndexRef = useRef(0);
+  const CAMERA_MODES = ['chase', 'hood', 'bumper'] as const;
 
   const gpu = useGPUConnection();
   const engineSound = useEngineSound();
+  const bgMusic = useBackgroundMusic();
 
   // Track previous race_status for countdown detection
   const prevRaceStatusRef = useRef<string | null>(null);
 
-  // --- Engine sound update loop ---
+  // --- Screen shake state ---
+  const [shakeX, setShakeX] = useState(0);
+  const [shakeY, setShakeY] = useState(0);
+  const shakeRef = useRef<{ x: number; y: number; decay: number }>({ x: 0, y: 0, decay: 0 });
+  const shakeRafRef = useRef<number | null>(null);
+
+  // --- Engine sound + background music update loop ---
   useEffect(() => {
     if (view !== 'racing') return;
 
@@ -42,13 +52,19 @@ export function Race() {
           player.speed_kmh,
           player.steer ?? 0,
         );
+
+        // Update background music intensity based on speed and gap
+        const speedFactor = player.speed_kmh / 150;
+        const gapCloseFactor = (player.gap_seconds != null && Math.abs(player.gap_seconds) < 3) ? 0.3 : 0;
+        const intensity = Math.min(1.0, speedFactor + gapCloseFactor);
+        bgMusic.updateIntensity(intensity);
       }
       rafId = requestAnimationFrame(tick);
     };
     rafId = requestAnimationFrame(tick);
 
     return () => { cancelAnimationFrame(rafId); };
-  }, [view, gpu.raceState, engineSound.update]);
+  }, [view, gpu.raceState, engineSound.update, bgMusic.updateIntensity]);
 
   // --- Countdown beeps ---
   useEffect(() => {
@@ -58,6 +74,77 @@ export function Race() {
     }
     prevRaceStatusRef.current = status;
   }, [gpu.raceState?.race_status, engineSound.playCountdownBeeps]);
+
+  // --- Collision: screen shake + impact sound ---
+  useEffect(() => {
+    const collisions = gpu.raceState?.collisions;
+    if (!collisions || collisions.length === 0) return;
+
+    // Play impact sound for each collision
+    for (const collision of collisions) {
+      engineSound.playImpact(collision.intensity);
+    }
+
+    // Use the strongest collision for shake intensity
+    const maxIntensity = Math.max(...collisions.map(c => c.intensity));
+    // Shake magnitude: proportional to intensity, capped at 10px
+    const magnitude = Math.min(10, maxIntensity / 500);
+
+    // Set initial shake values
+    shakeRef.current = {
+      x: (Math.random() - 0.5) * 2 * magnitude,
+      y: (Math.random() - 0.5) * 2 * magnitude,
+      decay: magnitude,
+    };
+
+    // Cancel any existing shake animation
+    if (shakeRafRef.current !== null) {
+      cancelAnimationFrame(shakeRafRef.current);
+    }
+
+    const shakeStart = performance.now();
+    const shakeDuration = 300; // ms
+
+    const animateShake = (now: number) => {
+      const elapsed = now - shakeStart;
+      if (elapsed >= shakeDuration) {
+        setShakeX(0);
+        setShakeY(0);
+        shakeRafRef.current = null;
+        return;
+      }
+
+      // Decay factor: starts at 1, goes to 0 over shakeDuration
+      const decayFactor = 1 - elapsed / shakeDuration;
+      const currentMag = magnitude * decayFactor;
+
+      const newX = (Math.random() - 0.5) * 2 * currentMag;
+      const newY = (Math.random() - 0.5) * 2 * currentMag;
+      setShakeX(newX);
+      setShakeY(newY);
+
+      shakeRafRef.current = requestAnimationFrame(animateShake);
+    };
+
+    shakeRafRef.current = requestAnimationFrame(animateShake);
+
+    return () => {
+      if (shakeRafRef.current !== null) {
+        cancelAnimationFrame(shakeRafRef.current);
+        shakeRafRef.current = null;
+      }
+    };
+  }, [gpu.raceState?.collisions, engineSound.playImpact]);
+
+  // --- Background music lifecycle ---
+  useEffect(() => {
+    const status = gpu.raceState?.race_status;
+    if (view === 'racing' && (status === 'racing' || status === 'countdown')) {
+      bgMusic.start();
+    } else {
+      bgMusic.stop();
+    }
+  }, [view, gpu.raceState?.race_status, bgMusic.start, bgMusic.stop]);
 
   // --- Keyboard controls ---
   useEffect(() => {
@@ -70,6 +157,11 @@ export function Race() {
         setShowRespawning(true);
         if (respawnTimeoutRef.current) clearTimeout(respawnTimeoutRef.current);
         respawnTimeoutRef.current = setTimeout(() => setShowRespawning(false), 1500);
+        return;
+      }
+      if (key === 'c') {
+        cameraIndexRef.current = (cameraIndexRef.current + 1) % CAMERA_MODES.length;
+        gpu.sendCameraMode(CAMERA_MODES[cameraIndexRef.current]);
         return;
       }
       if (key === ' ') {
@@ -109,7 +201,7 @@ export function Race() {
         respawnTimeoutRef.current = null;
       }
     };
-  }, [view, gpu.sendControls, gpu.sendRespawn]);
+  }, [view, gpu.sendControls, gpu.sendRespawn, gpu.sendCameraMode]);
 
   // --- Watch for race finished ---
   useEffect(() => {
@@ -170,7 +262,10 @@ export function Race() {
 
       {/* Racing view */}
       {view === 'racing' && (
-        <div className="relative w-full h-screen">
+        <div
+          className="relative w-full h-screen"
+          style={{ transform: `translate(${shakeX}px, ${shakeY}px)` }}
+        >
           {/* Video feed */}
           <VideoCanvas
             onBinaryFrame={gpu.onBinaryFrame}
@@ -202,6 +297,13 @@ export function Race() {
             &#x2190; Exit
           </button>
 
+          {/* Camera mode pill */}
+          <div className="absolute top-14 left-4 z-10">
+            <div className="bg-black/60 backdrop-blur-sm rounded-full px-3 py-1 text-xs font-mono text-white/60 border border-white/10 uppercase tracking-wider">
+              {gpu.cameraMode}
+            </div>
+          </div>
+
           {/* GPU cost indicator */}
           {gpu.instanceData.cost_so_far > 0 && (
             <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10">
@@ -214,9 +316,13 @@ export function Race() {
           {/* Minimap */}
           <Minimap raceState={gpu.raceState} />
 
-          {/* Mute/unmute button */}
+          {/* Mute/unmute button (controls both engine sound and background music) */}
           <button
-            onClick={() => engineSound.setMuted(!engineSound.isMuted)}
+            onClick={() => {
+              const newMuted = !engineSound.isMuted;
+              engineSound.setMuted(newMuted);
+              bgMusic.setMuted(newMuted);
+            }}
             className="absolute bottom-4 left-4 z-10 pointer-events-auto bg-black/60 backdrop-blur-sm rounded-lg px-3 py-2 text-white/60 hover:text-white text-sm border border-white/10 transition-colors"
             title={engineSound.isMuted ? 'Unmute' : 'Mute'}
           >

@@ -21,6 +21,8 @@ export interface RaceState {
   countdown?: number | null;
   jpeg_quality?: number;
   checkpoints?: Array<{ x: number; y: number }>;
+  collisions?: Array<{ intensity: number }>;
+  camera_mode?: string;
 }
 
 export interface RacerState {
@@ -69,6 +71,9 @@ export type ServerMessage = RaceState | RaceFinished | HandshakeAck | {
   success: boolean;
 } | {
   type: 'respawn_ack';
+} | {
+  type: 'camera_mode_changed';
+  mode: string;
 } | {
   type: 'error';
   message: string;

@@ -69,6 +69,7 @@ function createWhiteNoiseBuffer(ctx: AudioContext): AudioBuffer {
 export interface UseEngineSoundReturn {
   update: (rpm: number, throttle: number, speed: number, steer: number) => void;
   playCountdownBeeps: () => void;
+  playImpact: (intensity: number) => void;
   setMuted: (muted: boolean) => void;
   isMuted: boolean;
 }
@@ -279,6 +280,46 @@ export function useEngineSound(): UseEngineSoundReturn {
     playBeep(now + 3.0, 0.6, 440, 0.8);
   }, []);
 
+  // Play collision impact sound: short white noise burst through low-pass filter
+  const playImpact = useCallback((intensity: number) => {
+    const nodes = nodesRef.current;
+    if (!nodes || nodes.ctx.state === 'closed' || nodes.ctx.state === 'suspended') return;
+    if (!noiseBufferRef.current) return;
+
+    const ctx = nodes.ctx;
+    const now = ctx.currentTime;
+
+    // Normalized volume: intensity / 5000, capped at 1.0
+    const volume = Math.min(1.0, intensity / 5000);
+
+    // Duration scales slightly with intensity: 100-200ms
+    const duration = 0.1 + 0.1 * volume;
+
+    // Create a one-shot white noise source
+    const source = ctx.createBufferSource();
+    source.buffer = noiseBufferRef.current;
+    source.loop = false;
+
+    // Low-pass filter at ~500Hz for a thuddy impact
+    const lpFilter = ctx.createBiquadFilter();
+    lpFilter.type = 'lowpass';
+    lpFilter.frequency.value = 500;
+    lpFilter.Q.value = 1.0;
+
+    // Gain envelope: sharp attack, rapid decay
+    const impactGain = ctx.createGain();
+    impactGain.gain.setValueAtTime(volume, now);
+    impactGain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+    // Connect: source -> lowpass -> gain -> master
+    source.connect(lpFilter);
+    lpFilter.connect(impactGain);
+    impactGain.connect(nodes.masterGain);
+
+    source.start(now);
+    source.stop(now + duration);
+  }, []);
+
   // Mute/unmute toggle
   const setMuted = useCallback((muted: boolean) => {
     mutedRef.current = muted;
@@ -314,7 +355,7 @@ export function useEngineSound(): UseEngineSoundReturn {
     };
   }, []);
 
-  return { update, playCountdownBeeps, setMuted, isMuted };
+  return { update, playCountdownBeeps, playImpact, setMuted, isMuted };
 }
 
 export default useEngineSound;

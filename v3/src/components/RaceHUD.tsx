@@ -121,7 +121,7 @@ export function RaceHUD({ raceState, latencyMs, className = '' }: RaceHUDProps) 
               {latencyMs}ms
             </div>
           )}
-          <div className="text-white/20 text-xs font-mono mt-1">WASD + Space | R=Reset</div>
+          <div className="text-white/20 text-xs font-mono mt-1">WASD + Space | R=Reset | C=Camera</div>
         </div>
       </div>
     </div>

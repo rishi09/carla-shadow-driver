@@ -8,7 +8,23 @@ import { WebSocketServer } from 'ws';
 import { createCanvas } from 'canvas'; // npm install canvas ws
 
 const PORT = 8765;
-const FPS = 20;
+const FPS = 30;
+
+// Generate 10 fake checkpoint positions along a rough oval track
+function generateCheckpoints() {
+  const checkpoints = [];
+  for (let i = 0; i < 10; i++) {
+    const angle = (i / 10) * Math.PI * 2;
+    checkpoints.push({
+      x: 200 + Math.cos(angle) * 150,
+      y: 200 + Math.sin(angle) * 100,
+      index: i,
+    });
+  }
+  return checkpoints;
+}
+
+const TRACK_CHECKPOINTS = generateCheckpoints();
 
 // Create a simple test frame (colored rectangle with text)
 function createTestFrame(frameNum, playerSpeed, aiSpeed) {
@@ -96,9 +112,26 @@ wss.on('connection', (ws) => {
   let playerCheckpoint = 0;
   let aiCheckpoint = 0;
   let countdown = 3;
+  let cameraMode = 'chase';
+  let jpegQuality = 70;
+  let raceTrack = 'Town01';
+  let raceLaps = 3;
+  let raceWeather = 'ClearNoon';
+
+  // Slowly changing positions for player/AI (simulates driving around a track)
+  let playerX = 200;
+  let playerY = 200;
+  let aiX = 210;
+  let aiY = 210;
 
   ws.on('message', (data) => {
-    const msg = JSON.parse(data.toString());
+    let msg;
+    try {
+      msg = JSON.parse(data.toString());
+    } catch (e) {
+      // Binary data or invalid JSON, ignore
+      return;
+    }
     console.log('Received:', msg.type);
 
     if (msg.type === 'handshake') {
@@ -110,15 +143,48 @@ wss.on('connection', (ws) => {
     } else if (msg.type === 'ping') {
       ws.send(JSON.stringify({ type: 'pong', timestamp: msg.timestamp }));
     } else if (msg.type === 'start_race') {
-      console.log(`Starting race: track=${msg.track}, laps=${msg.laps}`);
+      raceTrack = msg.track || 'Town01';
+      raceLaps = msg.laps || 3;
+      raceWeather = msg.weather || 'ClearNoon';
+      console.log(`Starting race: track=${raceTrack}, laps=${raceLaps}, weather=${raceWeather}`);
       racing = true;
       countdown = 3;
+      playerLap = 1;
+      aiLap = 1;
+      playerCheckpoint = 0;
+      aiCheckpoint = 0;
+      frameNum = 0;
       raceStartTime = Date.now();
       startRaceLoop(ws);
     } else if (msg.type === 'switch_model') {
       ws.send(JSON.stringify({ type: 'model_switched', model: msg.model, success: true }));
     } else if (msg.type === 'control') {
-      // Log controls including space (handbrake)
+      // Log controls including space (handbrake) and latency field
+      if (msg.latency !== undefined) {
+        // Adapt JPEG quality based on reported latency
+        if (msg.latency > 150) {
+          jpegQuality = Math.max(30, jpegQuality - 5);
+        } else if (msg.latency < 50) {
+          jpegQuality = Math.min(90, jpegQuality + 2);
+        }
+      }
+    } else if (msg.type === 'respawn') {
+      console.log('Player requested respawn');
+      // Reset player position to last checkpoint
+      const cp = TRACK_CHECKPOINTS[playerCheckpoint] || TRACK_CHECKPOINTS[0];
+      playerX = cp.x;
+      playerY = cp.y;
+      ws.send(JSON.stringify({
+        type: 'respawn_ack',
+        checkpoint: playerCheckpoint,
+      }));
+    } else if (msg.type === 'camera_mode') {
+      cameraMode = msg.mode || 'chase';
+      console.log(`Camera mode changed to: ${cameraMode}`);
+      ws.send(JSON.stringify({
+        type: 'camera_mode_changed',
+        mode: cameraMode,
+      }));
     }
   });
 
@@ -129,18 +195,45 @@ wss.on('connection', (ws) => {
       frameNum++;
       const elapsed = (Date.now() - raceStartTime) / 1000;
 
+      // Slowly update car positions (drive around an oval-ish track)
+      const playerAngle = elapsed * 0.3;
+      const aiAngle = elapsed * 0.32 + 0.5;
+      playerX = 200 + Math.cos(playerAngle) * 150 + Math.sin(playerAngle * 0.7) * 20;
+      playerY = 200 + Math.sin(playerAngle) * 100 + Math.cos(playerAngle * 0.5) * 15;
+      aiX = 200 + Math.cos(aiAngle) * 150 + Math.sin(aiAngle * 0.7) * 20;
+      aiY = 200 + Math.sin(aiAngle) * 100 + Math.cos(aiAngle * 0.5) * 15;
+
       // Countdown phase
       if (countdown > 0 && elapsed < 3) {
         countdown = 3 - Math.floor(elapsed);
         ws.send(JSON.stringify({
           type: 'race_state',
-          player: { speed_kmh: 0, lap: 1, total_laps: 3, checkpoint: 0, lap_time: 0, best_lap: null, position: 1, finished: false },
-          ai: { speed_kmh: 0, lap: 1, total_laps: 3, checkpoint: 0, lap_time: 0, best_lap: null, position: 2, finished: false },
+          player: {
+            speed_kmh: 0, lap: 1, total_laps: raceLaps, checkpoint: 0,
+            lap_time: 0, best_lap: null, position: 1, finished: false,
+            x: playerX, y: playerY,
+            gear: 0, rpm: 800, throttle: 0, brake: 0, steer: 0,
+            gap_seconds: 0,
+            checkpoints: TRACK_CHECKPOINTS,
+            jpeg_quality: jpegQuality,
+            collisions: [],
+          },
+          ai: {
+            speed_kmh: 0, lap: 1, total_laps: raceLaps, checkpoint: 0,
+            lap_time: 0, best_lap: null, position: 2, finished: false,
+            x: aiX, y: aiY,
+            gear: 0, rpm: 800, throttle: 0, brake: 0, steer: 0,
+            gap_seconds: 0,
+            checkpoints: TRACK_CHECKPOINTS,
+            jpeg_quality: jpegQuality,
+            collisions: [],
+          },
           model: 'carla_pilotnet',
           race_status: 'countdown',
           fps: FPS,
           countdown: countdown,
           winner: null,
+          camera_mode: cameraMode,
         }));
 
         // Send a test frame
@@ -163,46 +256,76 @@ wss.on('connection', (ws) => {
         if (aiCheckpoint >= 10) { aiCheckpoint = 0; aiLap++; }
       }
 
+      // Occasionally generate a collision event (~every 15 seconds on average)
+      const playerCollisions = [];
+      const aiCollisions = [];
+      if (Math.random() < 0.002) {
+        playerCollisions.push({
+          other_actor: 'static.prop.streetbarrier',
+          intensity: Math.round(Math.random() * 800 + 200),
+          timestamp: raceTime,
+        });
+        console.log('Collision event generated for player');
+      }
+      if (Math.random() < 0.001) {
+        aiCollisions.push({
+          other_actor: 'static.prop.trafficcone01',
+          intensity: Math.round(Math.random() * 500 + 100),
+          timestamp: raceTime,
+        });
+      }
+
       // Send race state
       ws.send(JSON.stringify({
         type: 'race_state',
         player: {
           speed_kmh: Math.round(playerSpeed * 10) / 10,
-          lap: Math.min(playerLap, 3),
-          total_laps: 3,
+          lap: Math.min(playerLap, raceLaps),
+          total_laps: raceLaps,
           checkpoint: playerCheckpoint,
           lap_time: raceTime % 45,
           best_lap: playerLap > 1 ? 42.3 : null,
           position: aiLap > playerLap ? 2 : 1,
-          finished: playerLap > 3,
+          finished: playerLap > raceLaps,
           gear: Math.min(6, Math.floor(playerSpeed / 30) + 1),
           rpm: playerSpeed * 40,
           throttle: 0.7 + Math.sin(raceTime * 2) * 0.3,
           brake: Math.max(0, Math.sin(raceTime * 1.5) * 0.3),
           steer: Math.sin(raceTime * 0.8) * 0.4,
           gap_seconds: (playerCheckpoint - aiCheckpoint) * 2.5,
+          x: playerX,
+          y: playerY,
+          checkpoints: TRACK_CHECKPOINTS,
+          jpeg_quality: jpegQuality,
+          collisions: playerCollisions,
         },
         ai: {
           speed_kmh: Math.round(aiSpeed * 10) / 10,
-          lap: Math.min(aiLap, 3),
-          total_laps: 3,
+          lap: Math.min(aiLap, raceLaps),
+          total_laps: raceLaps,
           checkpoint: aiCheckpoint,
           lap_time: raceTime % 40,
           best_lap: aiLap > 1 ? 39.8 : null,
           position: aiLap > playerLap ? 1 : 2,
-          finished: aiLap > 3,
+          finished: aiLap > raceLaps,
           gear: Math.min(6, Math.floor(aiSpeed / 30) + 1),
           rpm: aiSpeed * 40,
           throttle: 0.8 + Math.sin(raceTime * 1.8) * 0.2,
           brake: Math.max(0, Math.sin(raceTime * 1.2) * 0.2),
           steer: Math.sin(raceTime * 0.6 + 1) * 0.3,
           gap_seconds: (aiCheckpoint - playerCheckpoint) * 2.5,
+          x: aiX,
+          y: aiY,
+          checkpoints: TRACK_CHECKPOINTS,
+          jpeg_quality: jpegQuality,
+          collisions: aiCollisions,
         },
         model: 'carla_pilotnet',
         race_status: 'racing',
         fps: FPS,
         countdown: null,
         winner: null,
+        camera_mode: cameraMode,
       }));
 
       // Send a test frame (minimal JPEG)
@@ -211,6 +334,7 @@ wss.on('connection', (ws) => {
       // End race after ~2 minutes
       if (raceTime > 120) {
         clearInterval(interval);
+        racing = false;
         ws.send(JSON.stringify({
           type: 'race_finished',
           winner: 'player',

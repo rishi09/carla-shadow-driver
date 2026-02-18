@@ -1,6 +1,6 @@
 # V3 Implementation Plan: Head-to-Head CARLA Racing
 
-## Status: IN PROGRESS - Core complete, polish phase
+## Status: IN PROGRESS - Performance & deployment phase
 
 ## Architecture
 
@@ -61,35 +61,40 @@ Browser (Vercel)                      Cloud GPU (Vast.ai)
 - [x] model_switched handler for UI feedback
 - [x] Nullable finish times (RaceFinished.player_time/ai_time)
 
-## In Progress
+### Setup & Selection (Phase 2.5 - Implemented)
+- [x] Weather/time-of-day selector (CARLA presets)
+- [x] Track selector (Town01-Town10HD)
+- [x] Human-friendly model difficulty labels
+- [x] Double-buffered VideoCanvas
+- [x] Race progress bar (both car positions)
 
-- [ ] Weather/time-of-day selector (CARLA presets)
-- [ ] Track selector (Town01-Town10HD)
-- [ ] Human-friendly model difficulty labels
-- [ ] Double-buffered VideoCanvas
-- [ ] Race progress bar (both car positions)
+### Audio (Phase 3 - Implemented)
+- [x] Engine sound synthesis (Web Audio API, RPM-based pitch)
+- [x] Tire screech on high lateral-G
+- [x] Countdown beeps
+
+### Polish (Phase 4 - Implemented)
+- [x] Car reset/respawn (R key if stuck)
+- [x] Minimap with car positions
+
+### Performance (Phase 5 - Implemented)
+- [x] Adaptive JPEG quality based on latency
+- [x] Client-side HUD interpolation at 60fps
 
 ## Remaining TODO
 
-### Phase 3: Audio
-- [ ] Engine sound synthesis (Web Audio API, RPM-based pitch)
-- [ ] Tire screech on high lateral-G
+### Audio (Remaining)
 - [ ] Collision impact sounds
-- [ ] Countdown beeps
 - [ ] Background music with intensity scaling
 
-### Phase 4: Polish
+### Polish (Remaining)
 - [ ] Screen shake on collision (needs collision sensor)
 - [ ] Ghost car replay
 - [ ] Post-race racing line visualization
 - [ ] Camera mode toggle (chase/hood/bumper)
-- [ ] Car reset/respawn (R key if stuck)
-- [ ] Minimap with car positions
 
-### Phase 5: Performance
+### Performance (Remaining)
 - [ ] Decouple telemetry rate from frame rate (60Hz JSON, 30Hz JPEG)
-- [ ] Adaptive JPEG quality based on latency
-- [ ] Client-side HUD interpolation at 60fps
 
 ### Deployment
 - [ ] Build and push Docker image to Docker Hub
@@ -103,8 +108,9 @@ v3/
 +-- docker/Dockerfile, entrypoint.sh
 +-- server/race_server.py, carla_manager.py, model_manager.py, model.py, frame_encoder.py, race_logic.py
 +-- src/App.tsx, pages/{Home,Race}.tsx
-+-- src/components/{VideoCanvas,RaceHUD,SpeedEffects,GPUConnectionModal,ModelSelector,RaceResults,RaceSetup,RaceProgressBar}.tsx
-+-- src/hooks/useGPUConnection.ts, src/types/index.ts
++-- src/components/{VideoCanvas,RaceHUD,SpeedEffects,GPUConnectionModal,ModelSelector,RaceResults,RaceSetup,RaceProgressBar,Minimap}.tsx
++-- src/hooks/{useGPUConnection,useEngineSound,useInterpolatedState}.ts
++-- src/types/index.ts
 +-- api/gpu/{start,status,callback,stop}.ts
 +-- configs/race.yaml
 +-- test/mock_ws_server.mjs
@@ -113,9 +119,26 @@ v3/
 
 ## WebSocket Protocol
 - Binary messages = JPEG frames (server -> browser)
-- JSON messages = race_state, race_finished, control, handshake, ping/pong, model_switched, error
-- Browser sends: { type: "control", keys: { w, a, s, d, space } }
-- Server sends: { type: "race_state", player: { speed_kmh, lap, checkpoint, gear, rpm, throttle, brake, steer, gap_seconds, ... }, ai: {...}, model, race_status, fps }
+- JSON messages = race_state, race_finished, control, handshake, ping/pong, model_switched, respawn_ack, camera_mode_changed, error
+
+### Browser -> Server
+- `{ type: "control", keys: { w, a, s, d, space }, latency: number }` - Player input with measured latency
+- `{ type: "handshake" }` - Initial connection
+- `{ type: "ping", timestamp: number }` - Latency measurement
+- `{ type: "start_race", track: string, laps: number, weather: string }` - Begin race with settings
+- `{ type: "switch_model", model: string }` - Change AI model
+- `{ type: "respawn" }` - Reset player car to last checkpoint (R key)
+- `{ type: "camera_mode", mode: string }` - Switch camera perspective
+
+### Server -> Browser
+- `{ type: "race_state", player: { speed_kmh, lap, total_laps, checkpoint, lap_time, best_lap, position, finished, gear, rpm, throttle, brake, steer, gap_seconds, x, y, checkpoints, jpeg_quality, collisions }, ai: { ... }, model, race_status, fps, countdown, winner, camera_mode }`
+- `{ type: "race_finished", winner, player_time, ai_time, player_laps, ai_laps }`
+- `{ type: "handshake_ack", server, models }`
+- `{ type: "pong", timestamp }`
+- `{ type: "model_switched", model, success }`
+- `{ type: "respawn_ack", checkpoint: number }` - Confirms respawn, includes checkpoint index
+- `{ type: "camera_mode_changed", mode: string }` - Confirms camera mode switch
+- `{ type: "error", message }` - Error notification
 
 ## Testing Strategy (No Browser Available)
 1. TypeScript compilation: npx tsc --noEmit

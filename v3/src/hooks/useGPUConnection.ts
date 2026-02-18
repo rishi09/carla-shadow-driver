@@ -31,6 +31,7 @@ export interface UseGPUConnectionReturn {
   availableModels: string[];
   activeModel: string | null;
   latencyMs: number | null;
+  cameraMode: string;
   retryCount: number;
   maxRetries: number;
   startGPU: () => Promise<void>;
@@ -39,6 +40,7 @@ export interface UseGPUConnectionReturn {
   sendStartRace: (track: string, laps: number, weather: string) => void;
   sendSwitchModel: (model: string) => void;
   sendRespawn: () => void;
+  sendCameraMode: (mode: string) => void;
   clearError: () => void;
   isConnected: boolean;
   isProvisioningActive: boolean;
@@ -61,6 +63,7 @@ export function useGPUConnection(): UseGPUConnectionReturn {
   const [activeModel, setActiveModel] = useState<string | null>(null);
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
   const [retryCount, setRetryCount] = useState(0);
+  const [cameraMode, setCameraMode] = useState<string>('chase');
 
   const wsRef = useRef<WebSocket | null>(null);
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -164,6 +167,9 @@ export function useGPUConnection(): UseGPUConnectionReturn {
             if (switched.success) {
               setActiveModel(switched.model);
             }
+          } else if (data.type === 'camera_mode_changed') {
+            const camMsg = data as { mode: string };
+            setCameraMode(camMsg.mode);
           } else if (data.type === 'error') {
             setError({ message: (data as { message: string }).message, code: 'SERVER_ERROR' });
           }
@@ -356,6 +362,11 @@ export function useGPUConnection(): UseGPUConnectionReturn {
     wsRef.current.send(JSON.stringify({ type: 'respawn' }));
   }, []);
 
+  const sendCameraMode = useCallback((mode: string) => {
+    if (wsRef.current?.readyState !== WebSocket.OPEN) return;
+    wsRef.current.send(JSON.stringify({ type: 'camera_mode', mode }));
+  }, []);
+
   const onBinaryFrame = useCallback((handler: ((data: Blob) => void) | null) => {
     binaryFrameHandlerRef.current = handler;
   }, []);
@@ -373,9 +384,9 @@ export function useGPUConnection(): UseGPUConnectionReturn {
 
   return {
     provisioningState, connectionState, instanceData, error,
-    raceState, raceFinished, availableModels, activeModel, latencyMs,
+    raceState, raceFinished, availableModels, activeModel, latencyMs, cameraMode,
     retryCount, maxRetries: MAX_RETRIES,
-    startGPU, stopGPU, sendControls, sendStartRace, sendSwitchModel, sendRespawn,
+    startGPU, stopGPU, sendControls, sendStartRace, sendSwitchModel, sendRespawn, sendCameraMode,
     clearError, onBinaryFrame,
     isConnected: connectionState === 'connected',
     isProvisioningActive: provisioningState === 'starting' || provisioningState === 'running',

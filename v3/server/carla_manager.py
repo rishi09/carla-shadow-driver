@@ -60,10 +60,23 @@ class RaceManager:
         # Actors to clean up
         self._actors: list = []
 
+        # Collision sensor
+        self._collision_sensor: Optional[carla.Sensor] = None
+        self._collisions: List[Dict] = []
+        self._collision_lock = threading.Lock()
+
         # Progressive input state (smooth ramping)
         self._current_throttle = 0.0
         self._current_brake = 0.0
         self._current_steer = 0.0
+
+        # Camera mode
+        self._camera_mode = 'chase'
+        self._camera_transforms = {
+            'chase':  {'x': -6.0, 'z': 3.0, 'pitch': -15},
+            'hood':   {'x': 0.5, 'z': 1.4, 'pitch': -5},
+            'bumper': {'x': 2.0, 'z': 0.8, 'pitch': -3},
+        }
 
     def connect(self) -> bool:
         """Connect to CARLA server."""
@@ -146,6 +159,9 @@ class RaceManager:
                 callback=self.ai_buffer.update
             )
 
+            # Attach collision sensor to player car
+            self._collision_sensor = self._attach_collision_sensor(self.player_car)
+
             # Tick once to initialize cameras
             self.world.tick()
             time.sleep(0.5)
@@ -213,6 +229,83 @@ class RaceManager:
         except Exception as e:
             print(f"Failed to attach camera: {e}")
             return None
+
+    def _attach_collision_sensor(self, vehicle) -> Optional[carla.Sensor]:
+        """Attach a collision sensor to a vehicle."""
+        bp_library = self.world.get_blueprint_library()
+        collision_bp = bp_library.find('sensor.other.collision')
+
+        transform = carla.Transform(carla.Location(x=0, y=0, z=0))
+
+        try:
+            sensor = self.world.spawn_actor(collision_bp, transform, attach_to=vehicle)
+            self._actors.append(sensor)
+            sensor.listen(self._on_collision)
+            print("Collision sensor attached to player car")
+            return sensor
+        except Exception as e:
+            print(f"Failed to attach collision sensor: {e}")
+            return None
+
+    def _on_collision(self, event):
+        """Callback for collision events. Stores significant collisions thread-safely."""
+        impulse = event.normal_impulse
+        intensity = math.sqrt(impulse.x**2 + impulse.y**2 + impulse.z**2)
+        if intensity > 100:
+            with self._collision_lock:
+                self._collisions.append({
+                    'intensity': intensity,
+                    'timestamp': time.time(),
+                })
+
+    def get_recent_collisions(self) -> List[Dict]:
+        """Return and clear stored collisions."""
+        with self._collision_lock:
+            collisions = self._collisions.copy()
+            self._collisions.clear()
+        return collisions
+
+    def set_camera_mode(self, mode: str):
+        """Switch the chase camera between chase/hood/bumper views.
+
+        Destroys the current chase_cam sensor and re-attaches a new camera
+        with the transform corresponding to the requested mode.
+        """
+        if mode not in self._camera_transforms:
+            print(f"Unknown camera mode: {mode}")
+            return
+
+        if not self.player_car or not self.world:
+            print("Cannot switch camera: no player car or world")
+            return
+
+        cam_params = self._camera_transforms[mode]
+        chase_cfg = self.config['camera']['chase']
+
+        # Destroy current chase cam
+        if self.chase_cam is not None:
+            try:
+                if self.chase_cam in self._actors:
+                    self._actors.remove(self.chase_cam)
+                self.chase_cam.stop()
+                self.chase_cam.destroy()
+            except Exception as e:
+                print(f"Error destroying old chase cam: {e}")
+            self.chase_cam = None
+
+        # Attach new camera with the mode's transform
+        self.chase_cam = self._attach_camera(
+            self.player_car,
+            width=chase_cfg['width'],
+            height=chase_cfg['height'],
+            fov=chase_cfg['fov'],
+            x=cam_params['x'], y=0.0, z=cam_params['z'],
+            pitch=cam_params['pitch'],
+            callback=self.chase_buffer.update
+        )
+
+        self._camera_mode = mode
+        print(f"Camera mode switched to: {mode}")
 
     def apply_player_control(self, keys: Dict[str, bool]):
         """Convert WASD keys to vehicle control with progressive steering and ramping."""
@@ -380,6 +473,9 @@ class RaceManager:
         self.ai_car = None
         self.chase_cam = None
         self.ai_cam = None
+        self._collision_sensor = None
+        with self._collision_lock:
+            self._collisions.clear()
 
         # Reset synchronous mode
         if self.world:

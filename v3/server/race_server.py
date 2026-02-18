@@ -43,6 +43,7 @@ class RaceServer:
         self.fps = 0.0
         self._fps_timer = time.time()
         self._fps_count = 0
+        self._telemetry_task: Optional[asyncio.Task] = None
 
     async def handle_client(self, websocket):
         """Handle a single WebSocket client connection."""
@@ -103,6 +104,14 @@ class RaceServer:
                     self.carla.respawn_player()
                     await websocket.send(json.dumps({
                         'type': 'respawn_ack',
+                    }))
+
+                elif msg_type == 'camera_mode':
+                    mode = data.get('mode', 'chase')
+                    self.carla.set_camera_mode(mode)
+                    await websocket.send(json.dumps({
+                        'type': 'camera_mode_changed',
+                        'mode': self.carla._camera_mode,
                     }))
 
         except websockets.exceptions.ConnectionClosed:
@@ -171,11 +180,12 @@ class RaceServer:
         self.race_state.start_countdown()
         self.running = True
 
-        # Run the race loop
+        # Run the frame loop (30fps) and telemetry loop (60Hz) concurrently
         asyncio.create_task(self._race_loop())
+        self._telemetry_task = asyncio.create_task(self._telemetry_loop())
 
     async def _race_loop(self):
-        """Main race loop: runs at ~20fps."""
+        """Main race loop: sends JPEG frames at ~30fps. Telemetry is sent separately at 60Hz."""
         target_dt = 1.0 / 30.0  # 30 FPS target
 
         while self.running and self.ws_client:
@@ -189,7 +199,6 @@ class RaceServer:
                         self.race_state.start_race()
                     # Still send frames during countdown
                     await self._send_frame()
-                    await self._send_race_state()
 
                 elif self.race_state.status == "racing":
                     # 1. Apply player controls
@@ -218,9 +227,6 @@ class RaceServer:
 
                     # 5. Send chase camera frame to browser
                     await self._send_frame()
-
-                    # 6. Send race state
-                    await self._send_race_state(player_telem, ai_telem)
 
                 elif self.race_state.status == "finished":
                     # Send final race result
@@ -256,6 +262,13 @@ class RaceServer:
                 self._fps_timer = now
 
         # Cleanup after race
+        if self._telemetry_task and not self._telemetry_task.done():
+            self._telemetry_task.cancel()
+            try:
+                await self._telemetry_task
+            except asyncio.CancelledError:
+                pass
+            self._telemetry_task = None
         self.carla.cleanup()
 
     async def _send_frame(self):
@@ -277,6 +290,36 @@ class RaceServer:
         except Exception:
             pass
 
+    async def _telemetry_loop(self):
+        """Send race telemetry JSON at 60Hz, independent of the 30fps frame loop.
+
+        Reads the latest vehicle telemetry from CARLA (getters work between
+        ticks) and sends a race_state JSON message to the client.
+        """
+        target_dt = 1.0 / 60.0  # 60 Hz
+
+        while self.running and self.ws_client:
+            loop_start = time.time()
+
+            try:
+                if self.race_state and self.race_state.status in ("countdown", "racing"):
+                    # Read current telemetry (works between CARLA ticks)
+                    player_telem = None
+                    ai_telem = None
+                    if self.race_state.status == "racing":
+                        player_telem = self.carla.get_telemetry(self.carla.player_car)
+                        ai_telem = self.carla.get_telemetry(self.carla.ai_car)
+                    await self._send_race_state(player_telem, ai_telem)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                print(f"Telemetry loop error: {e}")
+
+            elapsed = time.time() - loop_start
+            sleep_time = target_dt - elapsed
+            if sleep_time > 0:
+                await asyncio.sleep(sleep_time)
+
     async def _send_race_state(self, player_telem: Optional[Dict] = None,
                                 ai_telem: Optional[Dict] = None):
         """Send race state as JSON WebSocket message."""
@@ -288,6 +331,12 @@ class RaceServer:
         state['model'] = self.current_model_name
         state['fps'] = round(self.fps, 1)
         state['jpeg_quality'] = self.encoder.get_quality()
+        state['camera_mode'] = self.carla._camera_mode
+
+        # Include recent collisions (returns and clears stored events)
+        recent_collisions = self.carla.get_recent_collisions()
+        if recent_collisions:
+            state['collisions'] = [{'intensity': c['intensity']} for c in recent_collisions]
 
         # Fill in telemetry from both vehicles
         if player_telem:
