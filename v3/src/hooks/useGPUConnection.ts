@@ -10,7 +10,7 @@ import type {
 
 // Constants
 const POLL_INTERVAL = 5000;
-const POLL_TIMEOUT = 5 * 60 * 1000;
+const POLL_TIMEOUT = 10 * 60 * 1000;
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 2000;
 const PING_INTERVAL = 30000;
@@ -217,7 +217,7 @@ export function useGPUConnection(): UseGPUConnectionReturn {
       clearPolling();
       if (isMountedRef.current) {
         setProvisioningState('error');
-        setError({ message: 'GPU setup timed out after 5 minutes', code: 'POLL_TIMEOUT' });
+        setError({ message: 'GPU setup timed out after 10 minutes', code: 'POLL_TIMEOUT' });
       }
       return;
     }
