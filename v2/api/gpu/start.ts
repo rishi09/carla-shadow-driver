@@ -96,20 +96,35 @@ fi
 echo "=== Starting Cloudflare Tunnel ==="
 report_status "tunneling" "Starting Cloudflare tunnel"
 
-# Start cloudflared and capture the tunnel URL
-cloudflared tunnel --url http://localhost:8765 2>&1 | while IFS= read -r line; do
-  echo "\$line"
-  if echo "\$line" | grep -q "trycloudflare.com"; then
-    TUNNEL_URL=\$(echo "\$line" | grep -oE 'https://[a-zA-Z0-9-]+\\.trycloudflare\\.com')
+# Start cloudflared and write output to a file
+TUNNEL_LOG=/tmp/cloudflared.log
+cloudflared tunnel --url http://localhost:8765 > \$TUNNEL_LOG 2>&1 &
+CF_PID=\$!
+
+# Wait up to 60 seconds for the tunnel URL to appear
+TUNNEL_URL=""
+for i in \$(seq 1 60); do
+  if [ -f \$TUNNEL_LOG ]; then
+    TUNNEL_URL=\$(grep -oE 'https://[a-zA-Z0-9-]+\\.trycloudflare\\.com' \$TUNNEL_LOG | head -1)
     if [ -n "\$TUNNEL_URL" ]; then
-      echo "=== Tunnel URL: \$TUNNEL_URL ==="
-      curl -s -X POST "$CALLBACK_URL" \\
-        -H "Content-Type: application/json" \\
-        -d "{\\"instance_id\\":\\"$INST_ID\\",\\"tunnel_url\\":\\"\$TUNNEL_URL\\",\\"status\\":\\"ready\\",\\"message\\":\\"Server running\\"}"
       break
     fi
   fi
-done &
+  sleep 1
+done
+
+if [ -n "\$TUNNEL_URL" ]; then
+  echo "=== Tunnel URL: \$TUNNEL_URL ==="
+  curl -s -X POST "$CALLBACK_URL" \\
+    -H "Content-Type: application/json" \\
+    -d "{\\"instance_id\\":\\"$INST_ID\\",\\"tunnel_url\\":\\"\$TUNNEL_URL\\",\\"status\\":\\"ready\\",\\"message\\":\\"Server running\\"}"
+else
+  echo "ERROR: Tunnel failed to start within 60 seconds"
+  cat \$TUNNEL_LOG
+  report_status "error" "Cloudflare tunnel failed to start"
+  kill \$CF_PID 2>/dev/null
+  exit 1
+fi
 
 # Keep container running
 wait \$WS_PID
