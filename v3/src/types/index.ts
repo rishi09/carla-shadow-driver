@@ -44,6 +44,7 @@ export interface RacerState {
   gap_seconds?: number | null;
   x?: number;
   y?: number;
+  yaw?: number;
   next_checkpoint_x?: number;
   next_checkpoint_y?: number;
 }

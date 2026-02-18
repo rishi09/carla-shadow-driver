@@ -375,7 +375,7 @@ class RaceManager:
         if keys.get('s', False) and speed_kmh < 5.0:
             control = carla.VehicleControl(
                 throttle=0.6,
-                steer=max(-1.0, min(1.0, -self._current_steer)),  # Invert steering for reverse
+                steer=max(-1.0, min(1.0, self._current_steer)),  # Same steering direction as forward
                 brake=0.0,
                 hand_brake=hand_brake,
                 reverse=True

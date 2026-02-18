@@ -318,7 +318,7 @@ class RaceServer:
         Reads the latest vehicle telemetry from CARLA (getters work between
         ticks) and sends a race_state JSON message to the client.
         """
-        target_dt = 1.0 / 60.0  # 60 Hz
+        target_dt = 1.0 / 30.0  # 30 Hz (was 60Hz, reduced to cut bandwidth)
 
         while self.running and self.ws_client:
             loop_start = time.time()
@@ -371,6 +371,7 @@ class RaceServer:
             state['player']['throttle'] = round(player_telem.get('throttle', 0), 2)
             state['player']['brake'] = round(player_telem.get('brake', 0), 2)
             state['player']['steer'] = round(player_telem.get('steer', 0), 2)
+            state['player']['yaw'] = round(player_telem.get('yaw', 0), 1)
         if ai_telem:
             state['ai']['speed_kmh'] = round(ai_telem['speed_kmh'], 1)
             state['ai']['gear'] = ai_telem.get('gear', 0)

@@ -76,6 +76,7 @@ export function RaceHUD({ raceState, latencyMs, className = '' }: RaceHUDProps) 
         <CheckpointArrow
           playerX={player.x}
           playerY={player.y ?? 0}
+          playerYaw={player.yaw}
           targetX={player.next_checkpoint_x}
           targetY={player.next_checkpoint_y ?? 0}
           checkpoint={player.checkpoint}
@@ -262,28 +263,51 @@ function formatTime(seconds: number): string {
   return `${mins}:${secs.toFixed(1).padStart(4, '0')}`;
 }
 
-/** Arrow pointing toward the next checkpoint with distance */
-function CheckpointArrow({ playerX, playerY, targetX, targetY, checkpoint, totalCheckpoints }: {
-  playerX: number; playerY: number; targetX: number; targetY: number;
+/** Large directional arrow pointing toward the next checkpoint */
+function CheckpointArrow({ playerX, playerY, playerYaw, targetX, targetY, checkpoint, totalCheckpoints }: {
+  playerX: number; playerY: number; playerYaw?: number; targetX: number; targetY: number;
   checkpoint: number; totalCheckpoints: number;
 }) {
   const dx = targetX - playerX;
   const dy = targetY - playerY;
   const dist = Math.sqrt(dx * dx + dy * dy);
 
+  // Calculate relative angle from player heading to checkpoint
+  const angleToTarget = Math.atan2(dy, dx) * (180 / Math.PI);
+  const yaw = playerYaw ?? 0;
+  let relativeAngle = angleToTarget - yaw;
+  while (relativeAngle > 180) relativeAngle -= 360;
+  while (relativeAngle < -180) relativeAngle += 360;
+
+  let direction: string;
+  let arrowRotation: number;
+  if (Math.abs(relativeAngle) < 25) {
+    direction = 'STRAIGHT';
+    arrowRotation = 0;
+  } else if (Math.abs(relativeAngle) > 155) {
+    direction = 'U-TURN';
+    arrowRotation = 180;
+  } else if (relativeAngle > 0) {
+    direction = relativeAngle > 70 ? 'HARD RIGHT' : 'RIGHT';
+    arrowRotation = relativeAngle > 70 ? 90 : 45;
+  } else {
+    direction = relativeAngle < -70 ? 'HARD LEFT' : 'LEFT';
+    arrowRotation = relativeAngle < -70 ? -90 : -45;
+  }
+
   return (
     <div className="absolute top-[110px] left-1/2 -translate-x-1/2 z-10">
-      <div className="bg-black/60 backdrop-blur-sm rounded-lg px-4 py-2 border border-accent/30 flex items-center gap-3">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" className="text-accent">
-          <path d="M12 2L15 8H9L12 2Z" fill="currentColor" />
-          <rect x="11" y="8" width="2" height="10" fill="currentColor" opacity="0.5" />
+      <div className="bg-black/70 backdrop-blur-sm rounded-xl px-5 py-3 border border-accent/40 flex items-center gap-4">
+        <svg width="36" height="36" viewBox="0 0 36 36" className="text-accent flex-shrink-0"
+          style={{ transform: `rotate(${arrowRotation}deg)`, transition: 'transform 0.3s ease' }}>
+          <path d="M18 4L26 16H22V30H14V16H10L18 4Z" fill="currentColor" />
         </svg>
         <div>
-          <div className="text-accent text-xs font-mono uppercase tracking-wider">
-            Checkpoint {checkpoint + 1}/{totalCheckpoints}
+          <div className="text-accent text-lg font-bold font-mono">
+            {direction}
           </div>
-          <div className="text-white text-sm font-mono font-bold">
-            {Math.round(dist)}m away
+          <div className="text-white/60 text-xs font-mono">
+            CP {checkpoint + 1}/{totalCheckpoints} — {Math.round(dist)}m
           </div>
         </div>
       </div>
