@@ -19,11 +19,9 @@ interface VastOffer {
   [key: string]: unknown;
 }
 
-// v3 onstart: report starting status only. Docker ENTRYPOINT handles everything.
+// v3 onstart: Vast.ai overrides Docker ENTRYPOINT, so we must launch our entrypoint from here.
 const ONSTART_SCRIPT = `#!/bin/bash
-INST_ID="\${VAST_CONTAINERLABEL:-\${INSTANCE_ID}}"
-CB="${CALLBACK_URL}"
-curl -s -X POST "\$CB" -H "Content-Type: application/json" -d "{\\"instance_id\\":\\"\$INST_ID\\",\\"status\\":\\"starting\\",\\"message\\":\\"Container started\\"}" || true
+nohup /opt/shadow-driver/entrypoint.sh > /var/log/shadow-driver.log 2>&1 &
 `;
 
 async function setData(key: string, data: unknown): Promise<void> {
