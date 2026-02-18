@@ -12,6 +12,10 @@ interface SpeedEffectsProps {
 export function SpeedEffects({ speedKmh, className = '' }: SpeedEffectsProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animRef = useRef<number>(0);
+  const speedRef = useRef(speedKmh);
+
+  // Update ref on every render (no effect teardown needed)
+  speedRef.current = speedKmh;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -26,11 +30,12 @@ export function SpeedEffects({ speedKmh, className = '' }: SpeedEffectsProps) {
 
       const w = canvas.width;
       const h = canvas.height;
+      const speed = speedRef.current;
       ctx.clearRect(0, 0, w, h);
 
       // --- Vignette ---
       // Intensity: 0 at rest, 0.7 at 200+ km/h
-      const vignetteIntensity = Math.min(0.7, speedKmh / 300);
+      const vignetteIntensity = Math.min(0.7, speed / 300);
       if (vignetteIntensity > 0.05) {
         const gradient = ctx.createRadialGradient(w / 2, h / 2, w * 0.25, w / 2, h / 2, w * 0.7);
         gradient.addColorStop(0, 'rgba(0,0,0,0)');
@@ -41,8 +46,8 @@ export function SpeedEffects({ speedKmh, className = '' }: SpeedEffectsProps) {
 
       // --- Speed lines ---
       // Only show above 80 km/h, intensity increases with speed
-      if (speedKmh > 80) {
-        const lineIntensity = Math.min(1.0, (speedKmh - 80) / 200);
+      if (speed > 80) {
+        const lineIntensity = Math.min(1.0, (speed - 80) / 200);
         const numLines = Math.floor(8 + lineIntensity * 24);
         const centerX = w / 2;
         const centerY = h / 2;
@@ -90,7 +95,7 @@ export function SpeedEffects({ speedKmh, className = '' }: SpeedEffectsProps) {
       cancelAnimationFrame(animRef.current);
       resizeObserver.disconnect();
     };
-  }, [speedKmh]);
+  }, []);
 
   return (
     <canvas

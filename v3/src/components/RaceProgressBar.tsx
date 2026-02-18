@@ -18,13 +18,14 @@ export function RaceProgressBar({
   const totalSegments = totalLaps * totalCheckpoints;
 
   // Calculate progress as a fraction [0, 1]
+  // Lap values from server are 1-indexed, so subtract 1 for 0-based math
   const playerProgress = Math.min(
     1,
-    Math.max(0, (playerLap * totalCheckpoints + playerCheckpoint) / totalSegments)
+    Math.max(0, ((playerLap - 1) * totalCheckpoints + playerCheckpoint) / totalSegments)
   );
   const aiProgress = Math.min(
     1,
-    Math.max(0, (aiLap * totalCheckpoints + aiCheckpoint) / totalSegments)
+    Math.max(0, ((aiLap - 1) * totalCheckpoints + aiCheckpoint) / totalSegments)
   );
 
   // Lap marker positions (between laps, so totalLaps - 1 markers)

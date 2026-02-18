@@ -66,6 +66,7 @@ export function RaceHUD({ raceState, latencyMs, className = '' }: RaceHUDProps) 
             aiLap={ai.lap}
             aiCheckpoint={ai.checkpoint}
             totalLaps={player.total_laps}
+            totalCheckpoints={raceState.checkpoints?.length ?? 10}
           />
         </div>
       )}
@@ -156,7 +157,7 @@ function CountdownOverlay({ countdown }: { countdown: number }) {
         <div className="flex gap-3 mb-4">
           <div className={`w-5 h-5 rounded-full transition-all duration-300 ${countdown <= 3 ? 'bg-red-500 shadow-[0_0_15px_rgba(244,67,54,0.8)]' : 'bg-white/10'}`} />
           <div className={`w-5 h-5 rounded-full transition-all duration-300 ${countdown <= 2 && countdown > 0 ? 'bg-amber-500 shadow-[0_0_15px_rgba(255,152,0,0.8)]' : 'bg-white/10'}`} />
-          <div className={`w-5 h-5 rounded-full transition-all duration-300 ${countdown === 1 || isGo ? 'bg-green-500 shadow-[0_0_15px_rgba(76,175,80,0.8)]' : 'bg-white/10'}`} />
+          <div className={`w-5 h-5 rounded-full transition-all duration-300 ${isGo ? 'bg-green-500 shadow-[0_0_15px_rgba(76,175,80,0.8)]' : 'bg-white/10'}`} />
         </div>
 
         {/* Number / GO */}

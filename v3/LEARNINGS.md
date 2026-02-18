@@ -227,6 +227,43 @@ Format: `## [timestamp] Category: Short description`
 
 ---
 
+## [2026-02-18 12:00] Code Review: RaceProgressBar off-by-one (1-indexed laps)
+- **Bug**: Server sends `player.lap` as 1-indexed (race_logic.py: `self.player_lap + 1`), but `RaceProgressBar` used raw `playerLap` in its formula `(playerLap * totalCheckpoints + playerCheckpoint) / totalSegments`. At race start, lap=1 checkpoint=0 gives 33% progress on a 3-lap race instead of 0%.
+- **Severity**: High -- both car dots appear one full lap ahead of actual position.
+- **Fix**: Changed to `(playerLap - 1) * totalCheckpoints + playerCheckpoint` to convert back to 0-indexed before computing progress.
+- **Rule**: When the server sends display-friendly 1-indexed values, always convert back to 0-indexed for arithmetic. Document the indexing convention at the type level.
+
+## [2026-02-18 12:00] Code Review: Countdown green light activates one second early
+- **Bug**: Traffic light green dot condition was `countdown === 1 || isGo` instead of just `isGo`. This turned the green light on during "1" (one second before GO), breaking the red→amber→green sequence.
+- **Severity**: Medium -- visually confusing, doesn't match standard racing countdown.
+- **Fix**: Changed condition to just `isGo` (countdown === 0).
+- **Rule**: Traffic light sequence is red (3, 2), amber (1), green (GO/0). Each light should activate at exactly one phase, not overlap.
+
+## [2026-02-18 12:00] Code Review: SpeedEffects useEffect tears down 60x/sec
+- **Bug**: `SpeedEffects.tsx` had `[speedKmh]` in its useEffect dependency array. Since speed updates at 60Hz from the telemetry loop, the entire canvas setup (ResizeObserver + RAF loop) was torn down and recreated 60 times per second.
+- **Severity**: Medium -- performance waste, potential visual flicker.
+- **Fix**: Store `speedKmh` in a ref (`speedRef`), read from ref inside the draw loop, and use `[]` as the dependency array so the effect runs only once.
+- **Rule**: For animation loops that read rapidly changing values, always use refs instead of putting the value in the useEffect dependency array. The RAF loop reads the ref on each frame without triggering effect teardown.
+
+## [2026-02-18 12:00] Code Review: totalCheckpoints hardcoded to 10 in progress bar
+- **Bug**: `RaceHUD` passed `playerLap`, `playerCheckpoint`, etc. to `RaceProgressBar` but never passed `totalCheckpoints`. The prop defaulted to 10, but the actual checkpoint count depends on the map and is available in `raceState.checkpoints`.
+- **Severity**: Medium -- progress bar positions are wrong on maps with != 10 checkpoints.
+- **Fix**: Added `totalCheckpoints={raceState.checkpoints?.length ?? 10}` to the RaceProgressBar props in RaceHUD.
+
+## [2026-02-18 12:00] Code Review: No CUDA version filter in GPU provisioning
+- **Bug**: `api/gpu/start.ts` filtered GPUs by VRAM, reliability, and price but not CUDA version. The Docker image installs `cu121` (CUDA 12.1) PyTorch wheels. GPUs supporting only CUDA 11.x would fail to initialize PyTorch.
+- **Severity**: High -- silent model inference failure on older GPUs.
+- **Fix**: Added `o.cuda_max_good >= 12.1` to the GPU filter.
+- **Rule**: Always filter cloud GPU offers by the CUDA version your software requires. Mismatched CUDA versions produce cryptic errors at runtime.
+
+## [2026-02-18 12:00] Code Review: Docker ENTRYPOINT + onstart double execution
+- **Bug**: The Dockerfile sets `ENTRYPOINT ["/opt/shadow-driver/entrypoint.sh"]` and the Vast.ai `onstart` script also called `/opt/shadow-driver/entrypoint.sh`. On Vast.ai, `onstart` runs inside the already-started container (after the entrypoint). This would start CARLA, the race server, and cloudflared twice, causing port conflicts.
+- **Severity**: Critical -- container would crash with port-already-in-use errors.
+- **Fix**: Changed `onstart` to only report status (a single curl), not call entrypoint.sh. The Docker ENTRYPOINT handles everything.
+- **Rule**: Never duplicate startup logic between Docker ENTRYPOINT and cloud provider onstart scripts. Pick one mechanism and use the other only for lightweight status reporting.
+
+---
+
 ## [2026-02-18 10:00] E2E testing with safaridriver (Selenium + Safari Technology Preview)
 - **Implemented**: `scripts/safari_test.py` and `scripts/browser_test.py` run end-to-end game tests using Safari Technology Preview via Selenium WebDriver. The safaridriver binary is started manually on port 4445 (`safaridriver -p 4445`), and Selenium connects as a Remote WebDriver.
 - **Approach**: The tests navigate to the deployed game URL, click through the menu flow (Race Against Computer -> Choose Track -> Start Race -> Local AI), wait for the countdown, then programmatically control the car using `driver.execute_script()` to call the Phaser game engine's `setExternalInput()` API directly. This bypasses keyboard event simulation, which is unreliable in Safari's WebDriver implementation.

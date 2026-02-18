@@ -19,16 +19,11 @@ interface VastOffer {
   [key: string]: unknown;
 }
 
-// v3 onstart: uses custom Docker image, so just starts the entrypoint
-// The Docker image has CARLA + PyTorch + race server pre-installed
+// v3 onstart: report starting status only. Docker ENTRYPOINT handles everything.
 const ONSTART_SCRIPT = `#!/bin/bash
 INST_ID="\${VAST_CONTAINERLABEL:-\${INSTANCE_ID}}"
 CB="${CALLBACK_URL}"
-rs(){ curl -s -X POST "\$CB" -H "Content-Type: application/json" -d "{\\"instance_id\\":\\"\$INST_ID\\",\\"status\\":\\"\$1\\",\\"message\\":\\"\$2\\"}" || true; }
-rs starting "Starting Shadow Driver v3"
-# The Docker entrypoint handles everything (CARLA, server, tunnel)
-# Just report that we're running
-/opt/shadow-driver/entrypoint.sh
+curl -s -X POST "\$CB" -H "Content-Type: application/json" -d "{\\"instance_id\\":\\"\$INST_ID\\",\\"status\\":\\"starting\\",\\"message\\":\\"Container started\\"}" || true
 `;
 
 async function setData(key: string, data: unknown): Promise<void> {
@@ -67,6 +62,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         (o) =>
           o.gpu_ram >= 24000 &&
           o.reliability >= 0.9 &&
+          o.cuda_max_good >= 12.1 &&
           o.dph_total > 0 &&
           o.dph_total < 1.50
       )
