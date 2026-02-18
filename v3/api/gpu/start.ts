@@ -53,14 +53,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const offers = await searchResponse.json();
 
-    // v3: Filter for 24GB+ VRAM GPUs (needed for Alpamayo model)
-    // Price up to $1.50/hr for larger GPUs
+    // v3: Filter for 24GB+ VRAM GPUs with reliable connectivity
+    // Require 500+ Mbps download for the ~9GB Docker image pull
     const suitable = ((offers.offers || []) as VastOffer[])
       .filter(
         (o) =>
           o.gpu_ram >= 24000 &&
-          o.reliability >= 0.9 &&
+          o.reliability >= 0.95 &&
           o.cuda_max_good >= 12.1 &&
+          o.inet_down >= 500 &&
           o.dph_total > 0 &&
           o.dph_total < 1.50
       )
@@ -90,7 +91,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           body: JSON.stringify({
             client_id: 'shadow-driver-v3',
             image: 'rkshah09/shadow-driver-v3:latest',
-            disk: 50,
+            disk: 80,
             onstart: ONSTART_SCRIPT,
             env: {
               INSTANCE_ID: String(offer.id),
