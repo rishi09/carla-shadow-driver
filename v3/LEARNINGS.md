@@ -24,4 +24,11 @@ Format: `## [timestamp] Category: Short description`
 - Vite build: successful (37 modules, 216KB JS, 20KB CSS)
 - All files compile and bundle correctly
 
+## [2026-02-17 21:35] Deploy: Vercel production branch mismatch
+- **Issue**: `shadow-driver-v3.vercel.app` returns 404 after push to `v3` branch
+- **Cause**: Vercel production branch is set to `main` (default). Our code is on branch `v3`.
+- **Fix needed**: User must change production branch from `main` to `v3` in Vercel Settings > Git
+- **Workaround**: Preview deployments from v3 branch pushes have auto-generated URLs visible in Vercel dashboard
+- **TODO for user**: Go to Vercel > shadow-driver-v3 > Settings > Git > Production Branch and change to `v3`
+
 ---
