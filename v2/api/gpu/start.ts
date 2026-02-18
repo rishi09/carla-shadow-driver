@@ -98,7 +98,7 @@ report_status "tunneling" "Starting Cloudflare tunnel"
 
 # Start cloudflared and write output to a file
 TUNNEL_LOG=/tmp/cloudflared.log
-cloudflared tunnel --url http://localhost:8765 > \$TUNNEL_LOG 2>&1 &
+cloudflared tunnel --url http://localhost:8765 --protocol http2 > \$TUNNEL_LOG 2>&1 &
 CF_PID=\$!
 
 # Wait up to 60 seconds for the tunnel URL to appear
