@@ -333,12 +333,15 @@ class RaceState:
                 "lap": self.player_lap + 1,  # 1-indexed for display
                 "total_laps": self.total_laps,
                 "checkpoint": self.player_checkpoint % len(self.checkpoints),
+                "total_checkpoints": len(self.checkpoints),
                 "lap_time": round(self.get_current_lap_time("player"), 1),
                 "best_lap": round(self.player_best_lap, 1) if self.player_best_lap else None,
                 "position": positions["player"],
                 "finished": self.player_finished,
                 "x": round(self.player_x, 1),
                 "y": round(self.player_y, 1),
+                "next_checkpoint_x": round(self.checkpoints[self.player_checkpoint % len(self.checkpoints)][0], 1),
+                "next_checkpoint_y": round(self.checkpoints[self.player_checkpoint % len(self.checkpoints)][1], 1),
             },
             "ai": {
                 "speed_kmh": 0,  # Filled in by caller
@@ -369,21 +372,77 @@ class RaceState:
 
 
 def generate_checkpoints_from_waypoints(world, num_checkpoints: int = 10,
-                                         radius: float = 15.0) -> List[Tuple[float, float, float]]:
-    """Generate checkpoints from CARLA map waypoints."""
-    carla_map = world.get_map()
-    waypoints = carla_map.generate_waypoints(50.0)  # Every 50 meters
+                                         radius: float = 15.0,
+                                         start_location=None) -> List[Tuple[float, float, float]]:
+    """Generate checkpoints that form a circuit starting from the player's spawn point.
 
-    if not waypoints:
+    Follows the road forward from the start location, collecting waypoints
+    until the route loops back near the start or we've gone far enough.
+    """
+    carla_map = world.get_map()
+
+    # Get starting waypoint
+    if start_location is not None:
+        start_wp = carla_map.get_waypoint(start_location)
+    else:
+        spawn_points = carla_map.get_spawn_points()
+        if not spawn_points:
+            return []
+        start_wp = carla_map.get_waypoint(spawn_points[0].location)
+
+    if start_wp is None:
         return []
 
-    # Sample evenly spaced waypoints
-    step = max(1, len(waypoints) // num_checkpoints)
-    selected = waypoints[::step][:num_checkpoints]
+    # Follow the road forward, collecting waypoints every ~80 meters
+    route_waypoints = []
+    current_wp = start_wp
+    visited_roads = set()
+    max_waypoints = num_checkpoints * 8  # Collect more than needed, then sample
+
+    for _ in range(max_waypoints * 10):  # Safety limit
+        next_wps = current_wp.next(20.0)  # Step 20m forward
+        if not next_wps:
+            break
+
+        # Prefer going straight / following the main road
+        best_wp = next_wps[0]
+        for wp in next_wps:
+            # Prefer same road_id to stay on the main road
+            if wp.road_id == current_wp.road_id:
+                best_wp = wp
+                break
+
+        current_wp = best_wp
+        road_key = (current_wp.road_id, current_wp.lane_id, current_wp.section_id)
+
+        if road_key not in visited_roads:
+            route_waypoints.append(current_wp)
+            visited_roads.add(road_key)
+
+        # Check if we've looped back near the start
+        if len(route_waypoints) > num_checkpoints:
+            dist_to_start = math.sqrt(
+                (current_wp.transform.location.x - start_wp.transform.location.x) ** 2 +
+                (current_wp.transform.location.y - start_wp.transform.location.y) ** 2
+            )
+            if dist_to_start < 50.0:
+                break
+
+        if len(route_waypoints) >= max_waypoints:
+            break
+
+    if len(route_waypoints) < num_checkpoints:
+        # Fallback: use what we have
+        selected = route_waypoints
+    else:
+        # Sample evenly from the route
+        step = max(1, len(route_waypoints) // num_checkpoints)
+        selected = route_waypoints[::step][:num_checkpoints]
 
     checkpoints = []
     for wp in selected:
         loc = wp.transform.location
         checkpoints.append((loc.x, loc.y, radius))
 
+    print(f"Generated {len(checkpoints)} checkpoints along {len(route_waypoints)} road waypoints")
     return checkpoints

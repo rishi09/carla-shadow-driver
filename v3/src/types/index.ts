@@ -31,6 +31,7 @@ export interface RacerState {
   lap: number;
   total_laps: number;
   checkpoint: number;
+  total_checkpoints?: number;
   lap_time: number;
   best_lap: number | null;
   position: number;
@@ -43,6 +44,8 @@ export interface RacerState {
   gap_seconds?: number | null;
   x?: number;
   y?: number;
+  next_checkpoint_x?: number;
+  next_checkpoint_y?: number;
 }
 
 /** Race finished message from server */

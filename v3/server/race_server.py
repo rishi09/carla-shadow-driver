@@ -166,11 +166,12 @@ class RaceServer:
             print("No trained model weights found — using CARLA autopilot for AI car")
             self.carla.enable_ai_autopilot()
 
-        # Generate checkpoints from CARLA map
+        # Generate checkpoints from CARLA map, starting from player spawn
         checkpoints = generate_checkpoints_from_waypoints(
             self.carla.world,
             num_checkpoints=self.config.get('race', {}).get('checkpoints', 10),
             radius=self.config.get('race', {}).get('checkpoint_radius', 15.0),
+            start_location=self.carla.player_car.get_location(),
         )
 
         if not checkpoints:

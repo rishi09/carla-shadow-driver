@@ -66,9 +66,21 @@ export function RaceHUD({ raceState, latencyMs, className = '' }: RaceHUDProps) 
             aiLap={ai.lap}
             aiCheckpoint={ai.checkpoint}
             totalLaps={player.total_laps}
-            totalCheckpoints={raceState.checkpoints?.length ?? 10}
+            totalCheckpoints={player.total_checkpoints ?? raceState.checkpoints?.length ?? 10}
           />
         </div>
+      )}
+
+      {/* Next checkpoint indicator */}
+      {race_status === 'racing' && player.next_checkpoint_x != null && player.x != null && (
+        <CheckpointArrow
+          playerX={player.x}
+          playerY={player.y ?? 0}
+          targetX={player.next_checkpoint_x}
+          targetY={player.next_checkpoint_y ?? 0}
+          checkpoint={player.checkpoint}
+          totalCheckpoints={player.total_checkpoints ?? raceState.checkpoints?.length ?? 10}
+        />
       )}
 
       {/* Bottom left: speedometer + gear */}
@@ -248,4 +260,33 @@ function formatTime(seconds: number): string {
   const mins = Math.floor(seconds / 60);
   const secs = seconds % 60;
   return `${mins}:${secs.toFixed(1).padStart(4, '0')}`;
+}
+
+/** Arrow pointing toward the next checkpoint with distance */
+function CheckpointArrow({ playerX, playerY, targetX, targetY, checkpoint, totalCheckpoints }: {
+  playerX: number; playerY: number; targetX: number; targetY: number;
+  checkpoint: number; totalCheckpoints: number;
+}) {
+  const dx = targetX - playerX;
+  const dy = targetY - playerY;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+
+  return (
+    <div className="absolute top-[110px] left-1/2 -translate-x-1/2 z-10">
+      <div className="bg-black/60 backdrop-blur-sm rounded-lg px-4 py-2 border border-accent/30 flex items-center gap-3">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" className="text-accent">
+          <path d="M12 2L15 8H9L12 2Z" fill="currentColor" />
+          <rect x="11" y="8" width="2" height="10" fill="currentColor" opacity="0.5" />
+        </svg>
+        <div>
+          <div className="text-accent text-xs font-mono uppercase tracking-wider">
+            Checkpoint {checkpoint + 1}/{totalCheckpoints}
+          </div>
+          <div className="text-white text-sm font-mono font-bold">
+            {Math.round(dist)}m away
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }

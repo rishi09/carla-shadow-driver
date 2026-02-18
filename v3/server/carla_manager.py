@@ -371,11 +371,11 @@ class RaceManager:
         # --- Handbrake ---
         hand_brake = keys.get('space', False)
 
-        # --- Reverse if braking while stopped ---
-        if keys.get('s', False) and speed_kmh < 2.0:
+        # --- Reverse if braking while slow or stopped ---
+        if keys.get('s', False) and speed_kmh < 5.0:
             control = carla.VehicleControl(
-                throttle=0.3,
-                steer=max(-1.0, min(1.0, self._current_steer)),
+                throttle=0.6,
+                steer=max(-1.0, min(1.0, -self._current_steer)),  # Invert steering for reverse
                 brake=0.0,
                 hand_brake=hand_brake,
                 reverse=True
