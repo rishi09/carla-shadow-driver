@@ -6,7 +6,6 @@ import { VideoCanvas } from '../components/VideoCanvas.tsx';
 import { RaceHUD } from '../components/RaceHUD.tsx';
 import { SpeedEffects } from '../components/SpeedEffects.tsx';
 import { GPUConnectionModal } from '../components/GPUConnectionModal.tsx';
-import { ModelSelector } from '../components/ModelSelector.tsx';
 import { RaceResults } from '../components/RaceResults.tsx';
 import { RaceSetup } from '../components/RaceSetup.tsx';
 import { Minimap } from '../components/Minimap.tsx';
@@ -22,7 +21,6 @@ export function Race() {
   const isDemo = params.get('demo') === 'true';
   const directWsUrl = params.get('ws');
   const [view, setView] = useState<RaceView>(isDemo || directWsUrl ? 'pre_race' : 'setup');
-  const [currentModel, setCurrentModel] = useState('carla_pilotnet');
   const [showRespawning, setShowRespawning] = useState(false);
   const keysRef = useRef<KeyState>({ w: false, a: false, s: false, d: false, space: false });
   const keyIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -231,7 +229,7 @@ export function Race() {
     }
   }, [isDemo, gpu.isConnected, gpu.sendStartRace]);
 
-  const handleStartRace = useCallback((track: string, laps: number, weather: string) => {
+  const handleStartRace = useCallback((track: string, laps: number, weather: string, model?: string) => {
     setView('racing');
     if (isDemo || directWsUrl) {
       pendingDemoRaceRef.current = { track, laps, weather };
@@ -240,12 +238,10 @@ export function Race() {
     } else {
       gpu.sendStartRace(track, laps, weather);
     }
+    if (model) {
+      gpu.sendSwitchModel(model);
+    }
   }, [gpu, isDemo, directWsUrl]);
-
-  const handleSwitchModel = useCallback((model: string) => {
-    setCurrentModel(model);
-    gpu.sendSwitchModel(model);
-  }, [gpu]);
 
   const handlePlayAgain = useCallback(() => {
     setView('pre_race');

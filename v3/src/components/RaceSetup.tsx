@@ -33,8 +33,22 @@ const WEATHER_OPTIONS: WeatherOption[] = [
 
 const LAP_OPTIONS = [1, 3, 5];
 
+interface ModelOption {
+  id: string;
+  name: string;
+  difficulty: string;
+  diffColor: string;
+  description: string;
+}
+
+const AI_MODELS: ModelOption[] = [
+  { id: 'carla_pilotnet', name: 'Steady Driver', difficulty: 'Easy', diffColor: 'text-green-400 border-green-500/40 bg-green-500/20', description: 'Follows the road steadily. Good for learning the track.' },
+  { id: 'pilotnet', name: 'Weekend Racer', difficulty: 'Medium', diffColor: 'text-amber-400 border-amber-500/40 bg-amber-500/20', description: 'More aggressive cornering, occasionally misjudges turns.' },
+  { id: 'alpamayo', name: 'Pro Racer', difficulty: 'Hard', diffColor: 'text-red-400 border-red-500/40 bg-red-500/20', description: 'Alpamayo vision model. Pushes the limits.' },
+];
+
 interface RaceSetupProps {
-  onStartRace: (track: string, laps: number, weather: string) => void;
+  onStartRace: (track: string, laps: number, weather: string, model?: string) => void;
   onBack: () => void;
 }
 
@@ -42,6 +56,7 @@ export function RaceSetup({ onStartRace, onBack }: RaceSetupProps) {
   const [selectedTrack, setSelectedTrack] = useState('Town03');
   const [selectedWeather, setSelectedWeather] = useState('clear');
   const [selectedLaps, setSelectedLaps] = useState(3);
+  const [selectedModel, setSelectedModel] = useState('carla_pilotnet');
 
   const currentTrack = TRACKS.find(t => t.id === selectedTrack);
 
@@ -119,9 +134,40 @@ export function RaceSetup({ onStartRace, onBack }: RaceSetupProps) {
           </div>
         </div>
 
+        {/* AI Opponent */}
+        <div className="mb-6">
+          <label className="block text-white/60 text-sm font-medium mb-2">AI Opponent</label>
+          <div className="space-y-2">
+            {AI_MODELS.map((model) => (
+              <button
+                key={model.id}
+                onClick={() => setSelectedModel(model.id)}
+                className={`w-full flex items-center gap-3 py-3 px-4 rounded-lg border text-left transition-all ${
+                  selectedModel === model.id
+                    ? 'bg-white/10 border-white/30'
+                    : 'bg-black/60 border-white/10 hover:border-white/20'
+                }`}
+              >
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-white text-sm font-medium">{model.name}</span>
+                    <span className={`text-[10px] font-mono uppercase px-1.5 py-0.5 rounded border ${model.diffColor}`}>
+                      {model.difficulty}
+                    </span>
+                  </div>
+                  <p className="text-white/40 text-xs mt-0.5">{model.description}</p>
+                </div>
+                {selectedModel === model.id && (
+                  <div className="w-2 h-2 rounded-full bg-white" />
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* Start Race Button */}
         <button
-          onClick={() => onStartRace(selectedTrack, selectedLaps, selectedWeather)}
+          onClick={() => onStartRace(selectedTrack, selectedLaps, selectedWeather, selectedModel)}
           className="w-full py-3 px-6 bg-gradient-to-r from-player to-ai rounded-lg text-white font-bold text-lg hover:opacity-90 transition-opacity animate-glow"
         >
           Start Race

@@ -264,9 +264,9 @@ function formatTime(seconds: number): string {
 }
 
 /** Large directional arrow pointing toward the next checkpoint */
-function CheckpointArrow({ playerX, playerY, playerYaw, targetX, targetY, checkpoint, totalCheckpoints }: {
+function CheckpointArrow({ playerX, playerY, playerYaw, targetX, targetY }: {
   playerX: number; playerY: number; playerYaw?: number; targetX: number; targetY: number;
-  checkpoint: number; totalCheckpoints: number;
+  checkpoint?: number; totalCheckpoints?: number;
 }) {
   const dx = targetX - playerX;
   const dy = targetY - playerY;
