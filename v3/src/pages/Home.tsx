@@ -22,6 +22,16 @@ export function Home() {
             Start Race
           </a>
 
+          {/* Demo button */}
+          <div className="mt-4">
+            <a
+              href="/race?demo=true"
+              className="inline-block py-2 px-8 rounded-xl text-white/50 font-medium text-sm border border-white/20 hover:border-white/40 hover:text-white/70 transition-all"
+            >
+              Try Demo (No GPU)
+            </a>
+          </div>
+
           {/* Features grid */}
           <div className="grid grid-cols-3 gap-6 mt-16 text-left">
             <div className="bg-dark-300/50 rounded-lg p-4 border border-white/5">

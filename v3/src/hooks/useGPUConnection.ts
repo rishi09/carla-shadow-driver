@@ -41,6 +41,7 @@ export interface UseGPUConnectionReturn {
   sendSwitchModel: (model: string) => void;
   sendRespawn: () => void;
   sendCameraMode: (mode: string) => void;
+  connectDirect: (wsUrl: string) => void;
   clearError: () => void;
   isConnected: boolean;
   isProvisioningActive: boolean;
@@ -371,6 +372,11 @@ export function useGPUConnection(): UseGPUConnectionReturn {
     binaryFrameHandlerRef.current = handler;
   }, []);
 
+  const connectDirect = useCallback((wsUrl: string) => {
+    setProvisioningState('running');
+    connectWebSocket(wsUrl);
+  }, [connectWebSocket]);
+
   const clearError = useCallback(() => { setError(null); }, []);
 
   // Cleanup on unmount
@@ -387,7 +393,7 @@ export function useGPUConnection(): UseGPUConnectionReturn {
     raceState, raceFinished, availableModels, activeModel, latencyMs, cameraMode,
     retryCount, maxRetries: MAX_RETRIES,
     startGPU, stopGPU, sendControls, sendStartRace, sendSwitchModel, sendRespawn, sendCameraMode,
-    clearError, onBinaryFrame,
+    connectDirect, clearError, onBinaryFrame,
     isConnected: connectionState === 'connected',
     isProvisioningActive: provisioningState === 'starting' || provisioningState === 'running',
   };

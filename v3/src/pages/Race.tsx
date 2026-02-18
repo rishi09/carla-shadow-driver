@@ -15,8 +15,11 @@ import { useEffect, useRef } from 'react';
 
 type RaceView = 'setup' | 'pre_race' | 'racing' | 'results';
 
+const DEMO_WS_URL = 'ws://localhost:8765';
+
 export function Race() {
-  const [view, setView] = useState<RaceView>('setup');
+  const isDemo = new URLSearchParams(window.location.search).get('demo') === 'true';
+  const [view, setView] = useState<RaceView>(isDemo ? 'pre_race' : 'setup');
   const [currentModel, setCurrentModel] = useState('carla_pilotnet');
   const [showRespawning, setShowRespawning] = useState(false);
   const keysRef = useRef<KeyState>({ w: false, a: false, s: false, d: false, space: false });
@@ -214,10 +217,27 @@ export function Race() {
     setView('pre_race');
   }, []);
 
+  // Track pending demo race config to send once WebSocket connects
+  const pendingDemoRaceRef = useRef<{ track: string; laps: number; weather: string } | null>(null);
+
+  // --- Send start_race once connected in demo mode ---
+  useEffect(() => {
+    if (isDemo && gpu.isConnected && pendingDemoRaceRef.current) {
+      const { track, laps, weather } = pendingDemoRaceRef.current;
+      pendingDemoRaceRef.current = null;
+      gpu.sendStartRace(track, laps, weather);
+    }
+  }, [isDemo, gpu.isConnected, gpu.sendStartRace]);
+
   const handleStartRace = useCallback((track: string, laps: number, weather: string) => {
     setView('racing');
-    gpu.sendStartRace(track, laps, weather);
-  }, [gpu]);
+    if (isDemo) {
+      pendingDemoRaceRef.current = { track, laps, weather };
+      gpu.connectDirect(DEMO_WS_URL);
+    } else {
+      gpu.sendStartRace(track, laps, weather);
+    }
+  }, [gpu, isDemo]);
 
   const handleSwitchModel = useCallback((model: string) => {
     setCurrentModel(model);
@@ -256,7 +276,7 @@ export function Race() {
       {view === 'pre_race' && (
         <RaceSetup
           onStartRace={handleStartRace}
-          onBack={() => setView('setup')}
+          onBack={() => isDemo ? (window.location.href = '/') : setView('setup')}
         />
       )}
 

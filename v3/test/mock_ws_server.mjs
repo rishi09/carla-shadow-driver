@@ -5,10 +5,23 @@
  * Then open the frontend dev server and connect to ws://localhost:8765
  */
 import { WebSocketServer } from 'ws';
-import { createCanvas } from 'canvas'; // npm install canvas ws
+import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const PORT = 8765;
 const FPS = 30;
+
+// Load the test frame JPEG once at startup
+const TEST_FRAME = readFileSync(join(__dirname, 'test-frame.jpg'));
+console.log(`Loaded test frame: ${TEST_FRAME.length} bytes`);
+
+function createValidJPEG() {
+  return TEST_FRAME;
+}
 
 // Generate 10 fake checkpoint positions along a rough oval track
 function generateCheckpoints() {
@@ -25,79 +38,6 @@ function generateCheckpoints() {
 }
 
 const TRACK_CHECKPOINTS = generateCheckpoints();
-
-// Create a simple test frame (colored rectangle with text)
-function createTestFrame(frameNum, playerSpeed, aiSpeed) {
-  const canvas = createCanvas(1280, 720);
-  const ctx = canvas.getContext('2d');
-
-  // Background - road-like
-  ctx.fillStyle = '#2a2a2a';
-  ctx.fillRect(0, 0, 1280, 720);
-
-  // "Road"
-  ctx.fillStyle = '#444';
-  ctx.fillRect(200, 100, 880, 520);
-
-  // Road markings
-  ctx.strokeStyle = '#FFD700';
-  ctx.lineWidth = 3;
-  ctx.setLineDash([40, 20]);
-  ctx.beginPath();
-  ctx.moveTo(640, 100);
-  ctx.lineTo(640, 620);
-  ctx.stroke();
-
-  // Player car (green rectangle)
-  const px = 400 + Math.sin(frameNum * 0.05) * 100;
-  const py = 400 + Math.cos(frameNum * 0.03) * 80;
-  ctx.fillStyle = '#4CAF50';
-  ctx.fillRect(px - 20, py - 30, 40, 60);
-  ctx.fillStyle = '#81C784';
-  ctx.fillRect(px - 15, py - 25, 30, 15);
-
-  // AI car (blue rectangle)
-  const ax = 700 + Math.sin(frameNum * 0.04 + 1) * 100;
-  const ay = 350 + Math.cos(frameNum * 0.035 + 1) * 80;
-  ctx.fillStyle = '#2196F3';
-  ctx.fillRect(ax - 20, ay - 30, 40, 60);
-  ctx.fillStyle = '#64B5F6';
-  ctx.fillRect(ax - 15, ay - 25, 30, 15);
-
-  // Frame info text
-  ctx.fillStyle = '#fff';
-  ctx.font = '20px sans-serif';
-  ctx.fillText(`MOCK SERVER - Frame ${frameNum}`, 20, 30);
-  ctx.fillText(`Player: ${playerSpeed.toFixed(0)} km/h  |  AI: ${aiSpeed.toFixed(0)} km/h`, 20, 60);
-
-  return canvas.toBuffer('image/jpeg', { quality: 0.7 });
-}
-
-// Simple test frame without canvas dependency (generates a minimal valid JPEG)
-function createMinimalJPEG(frameNum) {
-  // 1x1 pixel JPEG - tiny but valid
-  // In a real test you'd use the canvas version above
-  const header = Buffer.from([
-    0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01,
-    0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0xFF, 0xDB, 0x00, 0x43,
-    0x00, 0x08, 0x06, 0x06, 0x07, 0x06, 0x05, 0x08, 0x07, 0x07, 0x07, 0x09,
-    0x09, 0x08, 0x0A, 0x0C, 0x14, 0x0D, 0x0C, 0x0B, 0x0B, 0x0C, 0x19, 0x12,
-    0x13, 0x0F, 0x14, 0x1D, 0x1A, 0x1F, 0x1E, 0x1D, 0x1A, 0x1C, 0x1C, 0x20,
-    0x24, 0x2E, 0x27, 0x20, 0x22, 0x2C, 0x23, 0x1C, 0x1C, 0x28, 0x37, 0x29,
-    0x2C, 0x30, 0x31, 0x34, 0x34, 0x34, 0x1F, 0x27, 0x39, 0x3D, 0x38, 0x32,
-    0x3C, 0x2E, 0x33, 0x34, 0x32, 0xFF, 0xC0, 0x00, 0x0B, 0x08, 0x00, 0x01,
-    0x00, 0x01, 0x01, 0x01, 0x11, 0x00, 0xFF, 0xC4, 0x00, 0x1F, 0x00, 0x00,
-    0x01, 0x05, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
-    0x09, 0x0A, 0x0B, 0xFF, 0xC4, 0x00, 0xB5, 0x10, 0x00, 0x02, 0x01, 0x03,
-    0x03, 0x02, 0x04, 0x03, 0x05, 0x05, 0x04, 0x04, 0x00, 0x00, 0x01, 0x7D,
-    0x01, 0x02, 0x03, 0x00, 0x04, 0x11, 0x05, 0x12, 0x21, 0x31, 0x41, 0x06,
-    0x13, 0x51, 0x61, 0x07, 0x22, 0x71, 0x14, 0x32, 0x81, 0x91, 0xA1, 0x08,
-  ]);
-  // This is actually not a complete valid JPEG, but for testing purposes
-  // the frontend will just skip invalid frames gracefully
-  return header;
-}
 
 const wss = new WebSocketServer({ port: PORT });
 console.log(`Mock WebSocket server running on ws://localhost:${PORT}`);
@@ -282,7 +222,7 @@ wss.on('connection', (ws) => {
         }));
 
         // Send a test frame
-        try { ws.send(createMinimalJPEG(frameNum)); } catch (e) {}
+        try { ws.send(createValidJPEG()); } catch (e) {}
         return;
       }
 
@@ -402,7 +342,7 @@ wss.on('connection', (ws) => {
       }));
 
       // Send a test frame (minimal JPEG)
-      try { ws.send(createMinimalJPEG(frameNum)); } catch (e) {}
+      try { ws.send(createValidJPEG()); } catch (e) {}
 
       // End race after ~2 minutes
       if (raceTime > 120) {

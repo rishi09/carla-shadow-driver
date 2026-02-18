@@ -91,7 +91,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           },
           body: JSON.stringify({
             client_id: 'shadow-driver-v3',
-            image: 'rkshah20/shadow-driver-v3:latest',
+            image: 'rkshah09/shadow-driver-v3:latest',
             disk: 50,
             onstart: ONSTART_SCRIPT,
             env: {
