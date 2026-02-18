@@ -301,17 +301,6 @@ export function Race() {
           {/* HUD overlay */}
           <RaceHUD raceState={gpu.raceState} latencyMs={gpu.latencyMs} />
 
-          {/* Model selector (top-right, collapsible) */}
-          {gpu.availableModels.length > 0 && (
-            <div className="absolute top-4 right-4 z-10 pointer-events-auto">
-              <ModelSelector
-                models={gpu.availableModels}
-                currentModel={currentModel}
-                onSelect={handleSwitchModel}
-              />
-            </div>
-          )}
-
           {/* Exit button */}
           <button
             onClick={handleMainMenu}

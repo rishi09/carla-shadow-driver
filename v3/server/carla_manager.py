@@ -344,7 +344,7 @@ class RaceManager:
             self._current_brake = max(0.0, self._current_brake - dt * 5.0)
 
         # --- Speed-sensitive steering ---
-        # At high speeds, reduce max steering to prevent spin-outs
+        # Instant steering response (no ramp), clamped by speed
         if speed_kmh < 30:
             steer_limit = 0.7
         elif speed_kmh < 80:
@@ -354,19 +354,12 @@ class RaceManager:
         else:
             steer_limit = 0.15
 
-        steer_rate = 5.0   # Steering change per second (faster response)
-        steer_decay = 8.0  # Return-to-center rate (snappier centering)
-
         if keys.get('a', False):
-            self._current_steer = max(-steer_limit, self._current_steer - steer_rate * dt)
+            self._current_steer = -steer_limit
         elif keys.get('d', False):
-            self._current_steer = min(steer_limit, self._current_steer + steer_rate * dt)
+            self._current_steer = steer_limit
         else:
-            # Smoothly return to center
-            if self._current_steer > 0:
-                self._current_steer = max(0.0, self._current_steer - steer_decay * dt)
-            elif self._current_steer < 0:
-                self._current_steer = min(0.0, self._current_steer + steer_decay * dt)
+            self._current_steer = 0.0
 
         # --- Handbrake ---
         hand_brake = keys.get('space', False)

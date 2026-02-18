@@ -279,37 +279,28 @@ function CheckpointArrow({ playerX, playerY, playerYaw, targetX, targetY, checkp
   while (relativeAngle > 180) relativeAngle -= 360;
   while (relativeAngle < -180) relativeAngle += 360;
 
-  let direction: string;
-  let arrowRotation: number;
-  if (Math.abs(relativeAngle) < 25) {
-    direction = 'STRAIGHT';
-    arrowRotation = 0;
-  } else if (Math.abs(relativeAngle) > 155) {
-    direction = 'U-TURN';
-    arrowRotation = 180;
-  } else if (relativeAngle > 0) {
-    direction = relativeAngle > 70 ? 'HARD RIGHT' : 'RIGHT';
-    arrowRotation = relativeAngle > 70 ? 90 : 45;
-  } else {
-    direction = relativeAngle < -70 ? 'HARD LEFT' : 'LEFT';
-    arrowRotation = relativeAngle < -70 ? -90 : -45;
-  }
+  // Simple direction hint
+  let hint: string;
+  if (Math.abs(relativeAngle) < 30) hint = 'GO';
+  else if (relativeAngle > 0) hint = 'RIGHT';
+  else hint = 'LEFT';
+
+  // Color: green when close, white when far
+  const isClose = dist < 30;
 
   return (
-    <div className="absolute top-[110px] left-1/2 -translate-x-1/2 z-10">
-      <div className="bg-black/70 backdrop-blur-sm rounded-xl px-5 py-3 border border-accent/40 flex items-center gap-4">
-        <svg width="36" height="36" viewBox="0 0 36 36" className="text-accent flex-shrink-0"
-          style={{ transform: `rotate(${arrowRotation}deg)`, transition: 'transform 0.3s ease' }}>
-          <path d="M18 4L26 16H22V30H14V16H10L18 4Z" fill="currentColor" />
+    <div className="absolute top-[108px] left-1/2 -translate-x-1/2 z-10 flex flex-col items-center gap-1">
+      {/* Rotating compass arrow */}
+      <div className={`rounded-full w-14 h-14 flex items-center justify-center ${isClose ? 'bg-green-500/30 border-2 border-green-400' : 'bg-black/60 border border-white/20'}`}>
+        <svg width="32" height="32" viewBox="0 0 32 32"
+          className={isClose ? 'text-green-400' : 'text-accent'}
+          style={{ transform: `rotate(${relativeAngle}deg)`, transition: 'transform 0.2s ease-out' }}>
+          <path d="M16 4L22 14H18V26H14V14H10L16 4Z" fill="currentColor" />
         </svg>
-        <div>
-          <div className="text-accent text-lg font-bold font-mono">
-            {direction}
-          </div>
-          <div className="text-white/60 text-xs font-mono">
-            CP {checkpoint + 1}/{totalCheckpoints} — {Math.round(dist)}m
-          </div>
-        </div>
+      </div>
+      {/* Compact label */}
+      <div className={`text-xs font-mono font-bold px-2 py-0.5 rounded ${isClose ? 'text-green-400 bg-green-500/20' : 'text-white/60 bg-black/40'}`}>
+        {isClose ? 'CHECKPOINT!' : `${hint} · ${Math.round(dist)}m`}
       </div>
     </div>
   );
