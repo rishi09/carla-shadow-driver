@@ -1,6 +1,6 @@
 # V3 Implementation Plan: Head-to-Head CARLA Racing
 
-## Status: IN PROGRESS - Performance & deployment phase
+## Status: IN PROGRESS - Deployment phase
 
 ## Architecture
 
@@ -13,9 +13,11 @@ Browser (Vercel)                      Cloud GPU (Vast.ai)
 | React HUD       |                   |   +-- Chase camera               |
 | SpeedEffects    |                   |                                  |
 | Model selector  |                   | Race Server (Python)             |
-|                 |                   |   +-- CARLA control loop ~30fps  |
-| useGPUConnection|  POST/GET         |   +-- Model inference            |
-| (adapted v2)    |------------------>|   +-- JPEG encode + WS send      |
+| RaceSetup       |                   |   +-- CARLA control loop ~30fps  |
+| Minimap         |                   |   +-- Model inference            |
+| RacingLineViz   |                   |   +-- JPEG encode + WS send      |
+| useGPUConnection|  POST/GET         |   +-- 60Hz JSON / 30Hz JPEG      |
+| (adapted v2)    |------------------>|   +-- Adaptive quality            |
 +-----------------+                   +----------------------------------+
         |
         v
@@ -43,7 +45,7 @@ Browser (Vercel)                      Cloud GPU (Vast.ai)
 - [x] AI model inference loop
 - [x] Mock WebSocket server for testing
 
-### Game Feel (Phase 2 - Implemented)
+### Game Feel (Phase 2)
 - [x] Progressive steering with speed sensitivity
 - [x] Throttle/brake ramping (smooth, not binary)
 - [x] Handbrake support (Space key)
@@ -61,55 +63,48 @@ Browser (Vercel)                      Cloud GPU (Vast.ai)
 - [x] model_switched handler for UI feedback
 - [x] Nullable finish times (RaceFinished.player_time/ai_time)
 
-### Setup & Selection (Phase 2.5 - Implemented)
+### Setup & Selection (Phase 2.5)
 - [x] Weather/time-of-day selector (CARLA presets)
 - [x] Track selector (Town01-Town10HD)
 - [x] Human-friendly model difficulty labels
 - [x] Double-buffered VideoCanvas
 - [x] Race progress bar (both car positions)
 
-### Audio (Phase 3 - Implemented)
+### Audio (Phase 3)
 - [x] Engine sound synthesis (Web Audio API, RPM-based pitch)
 - [x] Tire screech on high lateral-G
+- [x] Collision impact sounds
 - [x] Countdown beeps
+- [x] Background music with intensity scaling
 
-### Polish (Phase 4 - Implemented)
+### Polish (Phase 4)
+- [x] Screen shake on collision (needs collision sensor)
+- [x] Ghost car replay
+- [x] Post-race racing line visualization
 - [x] Car reset/respawn (R key if stuck)
 - [x] Minimap with car positions
+- [x] Camera mode toggle (chase/hood/bumper)
 
-### Performance (Phase 5 - Implemented)
+### Performance (Phase 5)
+- [x] Decouple telemetry rate from frame rate (60Hz JSON, 30Hz JPEG)
 - [x] Adaptive JPEG quality based on latency
 - [x] Client-side HUD interpolation at 60fps
 
 ## Remaining TODO
 
-### Audio (Remaining)
-- [ ] Collision impact sounds
-- [ ] Background music with intensity scaling
-
-### Polish (Remaining)
-- [ ] Screen shake on collision (needs collision sensor)
-- [ ] Ghost car replay
-- [ ] Post-race racing line visualization
-- [ ] Camera mode toggle (chase/hood/bumper)
-
-### Performance (Remaining)
-- [ ] Decouple telemetry rate from frame rate (60Hz JSON, 30Hz JPEG)
-
 ### Deployment
 - [ ] Build and push Docker image to Docker Hub
-- [ ] Fix Vercel production branch (change to v3)
 - [ ] Full end-to-end test with GPU
 - [ ] Verify API endpoints return JSON (not HTML)
 
 ## Directory Structure
 ```
 v3/
-+-- docker/Dockerfile, entrypoint.sh
++-- docker/Dockerfile, entrypoint.sh, requirements.txt
 +-- server/race_server.py, carla_manager.py, model_manager.py, model.py, frame_encoder.py, race_logic.py
 +-- src/App.tsx, pages/{Home,Race}.tsx
-+-- src/components/{VideoCanvas,RaceHUD,SpeedEffects,GPUConnectionModal,ModelSelector,RaceResults,RaceSetup,RaceProgressBar,Minimap}.tsx
-+-- src/hooks/{useGPUConnection,useEngineSound,useInterpolatedState}.ts
++-- src/components/{VideoCanvas,RaceHUD,SpeedEffects,GPUConnectionModal,ModelSelector,RaceResults,RaceSetup,RaceProgressBar,Minimap,RacingLineViz}.tsx
++-- src/hooks/{useGPUConnection,useEngineSound,useBackgroundMusic,useInterpolatedState}.ts
 +-- src/types/index.ts
 +-- api/gpu/{start,status,callback,stop}.ts
 +-- configs/race.yaml
@@ -118,8 +113,8 @@ v3/
 ```
 
 ## WebSocket Protocol
-- Binary messages = JPEG frames (server -> browser)
-- JSON messages = race_state, race_finished, control, handshake, ping/pong, model_switched, respawn_ack, camera_mode_changed, error
+- Binary messages = JPEG frames (server -> browser, ~30Hz)
+- JSON messages = all structured data (race state at ~60Hz, commands, acknowledgements)
 
 ### Browser -> Server
 - `{ type: "control", keys: { w, a, s, d, space }, latency: number }` - Player input with measured latency
@@ -131,8 +126,8 @@ v3/
 - `{ type: "camera_mode", mode: string }` - Switch camera perspective
 
 ### Server -> Browser
-- `{ type: "race_state", player: { speed_kmh, lap, total_laps, checkpoint, lap_time, best_lap, position, finished, gear, rpm, throttle, brake, steer, gap_seconds, x, y, checkpoints, jpeg_quality, collisions }, ai: { ... }, model, race_status, fps, countdown, winner, camera_mode }`
-- `{ type: "race_finished", winner, player_time, ai_time, player_laps, ai_laps }`
+- `{ type: "race_state", player: { speed_kmh, lap, total_laps, checkpoint, lap_time, best_lap, position, finished, gear, rpm, throttle, brake, steer, gap_seconds, x, y, checkpoints, ghost, collisions, jpeg_quality }, ai: { ... }, model, race_status, fps, countdown, winner, camera_mode }`
+- `{ type: "race_finished", winner, player_time, ai_time, player_laps, ai_laps, player_path, ai_path, player_stats, ai_stats }`
 - `{ type: "handshake_ack", server, models }`
 - `{ type: "pong", timestamp }`
 - `{ type: "model_switched", model, success }`

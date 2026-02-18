@@ -124,6 +124,24 @@ wss.on('connection', (ws) => {
   let aiX = 210;
   let aiY = 210;
 
+  // Ghost replay: record player positions during lap 1, replay with offset after
+  const ghostPath = []; // recorded positions from lap 1
+  let ghostIndex = 0;
+  let recordingGhost = true; // true during lap 1
+
+  // Stats accumulators for race_finished
+  const playerPathHistory = [];
+  const aiPathHistory = [];
+  let playerMaxSpeed = 0;
+  let aiMaxSpeed = 0;
+  let playerTotalDistance = 0;
+  let aiTotalDistance = 0;
+  let totalPlayerCollisions = 0;
+  let prevPlayerX = null;
+  let prevPlayerY = null;
+  let prevAiX = null;
+  let prevAiY = null;
+
   ws.on('message', (data) => {
     let msg;
     try {
@@ -198,10 +216,36 @@ wss.on('connection', (ws) => {
       // Slowly update car positions (drive around an oval-ish track)
       const playerAngle = elapsed * 0.3;
       const aiAngle = elapsed * 0.32 + 0.5;
-      playerX = 200 + Math.cos(playerAngle) * 150 + Math.sin(playerAngle * 0.7) * 20;
-      playerY = 200 + Math.sin(playerAngle) * 100 + Math.cos(playerAngle * 0.5) * 15;
-      aiX = 200 + Math.cos(aiAngle) * 150 + Math.sin(aiAngle * 0.7) * 20;
-      aiY = 200 + Math.sin(aiAngle) * 100 + Math.cos(aiAngle * 0.5) * 15;
+      const newPlayerX = 200 + Math.cos(playerAngle) * 150 + Math.sin(playerAngle * 0.7) * 20;
+      const newPlayerY = 200 + Math.sin(playerAngle) * 100 + Math.cos(playerAngle * 0.5) * 15;
+      const newAiX = 200 + Math.cos(aiAngle) * 150 + Math.sin(aiAngle * 0.7) * 20;
+      const newAiY = 200 + Math.sin(aiAngle) * 100 + Math.cos(aiAngle * 0.5) * 15;
+
+      // Accumulate distance traveled
+      if (prevPlayerX !== null) {
+        const pdx = newPlayerX - prevPlayerX;
+        const pdy = newPlayerY - prevPlayerY;
+        playerTotalDistance += Math.sqrt(pdx * pdx + pdy * pdy);
+      }
+      if (prevAiX !== null) {
+        const adx = newAiX - prevAiX;
+        const ady = newAiY - prevAiY;
+        aiTotalDistance += Math.sqrt(adx * adx + ady * ady);
+      }
+      prevPlayerX = newPlayerX;
+      prevPlayerY = newPlayerY;
+      prevAiX = newAiX;
+      prevAiY = newAiY;
+      playerX = newPlayerX;
+      playerY = newPlayerY;
+      aiX = newAiX;
+      aiY = newAiY;
+
+      // Record path history (sample every 10th frame to keep size manageable)
+      if (frameNum % 10 === 0) {
+        playerPathHistory.push({ x: playerX, y: playerY });
+        aiPathHistory.push({ x: aiX, y: aiY });
+      }
 
       // Countdown phase
       if (countdown > 0 && elapsed < 3) {
@@ -228,6 +272,7 @@ wss.on('connection', (ws) => {
             jpeg_quality: jpegQuality,
             collisions: [],
           },
+          ghost: null,
           model: 'carla_pilotnet',
           race_status: 'countdown',
           fps: FPS,
@@ -245,6 +290,18 @@ wss.on('connection', (ws) => {
       const raceTime = elapsed - 3;
       const playerSpeed = 60 + Math.sin(raceTime * 0.5) * 30;
       const aiSpeed = 65 + Math.sin(raceTime * 0.4 + 1) * 25;
+
+      // Track max speeds
+      if (playerSpeed > playerMaxSpeed) playerMaxSpeed = playerSpeed;
+      if (aiSpeed > aiMaxSpeed) aiMaxSpeed = aiSpeed;
+
+      // Ghost recording: during lap 1 record player positions
+      if (recordingGhost && playerLap === 1) {
+        ghostPath.push({ x: playerX, y: playerY });
+      } else if (recordingGhost && playerLap > 1) {
+        recordingGhost = false;
+        ghostIndex = 0;
+      }
 
       // Simulate checkpoint/lap progress
       if (frameNum % 100 === 0) {
@@ -265,6 +322,7 @@ wss.on('connection', (ws) => {
           intensity: Math.round(Math.random() * 800 + 200),
           timestamp: raceTime,
         });
+        totalPlayerCollisions += 1;
         console.log('Collision event generated for player');
       }
       if (Math.random() < 0.001) {
@@ -273,6 +331,20 @@ wss.on('connection', (ws) => {
           intensity: Math.round(Math.random() * 500 + 100),
           timestamp: raceTime,
         });
+      }
+
+      // Build ghost data: after lap 1, replay recorded positions with slight offset
+      let ghostData = null;
+      if (!recordingGhost && ghostPath.length > 0) {
+        const gp = ghostPath[ghostIndex % ghostPath.length];
+        // Apply a slight lateral offset so the ghost doesn't overlap exactly
+        ghostData = {
+          x: gp.x + 8,
+          y: gp.y + 5,
+          lap: 1,
+          checkpoint: Math.floor((ghostIndex / ghostPath.length) * 10),
+        };
+        ghostIndex++;
       }
 
       // Send race state
@@ -320,6 +392,7 @@ wss.on('connection', (ws) => {
           jpeg_quality: jpegQuality,
           collisions: aiCollisions,
         },
+        ghost: ghostData,
         model: 'carla_pilotnet',
         race_status: 'racing',
         fps: FPS,
@@ -342,6 +415,13 @@ wss.on('connection', (ws) => {
           ai_time: 125.1,
           player_laps: [41.2, 39.5, 39.6],
           ai_laps: [42.1, 41.8, 41.2],
+          player_path: playerPathHistory,
+          ai_path: aiPathHistory,
+          player_max_speed: Math.round(playerMaxSpeed * 10) / 10,
+          ai_max_speed: Math.round(aiMaxSpeed * 10) / 10,
+          player_distance: Math.round(playerTotalDistance * 10) / 10,
+          ai_distance: Math.round(aiTotalDistance * 10) / 10,
+          player_collisions: totalPlayerCollisions,
         }));
       }
     }, 1000 / FPS);
