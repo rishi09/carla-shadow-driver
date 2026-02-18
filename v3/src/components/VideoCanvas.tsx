@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback } from 'react';
+import { useRef, useEffect, useCallback, useState } from 'react';
 
 interface VideoCanvasProps {
   onBinaryFrame: (handler: ((data: Blob) => void) | null) => void;
@@ -13,6 +13,8 @@ export function VideoCanvas({ onBinaryFrame, className = '' }: VideoCanvasProps)
   const rafIdRef = useRef<number>(0);
   const frameCountRef = useRef<number>(0);
   const fpsIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [hasFirstFrame, setHasFirstFrame] = useState(false);
+  const firstFrameReceivedRef = useRef(false);
 
   // Lazily initialize the off-screen back buffer canvas
   const getBackBuffer = useCallback(() => {
@@ -102,6 +104,12 @@ export function VideoCanvas({ onBinaryFrame, className = '' }: VideoCanvasProps)
           bitmap.close();
           pendingFrameRef.current = true;
           decoding = false;
+
+          // Signal first frame received
+          if (!firstFrameReceivedRef.current) {
+            firstFrameReceivedRef.current = true;
+            setHasFirstFrame(true);
+          }
         })
         .catch(() => {
           // Failed to decode JPEG - skip frame
@@ -122,12 +130,21 @@ export function VideoCanvas({ onBinaryFrame, className = '' }: VideoCanvasProps)
   }, [onBinaryFrame, getBackBuffer]);
 
   return (
-    <canvas
-      ref={frontCanvasRef}
-      width={1280}
-      height={720}
-      className={`bg-dark-500 rounded-lg ${className}`}
-      style={{ width: '100%', height: 'auto', maxHeight: '80vh', objectFit: 'contain' }}
-    />
+    <div className={`relative ${className}`} style={{ width: '100%', maxHeight: '80vh' }}>
+      <canvas
+        ref={frontCanvasRef}
+        width={1280}
+        height={720}
+        className="bg-dark-500 rounded-lg"
+        style={{ width: '100%', height: 'auto', maxHeight: '80vh', objectFit: 'contain' }}
+      />
+      {!hasFirstFrame && (
+        <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-dark-500">
+          <span className="text-white/40 text-lg font-mono animate-pulse">
+            Waiting for video feed...
+          </span>
+        </div>
+      )}
+    </div>
   );
 }

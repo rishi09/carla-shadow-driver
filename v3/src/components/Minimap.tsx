@@ -33,6 +33,9 @@ export function Minimap({ raceState }: MinimapProps) {
     if (raceState.ai.x != null && raceState.ai.y != null) {
       points.push({ x: raceState.ai.x, y: raceState.ai.y });
     }
+    if (raceState.ghost) {
+      points.push({ x: raceState.ghost.x, y: raceState.ghost.y });
+    }
 
     if (points.length === 0) return null;
 
@@ -56,7 +59,7 @@ export function Minimap({ raceState }: MinimapProps) {
       minY: minY - margin,
       maxY: maxY + margin,
     };
-  }, [raceState?.checkpoints, raceState?.player.x, raceState?.player.y, raceState?.ai.x, raceState?.ai.y]);
+  }, [raceState?.checkpoints, raceState?.player.x, raceState?.player.y, raceState?.ai.x, raceState?.ai.y, raceState?.ghost?.x, raceState?.ghost?.y]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -168,6 +171,23 @@ export function Minimap({ raceState }: MinimapProps) {
       ctx.fill();
     }
 
+    // Draw ghost car (semi-transparent white, from best lap recording)
+    if (raceState.ghost) {
+      const [gx, gy] = toCanvas(raceState.ghost.x, raceState.ghost.y);
+      ctx.shadowColor = 'rgba(255, 255, 255, 0.5)';
+      ctx.shadowBlur = 6;
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+      ctx.beginPath();
+      ctx.arc(gx, gy, 5, 0, Math.PI * 2);
+      ctx.fill();
+      // Inner bright dot
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+      ctx.beginPath();
+      ctx.arc(gx, gy, 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
     // Draw player car (green, on top)
     if (raceState.player.x != null && raceState.player.y != null) {
       const [px, py] = toCanvas(raceState.player.x, raceState.player.y);
@@ -207,6 +227,16 @@ export function Minimap({ raceState }: MinimapProps) {
     ctx.fill();
     ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
     ctx.fillText('AI', PADDING + 48, legendY + 3);
+
+    // Ghost dot (only show in legend if ghost is active)
+    if (raceState.ghost) {
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+      ctx.beginPath();
+      ctx.arc(PADDING + 72, legendY, 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+      ctx.fillText('GHOST', PADDING + 78, legendY + 3);
+    }
   }, [raceState, bounds]);
 
   return (

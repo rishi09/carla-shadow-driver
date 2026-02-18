@@ -1,4 +1,5 @@
 import type { RaceFinished } from '../types/index.ts';
+import { RacingLineViz } from './RacingLineViz.tsx';
 
 interface RaceResultsProps {
   result: RaceFinished;
@@ -68,6 +69,62 @@ export function RaceResults({ result, onPlayAgain, onMainMenu }: RaceResultsProp
           </div>
         )}
 
+        {/* Race Statistics */}
+        {(result.player_max_speed != null || result.player_distance != null || result.player_collisions != null) && (
+          <div className="bg-dark-400/50 rounded-lg p-4 mb-8 text-left">
+            <div className="text-white/40 text-xs font-mono uppercase mb-3">Race Statistics</div>
+            <div className="grid grid-cols-3 gap-y-2 gap-x-3 text-xs font-mono">
+              {/* Header row */}
+              <div className="text-white/30" />
+              <div className="text-player/70">You</div>
+              <div className="text-ai/70">AI</div>
+
+              {/* Top Speed */}
+              {result.player_max_speed != null && result.ai_max_speed != null && (
+                <div className="contents">
+                  <div className="text-white/50">Top Speed</div>
+                  <div className={result.player_max_speed >= result.ai_max_speed ? 'text-green-400' : 'text-red-400'}>
+                    {result.player_max_speed.toFixed(1)} km/h
+                  </div>
+                  <div className={result.ai_max_speed >= result.player_max_speed ? 'text-green-400' : 'text-red-400'}>
+                    {result.ai_max_speed.toFixed(1)} km/h
+                  </div>
+                </div>
+              )}
+
+              {/* Distance Traveled */}
+              {result.player_distance != null && result.ai_distance != null && (
+                <div className="contents">
+                  <div className="text-white/50">Distance</div>
+                  <div className="text-white/70">{formatDistance(result.player_distance)}</div>
+                  <div className="text-white/70">{formatDistance(result.ai_distance)}</div>
+                </div>
+              )}
+
+              {/* Collisions */}
+              {result.player_collisions != null && (
+                <div className="contents">
+                  <div className="text-white/50">Collisions</div>
+                  <div className="text-white/70">
+                    <span className="inline-block mr-1 text-warning">&#x26A0;</span>{result.player_collisions}
+                  </div>
+                  <div className="text-white/30">--</div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Racing line visualization */}
+        {(result.player_path || result.ai_path) && (
+          <div className="mb-8">
+            <RacingLineViz
+              playerPath={result.player_path}
+              aiPath={result.ai_path}
+            />
+          </div>
+        )}
+
         {/* Actions */}
         <div className="flex gap-3">
           <button
@@ -92,4 +149,11 @@ function formatRaceTime(seconds: number): string {
   const mins = Math.floor(seconds / 60);
   const secs = seconds % 60;
   return `${mins}:${secs.toFixed(1).padStart(4, '0')}`;
+}
+
+function formatDistance(meters: number): string {
+  if (meters >= 1000) {
+    return `${(meters / 1000).toFixed(2)} km`;
+  }
+  return `${Math.round(meters)} m`;
 }

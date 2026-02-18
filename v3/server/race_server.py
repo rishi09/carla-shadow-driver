@@ -225,12 +225,21 @@ class RaceServer:
                         ai_telem['x'], ai_telem['y'], ai_telem['speed_kmh']
                     )
 
-                    # 5. Send chase camera frame to browser
+                    # 5. Record player position for ghost replay
+                    lap_time = self.race_state.get_current_lap_time("player")
+                    yaw = player_telem.get('yaw', 0.0)
+                    self.race_state.record_player_position(
+                        player_telem['x'], player_telem['y'], yaw, lap_time
+                    )
+
+                    # 6. Send chase camera frame to browser
                     await self._send_frame()
 
                 elif self.race_state.status == "finished":
                     # Send final race result
                     if self.ws_client:
+                        paths = self.race_state.get_paths()
+                        stats = self.race_state.get_stats()
                         await self.ws_client.send(json.dumps({
                             'type': 'race_finished',
                             'winner': self.race_state.winner,
@@ -238,6 +247,13 @@ class RaceServer:
                             'ai_time': self.race_state.ai_finish_time,
                             'player_laps': self.race_state.player_lap_times,
                             'ai_laps': self.race_state.ai_lap_times,
+                            'player_path': paths['player'],
+                            'ai_path': paths['ai'],
+                            'player_max_speed': stats['player_max_speed'],
+                            'ai_max_speed': stats['ai_max_speed'],
+                            'player_distance': stats['player_distance'],
+                            'ai_distance': stats['ai_distance'],
+                            'player_collisions': stats['player_collisions'],
                         }))
                     self.running = False
                     break
@@ -337,6 +353,9 @@ class RaceServer:
         recent_collisions = self.carla.get_recent_collisions()
         if recent_collisions:
             state['collisions'] = [{'intensity': c['intensity']} for c in recent_collisions]
+            # Track collision count in race stats
+            for _ in recent_collisions:
+                self.race_state.report_player_collision()
 
         # Fill in telemetry from both vehicles
         if player_telem:

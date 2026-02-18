@@ -43,6 +43,27 @@ class RaceState:
         self.ai_x: float = 0.0
         self.ai_y: float = 0.0
 
+        # Statistics tracking
+        self.player_max_speed: float = 0.0
+        self.ai_max_speed: float = 0.0
+        self.player_total_distance: float = 0.0
+        self.ai_total_distance: float = 0.0
+        self.player_collisions_count: int = 0
+        self._player_prev_x: Optional[float] = None
+        self._player_prev_y: Optional[float] = None
+        self._ai_prev_x: Optional[float] = None
+        self._ai_prev_y: Optional[float] = None
+
+        # Ghost replay recording
+        self._player_recording: List[Dict] = []  # all recorded positions across laps
+        self._current_lap_recording: List[Dict] = []
+        self._best_lap_recording: List[Dict] = []
+
+        # Path recording (every 5th frame to keep data manageable)
+        self._player_path: List[Tuple[float, float]] = []
+        self._ai_path: List[Tuple[float, float]] = []
+        self._path_frame_counter: int = 0
+
         # Race timing
         self.race_start_time: Optional[float] = None
         self.countdown_start: Optional[float] = None
@@ -60,6 +81,64 @@ class RaceState:
         self.player_lap_start = now
         self.ai_lap_start = now
         self.status = "racing"
+
+    def record_player_position(self, x: float, y: float, yaw: float, lap_time: float):
+        """Record the player's position for ghost replay during the current lap."""
+        frame = {
+            'x': x,
+            'y': y,
+            'yaw': yaw,
+            'time_in_lap': lap_time,
+        }
+        self._current_lap_recording.append(frame)
+        self._player_recording.append(frame)
+
+    def get_ghost_position(self, time_in_current_lap: float) -> Optional[Dict]:
+        """Look up the ghost car position at the given lap time.
+
+        Uses linear interpolation between the two nearest recorded frames
+        in the best lap recording.
+
+        Returns:
+            Dict with 'x', 'y', 'yaw' or None if no recording exists.
+        """
+        if not self._best_lap_recording:
+            return None
+
+        recording = self._best_lap_recording
+
+        # If before the first recorded frame, return the first position
+        if time_in_current_lap <= recording[0]['time_in_lap']:
+            f = recording[0]
+            return {'x': f['x'], 'y': f['y'], 'yaw': f['yaw']}
+
+        # If past the last recorded frame, return the last position
+        if time_in_current_lap >= recording[-1]['time_in_lap']:
+            f = recording[-1]
+            return {'x': f['x'], 'y': f['y'], 'yaw': f['yaw']}
+
+        # Binary search for the interval containing time_in_current_lap
+        lo, hi = 0, len(recording) - 1
+        while lo < hi - 1:
+            mid = (lo + hi) // 2
+            if recording[mid]['time_in_lap'] <= time_in_current_lap:
+                lo = mid
+            else:
+                hi = mid
+
+        # Linear interpolation between recording[lo] and recording[hi]
+        f0 = recording[lo]
+        f1 = recording[hi]
+        dt = f1['time_in_lap'] - f0['time_in_lap']
+        if dt <= 0:
+            return {'x': f0['x'], 'y': f0['y'], 'yaw': f0['yaw']}
+
+        t = (time_in_current_lap - f0['time_in_lap']) / dt
+        return {
+            'x': f0['x'] + (f1['x'] - f0['x']) * t,
+            'y': f0['y'] + (f1['y'] - f0['y']) * t,
+            'yaw': f0['yaw'] + (f1['yaw'] - f0['yaw']) * t,
+        }
 
     def get_countdown(self) -> Optional[int]:
         """Get countdown number (3, 2, 1, 0=GO). None if not in countdown."""
@@ -80,12 +159,44 @@ class RaceState:
         dist = math.sqrt((pos_x - cx) ** 2 + (pos_y - cy) ** 2)
         return dist <= radius
 
+    def report_player_collision(self):
+        """Increment the player collision counter."""
+        self.player_collisions_count += 1
+
+    def get_stats(self) -> Dict:
+        """Return accumulated race statistics."""
+        return {
+            'player_max_speed': round(self.player_max_speed, 1),
+            'ai_max_speed': round(self.ai_max_speed, 1),
+            'player_distance': round(self.player_total_distance, 1),
+            'ai_distance': round(self.ai_total_distance, 1),
+            'player_collisions': self.player_collisions_count,
+        }
+
     def update_player(self, x: float, y: float, speed_kmh: float):
         """Update player position and check checkpoints."""
         self.player_x = x
         self.player_y = y
         if self.status != "racing" or self.player_finished:
             return
+
+        # Track max speed
+        if speed_kmh > self.player_max_speed:
+            self.player_max_speed = speed_kmh
+
+        # Track distance traveled
+        if self._player_prev_x is not None and self._player_prev_y is not None:
+            dx = x - self._player_prev_x
+            dy = y - self._player_prev_y
+            self.player_total_distance += math.sqrt(dx * dx + dy * dy)
+        self._player_prev_x = x
+        self._player_prev_y = y
+
+        # Record path every 5th frame
+        self._path_frame_counter += 1
+        if self._path_frame_counter % 5 == 0:
+            self._player_path.append((round(x, 1), round(y, 1)))
+            self._ai_path.append((round(self.ai_x, 1), round(self.ai_y, 1)))
 
         next_cp = self.player_checkpoint % len(self.checkpoints)
         if self._check_checkpoint(x, y, next_cp):
@@ -101,6 +212,11 @@ class RaceState:
 
                 if self.player_best_lap is None or lap_time < self.player_best_lap:
                     self.player_best_lap = lap_time
+                    # Save this lap's recording as the best ghost replay
+                    self._best_lap_recording = list(self._current_lap_recording)
+
+                # Start a new recording for the next lap
+                self._current_lap_recording = []
 
                 # Check if race finished
                 if self.player_lap >= self.total_laps:
@@ -116,6 +232,18 @@ class RaceState:
         self.ai_y = y
         if self.status != "racing" or self.ai_finished:
             return
+
+        # Track max speed
+        if speed_kmh > self.ai_max_speed:
+            self.ai_max_speed = speed_kmh
+
+        # Track distance traveled
+        if self._ai_prev_x is not None and self._ai_prev_y is not None:
+            dx = x - self._ai_prev_x
+            dy = y - self._ai_prev_y
+            self.ai_total_distance += math.sqrt(dx * dx + dy * dy)
+        self._ai_prev_x = x
+        self._ai_prev_y = y
 
         next_cp = self.ai_checkpoint % len(self.checkpoints)
         if self._check_checkpoint(x, y, next_cp):
@@ -186,10 +314,20 @@ class RaceState:
         # Same checkpoint: compare current lap times
         return ai_time - player_time
 
+    def get_paths(self) -> Dict:
+        """Return recorded paths for both cars."""
+        return {
+            'player': [[x, y] for x, y in self._player_path],
+            'ai': [[x, y] for x, y in self._ai_path],
+        }
+
     def to_dict(self) -> Dict:
         """Serialize race state for WebSocket transmission."""
         positions = self.get_position()
-        return {
+        current_lap_time = self.get_current_lap_time("player")
+        ghost_pos = self.get_ghost_position(current_lap_time)
+
+        result = {
             "player": {
                 "speed_kmh": 0,  # Filled in by caller
                 "lap": self.player_lap + 1,  # 1-indexed for display
@@ -219,6 +357,15 @@ class RaceState:
             "countdown": self.get_countdown(),
             "checkpoints": [{"x": round(cx, 1), "y": round(cy, 1)} for cx, cy, _ in self.checkpoints],
         }
+
+        if ghost_pos is not None:
+            result["ghost"] = {
+                "x": round(ghost_pos['x'], 1),
+                "y": round(ghost_pos['y'], 1),
+                "yaw": round(ghost_pos['yaw'], 1),
+            }
+
+        return result
 
 
 def generate_checkpoints_from_waypoints(world, num_checkpoints: int = 10,

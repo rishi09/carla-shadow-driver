@@ -23,6 +23,7 @@ export interface RaceState {
   checkpoints?: Array<{ x: number; y: number }>;
   collisions?: Array<{ intensity: number }>;
   camera_mode?: string;
+  ghost?: { x: number; y: number; yaw: number };
 }
 
 export interface RacerState {
@@ -52,6 +53,13 @@ export interface RaceFinished {
   ai_time: number | null;
   player_laps: number[];
   ai_laps: number[];
+  player_path?: Array<[number, number]>;
+  ai_path?: Array<[number, number]>;
+  player_max_speed?: number;
+  ai_max_speed?: number;
+  player_distance?: number;
+  ai_distance?: number;
+  player_collisions?: number;
 }
 
 /** Handshake ack from server */

@@ -112,13 +112,16 @@ export function RaceHUD({ raceState, latencyMs, className = '' }: RaceHUDProps) 
         </div>
       </div>
 
-      {/* Bottom right: FPS + latency + controls hint */}
+      {/* Bottom right: FPS + latency + connection quality + controls hint */}
       <div className="absolute bottom-4 right-4 z-10">
         <div className="bg-black/60 backdrop-blur-sm rounded-lg px-3 py-2 border border-white/10">
           <div className="text-white/30 text-xs font-mono">{fps} FPS</div>
           {latencyMs != null && (
-            <div className={`text-xs font-mono mt-0.5 ${latencyMs < 100 ? 'text-player/50' : latencyMs < 150 ? 'text-accent/50' : 'text-warning/50'}`}>
-              {latencyMs}ms
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <ConnectionDot latencyMs={latencyMs} />
+              <span className={`text-xs font-mono ${latencyMs < 80 ? 'text-player/50' : latencyMs <= 150 ? 'text-accent/50' : 'text-warning/50'}`}>
+                {latencyMs}ms
+              </span>
             </div>
           )}
           <div className="text-white/20 text-xs font-mono mt-1">WASD + Space | R=Reset | C=Camera</div>
@@ -223,6 +226,20 @@ function Speedometer({ speedKmh }: { speedKmh: number }) {
       </span>
       <span className="text-white/50 text-sm font-mono">km/h</span>
     </div>
+  );
+}
+
+/** Pulsing connection quality dot: green < 80ms, yellow 80-150ms, red > 150ms */
+function ConnectionDot({ latencyMs }: { latencyMs: number }) {
+  const color = latencyMs < 80 ? 'bg-green-500' : latencyMs <= 150 ? 'bg-yellow-500' : 'bg-red-500';
+  const shadow = latencyMs < 80
+    ? 'shadow-[0_0_6px_rgba(34,197,94,0.8)]'
+    : latencyMs <= 150
+      ? 'shadow-[0_0_6px_rgba(234,179,8,0.8)]'
+      : 'shadow-[0_0_6px_rgba(239,68,68,0.8)]';
+
+  return (
+    <span className={`inline-block w-2 h-2 rounded-full animate-pulse ${color} ${shadow}`} />
   );
 }
 
