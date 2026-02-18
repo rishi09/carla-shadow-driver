@@ -35,7 +35,7 @@ CALLBACK_URL="${CALLBACK_URL}"
 report_status() {
   curl -s -X POST "\$CALLBACK_URL" \\
     -H "Content-Type: application/json" \\
-    -d "{\\"instance_id\\":\\"\$INST_ID\\",\\"status\\":\\"\\$1\\",\\"message\\":\\"\\$2\\"}" || true
+    -d "{\\"instance_id\\":\\"\$INST_ID\\",\\"status\\":\\"\$1\\",\\"message\\":\\"\$2\\"}" || true
 }
 
 echo "=== Installing system dependencies ==="
@@ -46,6 +46,14 @@ echo "=== Installing cloudflared ==="
 report_status "installing" "Installing cloudflared"
 curl -sL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /usr/local/bin/cloudflared
 chmod +x /usr/local/bin/cloudflared
+
+# Verify cloudflared binary is valid
+if ! cloudflared --version 2>/dev/null; then
+  echo "ERROR: cloudflared binary invalid or failed to execute"
+  report_status "error" "cloudflared binary download failed"
+  exit 1
+fi
+echo "cloudflared version: \$(cloudflared --version)"
 
 echo "=== Installing Python dependencies ==="
 report_status "installing" "Installing Python dependencies"
@@ -95,6 +103,11 @@ fi
 echo "=== Starting Cloudflare Tunnel ==="
 report_status "tunneling" "Starting Cloudflare tunnel"
 
+# Quick connectivity check
+if ! curl -s --max-time 5 -o /dev/null https://cloudflare.com 2>/dev/null; then
+  echo "WARNING: Cannot reach Cloudflare, tunnel may fail"
+fi
+
 # Start cloudflared and write output to a file
 TUNNEL_LOG=/tmp/cloudflared.log
 cloudflared tunnel --url http://localhost:8765 --protocol http2 > \$TUNNEL_LOG 2>&1 &
@@ -119,8 +132,16 @@ if [ -n "\$TUNNEL_URL" ]; then
     -d "{\\"instance_id\\":\\"$INST_ID\\",\\"tunnel_url\\":\\"\$TUNNEL_URL\\",\\"status\\":\\"ready\\",\\"message\\":\\"Server running\\"}"
 else
   echo "ERROR: Tunnel failed to start within 60 seconds"
+  echo "=== Cloudflared log ==="
   cat \$TUNNEL_LOG
-  report_status "error" "Cloudflare tunnel failed to start"
+  # Extract last meaningful error line for the callback
+  LAST_ERR=\$(grep -i 'error\\|failed\\|refused\\|timeout' \$TUNNEL_LOG | tail -1 | head -c 200)
+  if [ -z "\$LAST_ERR" ]; then
+    LAST_ERR="No tunnel URL after 60s"
+  fi
+  # Sanitize for JSON (remove quotes and backslashes)
+  LAST_ERR=\$(echo "\$LAST_ERR" | tr -d '"\\\\'  | tr -s ' ')
+  report_status "error" "Tunnel failed: \$LAST_ERR"
   kill \$CF_PID 2>/dev/null
   exit 1
 fi
