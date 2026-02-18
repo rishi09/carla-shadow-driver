@@ -28,7 +28,7 @@ export function RaceResults({ result, onPlayAgain, onMainMenu }: RaceResultsProp
           <div className={`rounded-lg p-4 border ${playerWon ? 'bg-player/10 border-player/30' : 'bg-dark-400 border-white/10'}`}>
             <div className="text-white/50 text-xs font-mono uppercase mb-1">Your Time</div>
             <div className="text-white text-2xl font-bold font-mono">
-              {formatRaceTime(result.player_time)}
+              {result.player_time != null ? formatRaceTime(result.player_time) : 'DNF'}
             </div>
             {result.player_laps.length > 0 && (
               <div className="text-white/30 text-xs font-mono mt-2">
@@ -39,7 +39,7 @@ export function RaceResults({ result, onPlayAgain, onMainMenu }: RaceResultsProp
           <div className={`rounded-lg p-4 border ${!playerWon ? 'bg-ai/10 border-ai/30' : 'bg-dark-400 border-white/10'}`}>
             <div className="text-white/50 text-xs font-mono uppercase mb-1">AI Time</div>
             <div className="text-white text-2xl font-bold font-mono">
-              {formatRaceTime(result.ai_time)}
+              {result.ai_time != null ? formatRaceTime(result.ai_time) : 'DNF'}
             </div>
             {result.ai_laps.length > 0 && (
               <div className="text-white/30 text-xs font-mono mt-2">

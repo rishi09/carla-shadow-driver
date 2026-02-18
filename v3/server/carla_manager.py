@@ -60,6 +60,11 @@ class RaceManager:
         # Actors to clean up
         self._actors: list = []
 
+        # Progressive input state (smooth ramping)
+        self._current_throttle = 0.0
+        self._current_brake = 0.0
+        self._current_steer = 0.0
+
     def connect(self) -> bool:
         """Connect to CARLA server."""
         cfg = self.config['carla']
@@ -91,7 +96,7 @@ class RaceManager:
             # Set synchronous mode for deterministic simulation
             settings = self.world.get_settings()
             settings.synchronous_mode = True
-            settings.fixed_delta_seconds = 1.0 / 20.0  # 20 FPS
+            settings.fixed_delta_seconds = 1.0 / 30.0  # 30 FPS
             self.world.apply_settings(settings)
 
             # Get spawn points
@@ -194,43 +199,76 @@ class RaceManager:
             return None
 
     def apply_player_control(self, keys: Dict[str, bool]):
-        """Convert WASD keys to vehicle control."""
+        """Convert WASD keys to vehicle control with progressive steering and ramping."""
         if not self.player_car:
             return
 
-        throttle = 0.0
-        steer = 0.0
-        brake = 0.0
+        dt = 1.0 / 30.0  # Approximate frame delta
 
-        if keys.get('w', False):
-            throttle = 0.8
-        if keys.get('s', False):
-            brake = 0.8
-        if keys.get('a', False):
-            steer = -0.5
-        if keys.get('d', False):
-            steer = 0.5
-
-        # Reverse if braking while stopped
+        # Get current speed for speed-sensitive steering
         velocity = self.player_car.get_velocity()
-        speed = math.sqrt(velocity.x**2 + velocity.y**2 + velocity.z**2)
-        if keys.get('s', False) and speed < 0.5:
-            throttle = 0.3
-            brake = 0.0
-            # Apply reverse gear via negative throttle hack
+        speed_kmh = 3.6 * math.sqrt(velocity.x**2 + velocity.y**2 + velocity.z**2)
+
+        # --- Throttle ramping ---
+        if keys.get('w', False):
+            # Ramp up over ~300ms
+            self._current_throttle = min(1.0, self._current_throttle + dt * 3.3)
+        else:
+            # Decay over ~200ms
+            self._current_throttle = max(0.0, self._current_throttle - dt * 5.0)
+
+        # --- Brake ramping ---
+        if keys.get('s', False):
+            # Brake ramps faster: ~100ms
+            self._current_brake = min(1.0, self._current_brake + dt * 10.0)
+        else:
+            self._current_brake = max(0.0, self._current_brake - dt * 5.0)
+
+        # --- Speed-sensitive steering ---
+        # At high speeds, reduce max steering to prevent spin-outs
+        if speed_kmh < 30:
+            steer_limit = 1.0
+        elif speed_kmh < 100:
+            steer_limit = 0.7
+        elif speed_kmh < 200:
+            steer_limit = 0.4
+        else:
+            steer_limit = 0.2
+
+        steer_rate = 3.0  # Steering change per second
+        steer_decay = 5.0  # Return-to-center rate
+
+        if keys.get('a', False):
+            self._current_steer = max(-steer_limit, self._current_steer - steer_rate * dt)
+        elif keys.get('d', False):
+            self._current_steer = min(steer_limit, self._current_steer + steer_rate * dt)
+        else:
+            # Smoothly return to center
+            if self._current_steer > 0:
+                self._current_steer = max(0.0, self._current_steer - steer_decay * dt)
+            elif self._current_steer < 0:
+                self._current_steer = min(0.0, self._current_steer + steer_decay * dt)
+
+        # --- Handbrake ---
+        hand_brake = keys.get('space', False)
+
+        # --- Reverse if braking while stopped ---
+        if keys.get('s', False) and speed_kmh < 2.0:
             control = carla.VehicleControl(
-                throttle=throttle,
-                steer=max(-1.0, min(1.0, steer)),
-                brake=brake,
+                throttle=0.3,
+                steer=max(-1.0, min(1.0, self._current_steer)),
+                brake=0.0,
+                hand_brake=hand_brake,
                 reverse=True
             )
             self.player_car.apply_control(control)
             return
 
         control = carla.VehicleControl(
-            throttle=max(0.0, min(1.0, throttle)),
-            steer=max(-1.0, min(1.0, steer)),
-            brake=max(0.0, min(1.0, brake)),
+            throttle=self._current_throttle,
+            steer=max(-1.0, min(1.0, self._current_steer)),
+            brake=self._current_brake,
+            hand_brake=hand_brake,
         )
         self.player_car.apply_control(control)
 
@@ -247,9 +285,10 @@ class RaceManager:
         self.ai_car.apply_control(control)
 
     def get_telemetry(self, vehicle: carla.Vehicle) -> Dict:
-        """Get telemetry for a vehicle."""
+        """Get telemetry for a vehicle including control state."""
         transform = vehicle.get_transform()
         velocity = vehicle.get_velocity()
+        control = vehicle.get_control()
         speed = 3.6 * math.sqrt(velocity.x**2 + velocity.y**2 + velocity.z**2)
 
         return {
@@ -258,6 +297,11 @@ class RaceManager:
             'z': transform.location.z,
             'yaw': transform.rotation.yaw,
             'speed_kmh': speed,
+            'gear': control.gear,
+            'throttle': control.throttle,
+            'brake': control.brake,
+            'steer': control.steer,
+            'rpm': speed * 40,  # Approximate RPM from speed
         }
 
     def tick(self):

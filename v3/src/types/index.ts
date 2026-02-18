@@ -6,6 +6,7 @@ export interface KeyState {
   a: boolean;
   s: boolean;
   d: boolean;
+  space: boolean;
 }
 
 /** Race state received from server */
@@ -29,14 +30,20 @@ export interface RacerState {
   best_lap: number | null;
   position: number;
   finished: boolean;
+  gear?: number;
+  rpm?: number;
+  throttle?: number;
+  brake?: number;
+  steer?: number;
+  gap_seconds?: number | null;
 }
 
 /** Race finished message from server */
 export interface RaceFinished {
   type: 'race_finished';
   winner: 'player' | 'ai';
-  player_time: number;
-  ai_time: number;
+  player_time: number | null;
+  ai_time: number | null;
   player_laps: number[];
   ai_laps: number[];
 }

@@ -29,6 +29,8 @@ export interface UseGPUConnectionReturn {
   raceState: RaceState | null;
   raceFinished: RaceFinished | null;
   availableModels: string[];
+  activeModel: string | null;
+  latencyMs: number | null;
   retryCount: number;
   maxRetries: number;
   startGPU: () => Promise<void>;
@@ -55,6 +57,8 @@ export function useGPUConnection(): UseGPUConnectionReturn {
   const [raceState, setRaceState] = useState<RaceState | null>(null);
   const [raceFinished, setRaceFinished] = useState<RaceFinished | null>(null);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [activeModel, setActiveModel] = useState<string | null>(null);
+  const [latencyMs, setLatencyMs] = useState<number | null>(null);
   const [retryCount, setRetryCount] = useState(0);
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -144,7 +148,18 @@ export function useGPUConnection(): UseGPUConnectionReturn {
           } else if (data.type === 'race_finished') {
             setRaceFinished(data as RaceFinished);
           } else if (data.type === 'handshake_ack') {
-            setAvailableModels((data as { models: string[] }).models || []);
+            const ack = data as { models: string[] };
+            setAvailableModels(ack.models || []);
+          } else if (data.type === 'pong') {
+            const pong = data as { timestamp: number };
+            if (pong.timestamp) {
+              setLatencyMs(Date.now() - pong.timestamp);
+            }
+          } else if (data.type === 'model_switched') {
+            const switched = data as { model: string; success: boolean };
+            if (switched.success) {
+              setActiveModel(switched.model);
+            }
           } else if (data.type === 'error') {
             setError({ message: (data as { message: string }).message, code: 'SERVER_ERROR' });
           }
@@ -345,7 +360,7 @@ export function useGPUConnection(): UseGPUConnectionReturn {
 
   return {
     provisioningState, connectionState, instanceData, error,
-    raceState, raceFinished, availableModels,
+    raceState, raceFinished, availableModels, activeModel, latencyMs,
     retryCount, maxRetries: MAX_RETRIES,
     startGPU, stopGPU, sendControls, sendStartRace, sendSwitchModel,
     clearError, onBinaryFrame,

@@ -149,6 +149,33 @@ class RaceState:
         else:
             return {"player": 2, "ai": 1}
 
+    def get_gap_seconds(self) -> Optional[float]:
+        """Get time gap between player and AI. Positive = player ahead."""
+        if self.status != "racing":
+            return None
+        # Compare current lap times at similar progress points
+        player_time = self.get_current_lap_time("player")
+        ai_time = self.get_current_lap_time("ai")
+        player_cp = self.player_checkpoint % len(self.checkpoints)
+        ai_cp = self.ai_checkpoint % len(self.checkpoints)
+
+        # If on different laps, the gap is large
+        if self.player_lap != self.ai_lap:
+            lap_diff = self.player_lap - self.ai_lap
+            avg_lap = 45.0  # Estimate average lap time
+            if self.player_lap_times:
+                avg_lap = sum(self.player_lap_times) / len(self.player_lap_times)
+            return lap_diff * avg_lap
+
+        # Same lap: estimate gap from checkpoint difference
+        if player_cp != ai_cp:
+            cp_diff = player_cp - ai_cp
+            avg_cp_time = player_time / max(player_cp, 1) if player_cp > 0 else 3.0
+            return cp_diff * avg_cp_time
+
+        # Same checkpoint: compare current lap times
+        return ai_time - player_time
+
     def to_dict(self) -> Dict:
         """Serialize race state for WebSocket transmission."""
         positions = self.get_position()

@@ -118,7 +118,7 @@ wss.on('connection', (ws) => {
     } else if (msg.type === 'switch_model') {
       ws.send(JSON.stringify({ type: 'model_switched', model: msg.model, success: true }));
     } else if (msg.type === 'control') {
-      // Just log it
+      // Log controls including space (handbrake)
     }
   });
 
@@ -175,6 +175,12 @@ wss.on('connection', (ws) => {
           best_lap: playerLap > 1 ? 42.3 : null,
           position: aiLap > playerLap ? 2 : 1,
           finished: playerLap > 3,
+          gear: Math.min(6, Math.floor(playerSpeed / 30) + 1),
+          rpm: playerSpeed * 40,
+          throttle: 0.7 + Math.sin(raceTime * 2) * 0.3,
+          brake: Math.max(0, Math.sin(raceTime * 1.5) * 0.3),
+          steer: Math.sin(raceTime * 0.8) * 0.4,
+          gap_seconds: (playerCheckpoint - aiCheckpoint) * 2.5,
         },
         ai: {
           speed_kmh: Math.round(aiSpeed * 10) / 10,
@@ -185,6 +191,12 @@ wss.on('connection', (ws) => {
           best_lap: aiLap > 1 ? 39.8 : null,
           position: aiLap > playerLap ? 1 : 2,
           finished: aiLap > 3,
+          gear: Math.min(6, Math.floor(aiSpeed / 30) + 1),
+          rpm: aiSpeed * 40,
+          throttle: 0.8 + Math.sin(raceTime * 1.8) * 0.2,
+          brake: Math.max(0, Math.sin(raceTime * 1.2) * 0.2),
+          steer: Math.sin(raceTime * 0.6 + 1) * 0.3,
+          gap_seconds: (aiCheckpoint - playerCheckpoint) * 2.5,
         },
         model: 'carla_pilotnet',
         race_status: 'racing',

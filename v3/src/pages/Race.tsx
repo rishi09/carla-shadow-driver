@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react';
 import { useGPUConnection } from '../hooks/useGPUConnection.ts';
 import { VideoCanvas } from '../components/VideoCanvas.tsx';
 import { RaceHUD } from '../components/RaceHUD.tsx';
+import { SpeedEffects } from '../components/SpeedEffects.tsx';
 import { GPUConnectionModal } from '../components/GPUConnectionModal.tsx';
 import { ModelSelector } from '../components/ModelSelector.tsx';
 import { RaceResults } from '../components/RaceResults.tsx';
@@ -13,7 +14,7 @@ type RaceView = 'setup' | 'racing' | 'results';
 export function Race() {
   const [view, setView] = useState<RaceView>('setup');
   const [currentModel, setCurrentModel] = useState('carla_pilotnet');
-  const keysRef = useRef<KeyState>({ w: false, a: false, s: false, d: false });
+  const keysRef = useRef<KeyState>({ w: false, a: false, s: false, d: false, space: false });
   const keyIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const gpu = useGPUConnection();
@@ -24,14 +25,19 @@ export function Race() {
 
     const handleKeyDown = (e: KeyboardEvent) => {
       const key = e.key.toLowerCase();
-      if (key in keysRef.current) {
+      if (key === ' ') {
+        e.preventDefault();
+        keysRef.current = { ...keysRef.current, space: true };
+      } else if (key in keysRef.current) {
         keysRef.current = { ...keysRef.current, [key]: true };
       }
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
       const key = e.key.toLowerCase();
-      if (key in keysRef.current) {
+      if (key === ' ') {
+        keysRef.current = { ...keysRef.current, space: false };
+      } else if (key in keysRef.current) {
         keysRef.current = { ...keysRef.current, [key]: false };
       }
     };
@@ -110,8 +116,11 @@ export function Race() {
             className="absolute inset-0 w-full h-full object-cover"
           />
 
+          {/* Speed effects overlay (speed lines + vignette) */}
+          <SpeedEffects speedKmh={gpu.raceState?.player.speed_kmh ?? 0} />
+
           {/* HUD overlay */}
-          <RaceHUD raceState={gpu.raceState} />
+          <RaceHUD raceState={gpu.raceState} latencyMs={gpu.latencyMs} />
 
           {/* Model selector (top-right, collapsible) */}
           {gpu.availableModels.length > 0 && (

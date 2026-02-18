@@ -35,7 +35,7 @@ class RaceServer:
         )
 
         self.race_state: Optional[RaceState] = None
-        self.player_keys: Dict[str, bool] = {'w': False, 'a': False, 's': False, 'd': False}
+        self.player_keys: Dict[str, bool] = {'w': False, 'a': False, 's': False, 'd': False, 'space': False}
         self.current_model_name = self.config['model'].get('default', 'carla_pilotnet')
         self.running = False
         self.ws_client = None
@@ -71,6 +71,7 @@ class RaceServer:
                         'a': keys.get('a', False),
                         's': keys.get('s', False),
                         'd': keys.get('d', False),
+                        'space': keys.get('space', False),
                     }
 
                 elif msg_type == 'switch_model':
@@ -156,7 +157,7 @@ class RaceServer:
 
     async def _race_loop(self):
         """Main race loop: runs at ~20fps."""
-        target_dt = 1.0 / 20.0  # 20 FPS target
+        target_dt = 1.0 / 30.0  # 30 FPS target
 
         while self.running and self.ws_client:
             loop_start = time.time()
@@ -268,11 +269,26 @@ class RaceServer:
         state['model'] = self.current_model_name
         state['fps'] = round(self.fps, 1)
 
-        # Fill in speeds from telemetry
+        # Fill in telemetry from both vehicles
         if player_telem:
             state['player']['speed_kmh'] = round(player_telem['speed_kmh'], 1)
+            state['player']['gear'] = player_telem.get('gear', 0)
+            state['player']['rpm'] = round(player_telem.get('rpm', 0), 0)
+            state['player']['throttle'] = round(player_telem.get('throttle', 0), 2)
+            state['player']['brake'] = round(player_telem.get('brake', 0), 2)
+            state['player']['steer'] = round(player_telem.get('steer', 0), 2)
         if ai_telem:
             state['ai']['speed_kmh'] = round(ai_telem['speed_kmh'], 1)
+            state['ai']['gear'] = ai_telem.get('gear', 0)
+            state['ai']['rpm'] = round(ai_telem.get('rpm', 0), 0)
+            state['ai']['throttle'] = round(ai_telem.get('throttle', 0), 2)
+            state['ai']['brake'] = round(ai_telem.get('brake', 0), 2)
+            state['ai']['steer'] = round(ai_telem.get('steer', 0), 2)
+
+        # Calculate gap between player and AI
+        gap = self.race_state.get_gap_seconds()
+        state['player']['gap_seconds'] = round(gap, 2) if gap is not None else None
+        state['ai']['gap_seconds'] = round(-gap, 2) if gap is not None else None
 
         try:
             await self.ws_client.send(json.dumps(state))
