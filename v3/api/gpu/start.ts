@@ -16,8 +16,14 @@ interface VastOffer {
   inet_down: number;
   reliability: number;
   cuda_max_good: number;
+  host_id: number;
+  machine_id: number;
   [key: string]: unknown;
 }
+
+// Hosts with broken CDI/GPU device injection — skip these
+const BLOCKED_HOSTS = new Set([85323]);
+const BLOCKED_MACHINES = new Set([16146, 32581]);
 
 // v3 onstart: Vast.ai overrides Docker ENTRYPOINT, so we must launch our entrypoint from here.
 // This script is self-contained — it patches the entrypoint and installs missing deps
@@ -107,7 +113,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           o.cuda_max_good >= 12.1 &&
           o.inet_down >= 500 &&
           o.dph_total > 0 &&
-          o.dph_total < 1.50
+          o.dph_total < 1.50 &&
+          !BLOCKED_HOSTS.has(o.host_id) &&
+          !BLOCKED_MACHINES.has(o.machine_id)
       )
       .sort((a, b) => a.dph_total - b.dph_total);
 
