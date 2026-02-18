@@ -1,0 +1,47 @@
+# Shadow Driver v3 - Race Configuration
+
+carla:
+  host: "localhost"
+  port: 2000
+  timeout: 10.0
+
+vehicle:
+  player_model: "vehicle.tesla.model3"
+  ai_model: "vehicle.audi.etron"
+
+camera:
+  # Chase camera (follows player, streams to browser)
+  chase:
+    width: 1280
+    height: 720
+    fov: 100
+    x: -6.0    # Behind the car
+    z: 3.0     # Above
+    pitch: -15  # Looking down at car
+  # AI camera (front-facing, for model inference)
+  ai:
+    width: 640
+    height: 480
+    fov: 90
+    x: 1.5     # Front of car
+    z: 1.4     # Dashboard height
+    pitch: -10  # Slight downward angle
+
+race:
+  default_track: "Town03"
+  default_laps: 3
+  checkpoints: 10
+  checkpoint_radius: 15.0
+
+model:
+  default: "carla_pilotnet"
+  input_size: [66, 200]
+  device: "auto"
+  weights:
+    carla_pilotnet: "models/pilotnet_carla.pth"
+    pilotnet: "models/pilotnet.pth"
+
+streaming:
+  jpeg_quality: 70
+  width: 1280
+  height: 720
