@@ -86,10 +86,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // Check for tunnel URL and status from KV
-    // Try instance_id first, then offer_id
+    // VAST_CONTAINERLABEL uses "C." prefix, so try multiple key formats
     let callbackData = await getData(instance_id);
+    if (!callbackData) {
+      callbackData = await getData(`C.${instance_id}`);
+    }
     if (!callbackData && offer_id) {
       callbackData = await getData(offer_id);
+    }
+    if (!callbackData && offer_id) {
+      callbackData = await getData(`offer_${offer_id}`);
     }
 
     const tunnel_url = callbackData?.tunnel_url || null;
