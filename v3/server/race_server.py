@@ -159,7 +159,12 @@ class RaceServer:
 
         # Load AI model
         weights = self.config['model'].get('weights', {}).get(self.current_model_name)
-        self.model.load_model(self.current_model_name, weights=weights)
+        model_loaded = self.model.load_model(self.current_model_name, weights=weights)
+
+        # If no trained weights available, use CARLA's built-in autopilot for AI
+        if not model_loaded or not weights or not __import__('pathlib').Path(weights).exists():
+            print("No trained model weights found — using CARLA autopilot for AI car")
+            self.carla.enable_ai_autopilot()
 
         # Generate checkpoints from CARLA map
         checkpoints = generate_checkpoints_from_waypoints(

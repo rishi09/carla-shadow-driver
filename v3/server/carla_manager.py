@@ -60,6 +60,9 @@ class RaceManager:
         # Actors to clean up
         self._actors: list = []
 
+        # Whether AI uses CARLA autopilot vs model inference
+        self._ai_autopilot = False
+
         # Collision sensor
         self._collision_sensor: Optional[carla.Sensor] = None
         self._collisions: List[Dict] = []
@@ -336,16 +339,16 @@ class RaceManager:
         # --- Speed-sensitive steering ---
         # At high speeds, reduce max steering to prevent spin-outs
         if speed_kmh < 30:
-            steer_limit = 1.0
-        elif speed_kmh < 100:
             steer_limit = 0.7
-        elif speed_kmh < 200:
+        elif speed_kmh < 80:
             steer_limit = 0.4
+        elif speed_kmh < 150:
+            steer_limit = 0.25
         else:
-            steer_limit = 0.2
+            steer_limit = 0.15
 
-        steer_rate = 3.0  # Steering change per second
-        steer_decay = 5.0  # Return-to-center rate
+        steer_rate = 5.0   # Steering change per second (faster response)
+        steer_decay = 8.0  # Return-to-center rate (snappier centering)
 
         if keys.get('a', False):
             self._current_steer = max(-steer_limit, self._current_steer - steer_rate * dt)
@@ -381,9 +384,21 @@ class RaceManager:
         )
         self.player_car.apply_control(control)
 
-    def apply_ai_control(self, prediction: Dict):
-        """Apply model prediction to AI car."""
+    def enable_ai_autopilot(self):
+        """Enable CARLA's built-in autopilot for the AI car.
+        Used as fallback when no trained model weights are available."""
         if not self.ai_car:
+            return
+        try:
+            self.ai_car.set_autopilot(True)
+            self._ai_autopilot = True
+            print("AI car: using CARLA autopilot")
+        except Exception as e:
+            print(f"Failed to enable autopilot: {e}")
+
+    def apply_ai_control(self, prediction: Dict):
+        """Apply model prediction to AI car. No-op if autopilot is active."""
+        if not self.ai_car or self._ai_autopilot:
             return
 
         control = carla.VehicleControl(
