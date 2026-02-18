@@ -26,127 +26,52 @@ interface VastOffer {
 // - Installs cloudflared reliably
 // - Captures tunnel URL via grep
 const ONSTART_SCRIPT = `#!/bin/bash
-
-# Instance ID: prefer VAST_CONTAINERLABEL (auto-set by vast.ai), fall back to env var
 INST_ID="\${VAST_CONTAINERLABEL:-\${INSTANCE_ID}}"
-CALLBACK_URL="${CALLBACK_URL}"
-
-# Function to report status to callback
-report_status() {
-  curl -s -X POST "\$CALLBACK_URL" \\
-    -H "Content-Type: application/json" \\
-    -d "{\\"instance_id\\":\\"\$INST_ID\\",\\"status\\":\\"\$1\\",\\"message\\":\\"\$2\\"}" || true
-}
-
-echo "=== Installing system dependencies ==="
-report_status "installing" "Installing system dependencies"
+CB="${CALLBACK_URL}"
+rs(){ curl -s -X POST "\$CB" -H "Content-Type: application/json" -d "{\\"instance_id\\":\\"\$INST_ID\\",\\"status\\":\\"\$1\\",\\"message\\":\\"\$2\\"}" || true; }
+rs installing "Installing dependencies"
 apt-get update -qq && apt-get install -y -qq curl --no-install-recommends || true
-
-echo "=== Installing cloudflared ==="
-report_status "installing" "Installing cloudflared"
-curl -sL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /usr/local/bin/cloudflared
-chmod +x /usr/local/bin/cloudflared
-
-# Verify cloudflared binary is valid
-if ! cloudflared --version 2>/dev/null; then
-  echo "ERROR: cloudflared binary invalid or failed to execute"
-  report_status "error" "cloudflared binary download failed"
-  exit 1
-fi
-echo "cloudflared version: \$(cloudflared --version)"
-
-echo "=== Installing Python dependencies ==="
-report_status "installing" "Installing Python dependencies"
-pip install websockets --quiet
-
-echo "=== Starting WebSocket AI server ==="
-report_status "starting" "Starting AI server"
-
+curl -sL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /usr/local/bin/cloudflared && chmod +x /usr/local/bin/cloudflared
+if ! cloudflared --version >/dev/null 2>&1; then rs error "cloudflared download failed"; exit 1; fi
+pip install websockets -q
+rs starting "Starting AI server"
 python3 -c "
-import asyncio, json, websockets, random
-
+import asyncio,json,websockets,random
 async def handle(ws):
     async for msg in ws:
-        data = json.loads(msg)
-        if data.get('type') == 'state':
-            steering = -data.get('position', 0) * 0.8 + data.get('curvature', 0) * 0.5
-            steering += random.gauss(0, 0.02)
-            await ws.send(json.dumps({
-                'type': 'prediction',
-                'steering': max(-1, min(1, steering)),
-                'confidence': 0.85 + random.random() * 0.1,
-                'model': 'PilotNet-GPU',
-                'throttle': 0.7,
-                'brake': 0.0
-            }))
-        elif data.get('type') == 'handshake':
-            await ws.send(json.dumps({'type': 'handshake_ack', 'server': 'shadow-driver-gpu'}))
-        elif data.get('type') == 'ping':
-            await ws.send(json.dumps({'type': 'pong', 'timestamp': data.get('timestamp')}))
-
+        d=json.loads(msg)
+        if d.get('type')=='state':
+            s=-d.get('position',0)*0.8+d.get('curvature',0)*0.5+random.gauss(0,0.02)
+            await ws.send(json.dumps({'type':'prediction','steering':max(-1,min(1,s)),'confidence':0.85+random.random()*0.1,'model':'PilotNet-GPU','throttle':0.7,'brake':0.0}))
+        elif d.get('type')=='handshake':
+            await ws.send(json.dumps({'type':'handshake_ack','server':'shadow-driver-gpu'}))
+        elif d.get('type')=='ping':
+            await ws.send(json.dumps({'type':'pong','timestamp':d.get('timestamp')}))
 async def main():
-    async with websockets.serve(handle, '0.0.0.0', 8765):
+    async with websockets.serve(handle,'0.0.0.0',8765):
         await asyncio.Future()
-
 asyncio.run(main())
 " &
 WS_PID=\$!
 sleep 3
-
-# Check if WebSocket server started
-if ! kill -0 \$WS_PID 2>/dev/null; then
-  echo "ERROR: WebSocket server failed to start"
-  report_status "error" "WebSocket server failed to start"
-  exit 1
-fi
-
-echo "=== Starting Cloudflare Tunnel ==="
-report_status "tunneling" "Starting Cloudflare tunnel"
-
-# Quick connectivity check
-if ! curl -s --max-time 5 -o /dev/null https://cloudflare.com 2>/dev/null; then
-  echo "WARNING: Cannot reach Cloudflare, tunnel may fail"
-fi
-
-# Start cloudflared and write output to a file
-TUNNEL_LOG=/tmp/cloudflared.log
-cloudflared tunnel --url http://localhost:8765 --protocol http2 > \$TUNNEL_LOG 2>&1 &
+if ! kill -0 \$WS_PID 2>/dev/null; then rs error "WebSocket server failed"; exit 1; fi
+rs tunneling "Starting tunnel"
+TL=/tmp/cf.log
+cloudflared tunnel --url http://localhost:8765 --protocol http2 >\$TL 2>&1 &
 CF_PID=\$!
-
-# Wait up to 60 seconds for the tunnel URL to appear
-TUNNEL_URL=""
+TU=""
 for i in \$(seq 1 60); do
-  if [ -f \$TUNNEL_LOG ]; then
-    TUNNEL_URL=\$(grep -oE 'https://[a-zA-Z0-9-]+\\.trycloudflare\\.com' \$TUNNEL_LOG | head -1)
-    if [ -n "\$TUNNEL_URL" ]; then
-      break
-    fi
-  fi
+  [ -f \$TL ] && TU=\$(grep -oE 'https://[a-zA-Z0-9-]+\\.trycloudflare\\.com' \$TL | head -1)
+  [ -n "\$TU" ] && break
   sleep 1
 done
-
-if [ -n "\$TUNNEL_URL" ]; then
-  echo "=== Tunnel URL: \$TUNNEL_URL ==="
-  curl -s -X POST "$CALLBACK_URL" \\
-    -H "Content-Type: application/json" \\
-    -d "{\\"instance_id\\":\\"$INST_ID\\",\\"tunnel_url\\":\\"\$TUNNEL_URL\\",\\"status\\":\\"ready\\",\\"message\\":\\"Server running\\"}"
+if [ -n "\$TU" ]; then
+  curl -s -X POST "\$CB" -H "Content-Type: application/json" -d "{\\"instance_id\\":\\"\$INST_ID\\",\\"tunnel_url\\":\\"\$TU\\",\\"status\\":\\"ready\\",\\"message\\":\\"Running\\"}"
 else
-  echo "ERROR: Tunnel failed to start within 60 seconds"
-  echo "=== Cloudflared log ==="
-  cat \$TUNNEL_LOG
-  # Extract last meaningful error line for the callback
-  LAST_ERR=\$(grep -i 'error\\|failed\\|refused\\|timeout' \$TUNNEL_LOG | tail -1 | head -c 200)
-  if [ -z "\$LAST_ERR" ]; then
-    LAST_ERR="No tunnel URL after 60s"
-  fi
-  # Sanitize for JSON (remove quotes and backslashes)
-  LAST_ERR=\$(echo "\$LAST_ERR" | tr -d '"\\\\'  | tr -s ' ')
-  report_status "error" "Tunnel failed: \$LAST_ERR"
-  kill \$CF_PID 2>/dev/null
-  exit 1
+  E=\$(grep -i 'error\\|fail' \$TL 2>/dev/null | tail -1 | head -c 100 | tr -d '\\"\\\\')
+  rs error "Tunnel failed: \${E:-timeout}"
+  kill \$CF_PID 2>/dev/null; exit 1
 fi
-
-# Keep container running
 wait \$WS_PID
 `;
 
