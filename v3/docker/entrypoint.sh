@@ -29,7 +29,8 @@ echo "Working dir: $(pwd)"
 report_status "starting" "Starting CARLA simulator"
 echo "Starting CARLA server (headless)..."
 
-/home/carla/CarlaUE4.sh -RenderOffScreen -nosound -carla-rpc-port=2000 &
+# CARLA (UE4) refuses to run as root — run as the 'carla' user from the base image
+su -s /bin/bash -c "/home/carla/CarlaUE4.sh -RenderOffScreen -nosound -carla-rpc-port=2000" carla &
 CARLA_PID=$!
 
 # Wait for CARLA to be ready (poll port 2000)

@@ -52,9 +52,11 @@ echo "[onstart] Installing carla Python package..."
 pip install carla==0.9.15 2>&1 | tail -3
 
 # Patch entrypoint.sh: remove set -e so errors don't silently kill it
+# Also fix CARLA root user issue: UE4 refuses to run as root, use 'carla' user
 if [ -f /opt/shadow-driver/entrypoint.sh ]; then
   sed -i 's/^set -e/#set -e  # disabled by onstart/' /opt/shadow-driver/entrypoint.sh
-  echo "[onstart] Patched entrypoint.sh (disabled set -e)"
+  sed -i 's|/home/carla/CarlaUE4.sh|su -s /bin/bash -c "/home/carla/CarlaUE4.sh -RenderOffScreen -nosound -carla-rpc-port=2000" carla #|' /opt/shadow-driver/entrypoint.sh
+  echo "[onstart] Patched entrypoint.sh (disabled set -e, fixed root user)"
 fi
 
 report "starting" "Launching CARLA and race server..."
