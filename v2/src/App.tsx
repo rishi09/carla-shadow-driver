@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { Layout, type NavigationPage } from './components/layout';
 import { MainMenu } from './components/menu';
 import { TrackSelect } from './components/menu/TrackSelect';
@@ -80,6 +80,18 @@ function App() {
 
   // GPU connection hook for real AI racing
   const gpu = useGPUConnection();
+
+  // Memoize gpuConnection to prevent GameContainer's useEffect from re-running
+  // on every render (which would destroy and recreate the Phaser game)
+  const gpuConnectionProps = useMemo(() => {
+    if (!state.useRealGPU) return undefined;
+    return {
+      useRealGPU: state.useRealGPU,
+      isConnected: gpu.isConnected,
+      sendGameState: gpu.sendGameState,
+      lastPrediction: gpu.lastPrediction,
+    };
+  }, [state.useRealGPU, gpu.isConnected, gpu.sendGameState, gpu.lastPrediction]);
 
   /**
    * Handle mode selection from MainMenu
@@ -365,12 +377,7 @@ function App() {
             difficulty={getDifficulty()}
             isMobile={isMobile}
             onRaceComplete={handleRaceComplete}
-            gpuConnection={state.useRealGPU ? {
-              useRealGPU: state.useRealGPU,
-              isConnected: gpu.isConnected,
-              sendGameState: gpu.sendGameState,
-              lastPrediction: gpu.lastPrediction,
-            } : undefined}
+            gpuConnection={gpuConnectionProps}
           />
         </div>
       )}

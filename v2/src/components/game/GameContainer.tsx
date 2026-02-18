@@ -118,6 +118,15 @@ export function GameContainer({
   const lastGPUSendTimeRef = useRef<number>(0);
   const GPU_SEND_INTERVAL = 100; // ms
 
+  // Store gpuConnection in a ref so the Phaser event callbacks always
+  // see the latest value without needing to be in the useEffect deps
+  const gpuConnectionRef = useRef(gpuConnection);
+  gpuConnectionRef.current = gpuConnection;
+
+  // Store onRaceComplete in a ref to avoid recreating Phaser game on callback change
+  const onRaceCompleteRef = useRef(onRaceComplete);
+  onRaceCompleteRef.current = onRaceComplete;
+
   // UI State
   const [showCountdown, setShowCountdown] = useState(true);
   const [hudState, setHudState] = useState<RaceHUDState>({
@@ -220,7 +229,8 @@ export function GameContainer({
         // We throttle sending to GPU at 10Hz (every 100ms).
         game.events.on('aiGameState', (state: { position: number; speed: number; curvature: number }) => {
           // Only send if GPU is connected and enabled
-          if (!gpuConnection?.useRealGPU || !gpuConnection?.isConnected) {
+          const gc = gpuConnectionRef.current;
+          if (!gc?.useRealGPU || !gc?.isConnected) {
             return;
           }
 
@@ -232,7 +242,7 @@ export function GameContainer({
           lastGPUSendTimeRef.current = now;
 
           // Send to GPU via WebSocket
-          gpuConnection.sendGameState({
+          gc.sendGameState({
             position: state.position,
             speed: state.speed,
             curvature: state.curvature,
@@ -241,7 +251,7 @@ export function GameContainer({
 
         // Tell RaceScene whether to use GPU mode
         game.events.emit('setGPUMode', {
-          enabled: gpuConnection?.useRealGPU && gpuConnection?.isConnected,
+          enabled: gpuConnectionRef.current?.useRealGPU && gpuConnectionRef.current?.isConnected,
         });
 
         // Listen for race complete
@@ -287,7 +297,7 @@ export function GameContainer({
             winner: result.winner,
           };
 
-          onRaceComplete?.(transformedResult);
+          onRaceCompleteRef.current?.(transformedResult);
         });
 
         return true;
@@ -346,7 +356,7 @@ export function GameContainer({
       gameRef.current = null;
       raceSceneRef.current = null;
     };
-  }, [width, height, trackId, mode, difficulty, onRaceComplete, gpuConnection]);
+  }, [width, height, trackId, mode, difficulty]);
 
   // ================================================================
   // GPU Integration: Forward predictions to Phaser
