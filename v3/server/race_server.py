@@ -81,7 +81,8 @@ class RaceServer:
                 elif msg_type == 'start_race':
                     track = data.get('track', 'Town03')
                     laps = data.get('laps', 3)
-                    await self._start_race(track, laps)
+                    weather = data.get('weather', 'clear')
+                    await self._start_race(track, laps, weather)
 
                 elif msg_type == 'ping':
                     await websocket.send(json.dumps({
@@ -108,9 +109,9 @@ class RaceServer:
                 'success': success,
             }))
 
-    async def _start_race(self, track: str, laps: int):
+    async def _start_race(self, track: str, laps: int, weather: str = 'clear'):
         """Initialize and start a race."""
-        print(f"Starting race: track={track}, laps={laps}")
+        print(f"Starting race: track={track}, laps={laps}, weather={weather}")
 
         # Connect to CARLA and set up race
         if not self.carla.connect():
@@ -128,6 +129,9 @@ class RaceServer:
                     'message': 'Failed to set up race',
                 }))
             return
+
+        # Apply weather settings
+        self.carla.set_weather(weather)
 
         # Load AI model
         weights = self.config['model'].get('weights', {}).get(self.current_model_name)

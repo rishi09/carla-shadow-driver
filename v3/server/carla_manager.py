@@ -157,6 +157,22 @@ class RaceManager:
             print(f"Race setup failed: {e}")
             return False
 
+    def set_weather(self, weather: str):
+        """Set weather conditions in the CARLA world."""
+        if not self.world:
+            return
+        presets = {
+            'clear': carla.WeatherParameters.ClearNoon,
+            'cloudy': carla.WeatherParameters.CloudyNoon,
+            'rain': carla.WeatherParameters.MidRainyNoon,
+            'storm': carla.WeatherParameters.HardRainNoon,
+            'sunset': carla.WeatherParameters.ClearSunset,
+            'night': carla.WeatherParameters.ClearNight,
+        }
+        weather_params = presets.get(weather, carla.WeatherParameters.ClearNoon)
+        self.world.set_weather(weather_params)
+        print(f"Weather set to: {weather}")
+
     def _spawn_vehicle(self, spawn_point, model: str) -> Optional[carla.Vehicle]:
         """Spawn a vehicle at the given transform."""
         bp_library = self.world.get_blueprint_library()

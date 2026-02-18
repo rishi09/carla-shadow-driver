@@ -36,7 +36,7 @@ export interface UseGPUConnectionReturn {
   startGPU: () => Promise<void>;
   stopGPU: () => Promise<void>;
   sendControls: (keys: KeyState) => void;
-  sendStartRace: (track: string, laps: number) => void;
+  sendStartRace: (track: string, laps: number, weather: string) => void;
   sendSwitchModel: (model: string) => void;
   clearError: () => void;
   isConnected: boolean;
@@ -333,9 +333,9 @@ export function useGPUConnection(): UseGPUConnectionReturn {
     wsRef.current.send(JSON.stringify({ type: 'control', keys }));
   }, []);
 
-  const sendStartRace = useCallback((track: string, laps: number) => {
+  const sendStartRace = useCallback((track: string, laps: number, weather: string) => {
     if (wsRef.current?.readyState !== WebSocket.OPEN) return;
-    wsRef.current.send(JSON.stringify({ type: 'start_race', track, laps }));
+    wsRef.current.send(JSON.stringify({ type: 'start_race', track, laps, weather }));
   }, []);
 
   const sendSwitchModel = useCallback((model: string) => {

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import type { RaceState } from '../types/index.ts';
+import { RaceProgressBar } from './RaceProgressBar.tsx';
 
 interface RaceHUDProps {
   raceState: RaceState | null;
@@ -54,6 +55,19 @@ export function RaceHUD({ raceState, latencyMs, className = '' }: RaceHUDProps) 
           </div>
         </div>
       </div>
+
+      {/* Race progress bar - shown during racing only */}
+      {race_status === 'racing' && (
+        <div className="absolute top-[72px] left-1/2 -translate-x-1/2 z-10 w-[480px] max-w-[90vw]">
+          <RaceProgressBar
+            playerLap={player.lap}
+            playerCheckpoint={player.checkpoint}
+            aiLap={ai.lap}
+            aiCheckpoint={ai.checkpoint}
+            totalLaps={player.total_laps}
+          />
+        </div>
+      )}
 
       {/* Bottom left: speedometer + gear */}
       <div className="absolute bottom-4 left-4 z-10">

@@ -6,10 +6,11 @@ import { SpeedEffects } from '../components/SpeedEffects.tsx';
 import { GPUConnectionModal } from '../components/GPUConnectionModal.tsx';
 import { ModelSelector } from '../components/ModelSelector.tsx';
 import { RaceResults } from '../components/RaceResults.tsx';
+import { RaceSetup } from '../components/RaceSetup.tsx';
 import type { KeyState } from '../types/index.ts';
 import { useEffect, useRef } from 'react';
 
-type RaceView = 'setup' | 'racing' | 'results';
+type RaceView = 'setup' | 'pre_race' | 'racing' | 'results';
 
 export function Race() {
   const [view, setView] = useState<RaceView>('setup');
@@ -68,9 +69,12 @@ export function Race() {
   }, [gpu.raceFinished]);
 
   const handleProceedToRace = useCallback(() => {
+    setView('pre_race');
+  }, []);
+
+  const handleStartRace = useCallback((track: string, laps: number, weather: string) => {
     setView('racing');
-    // Start the race on the server
-    gpu.sendStartRace('Town03', 3);
+    gpu.sendStartRace(track, laps, weather);
   }, [gpu]);
 
   const handleSwitchModel = useCallback((model: string) => {
@@ -79,9 +83,8 @@ export function Race() {
   }, [gpu]);
 
   const handlePlayAgain = useCallback(() => {
-    setView('racing');
-    gpu.sendStartRace('Town03', 3);
-  }, [gpu]);
+    setView('pre_race');
+  }, []);
 
   const handleMainMenu = useCallback(() => {
     gpu.stopGPU();
@@ -104,6 +107,14 @@ export function Race() {
           onStartGPU={gpu.startGPU}
           onStopGPU={gpu.stopGPU}
           onProceedToRace={handleProceedToRace}
+        />
+      )}
+
+      {/* Pre-race setup */}
+      {view === 'pre_race' && (
+        <RaceSetup
+          onStartRace={handleStartRace}
+          onBack={() => setView('setup')}
         />
       )}
 
