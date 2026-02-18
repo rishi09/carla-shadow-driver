@@ -73,6 +73,15 @@ class RaceServer:
                         'd': keys.get('d', False),
                         'space': keys.get('space', False),
                     }
+                    # Adaptive JPEG quality based on client latency
+                    latency = data.get('latency')
+                    if latency is not None:
+                        if latency > 200:
+                            self.encoder.set_quality(50)
+                        elif latency < 100:
+                            self.encoder.set_quality(80)
+                        else:
+                            self.encoder.set_quality(70)
 
                 elif msg_type == 'switch_model':
                     model_name = data.get('model', 'carla_pilotnet')
@@ -88,6 +97,12 @@ class RaceServer:
                     await websocket.send(json.dumps({
                         'type': 'pong',
                         'timestamp': data.get('timestamp'),
+                    }))
+
+                elif msg_type == 'respawn':
+                    self.carla.respawn_player()
+                    await websocket.send(json.dumps({
+                        'type': 'respawn_ack',
                     }))
 
         except websockets.exceptions.ConnectionClosed:
@@ -272,6 +287,7 @@ class RaceServer:
         state['type'] = 'race_state'
         state['model'] = self.current_model_name
         state['fps'] = round(self.fps, 1)
+        state['jpeg_quality'] = self.encoder.get_quality()
 
         # Fill in telemetry from both vehicles
         if player_telem:

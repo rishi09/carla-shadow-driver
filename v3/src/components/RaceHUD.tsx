@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import type { RaceState } from '../types/index.ts';
 import { RaceProgressBar } from './RaceProgressBar.tsx';
+import { useInterpolatedState } from '../hooks/useInterpolatedState.ts';
 
 interface RaceHUDProps {
   raceState: RaceState | null;
@@ -73,12 +74,7 @@ export function RaceHUD({ raceState, latencyMs, className = '' }: RaceHUDProps) 
       <div className="absolute bottom-4 left-4 z-10">
         <div className="bg-black/60 backdrop-blur-sm rounded-lg px-4 py-3 border border-white/10">
           <div className="text-white/50 text-xs font-mono uppercase">Speed</div>
-          <div className="flex items-baseline gap-1">
-            <span className="text-white text-3xl font-bold font-mono">
-              {Math.round(player.speed_kmh)}
-            </span>
-            <span className="text-white/50 text-sm font-mono">km/h</span>
-          </div>
+          <Speedometer speedKmh={player.speed_kmh} />
           {player.gear !== undefined && (
             <div className="text-white/40 text-xs font-mono mt-1">
               Gear {player.gear}
@@ -125,7 +121,7 @@ export function RaceHUD({ raceState, latencyMs, className = '' }: RaceHUDProps) 
               {latencyMs}ms
             </div>
           )}
-          <div className="text-white/20 text-xs font-mono mt-1">WASD + Space</div>
+          <div className="text-white/20 text-xs font-mono mt-1">WASD + Space | R=Reset</div>
         </div>
       </div>
     </div>
@@ -213,6 +209,19 @@ function InputBar({ label, value, color, centered }: { label: string; value: num
           />
         )}
       </div>
+    </div>
+  );
+}
+
+/** Speedometer with 60fps interpolation for smooth display */
+function Speedometer({ speedKmh }: { speedKmh: number }) {
+  const smoothSpeed = useInterpolatedState(speedKmh);
+  return (
+    <div className="flex items-baseline gap-1">
+      <span className="text-white text-3xl font-bold font-mono">
+        {Math.round(smoothSpeed)}
+      </span>
+      <span className="text-white/50 text-sm font-mono">km/h</span>
     </div>
   );
 }

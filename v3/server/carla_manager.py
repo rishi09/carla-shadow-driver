@@ -300,6 +300,38 @@ class RaceManager:
         )
         self.ai_car.apply_control(control)
 
+    def respawn_player(self):
+        """Respawn the player car at the nearest waypoint on the road."""
+        if not self.player_car or not self.world:
+            return
+
+        try:
+            # Get current location
+            location = self.player_car.get_location()
+
+            # Find nearest waypoint on the road
+            carla_map = self.world.get_map()
+            waypoint = carla_map.get_waypoint(location)
+
+            if waypoint is None:
+                print("No nearby waypoint found for respawn")
+                return
+
+            # Teleport player car to the waypoint's transform
+            self.player_car.set_transform(waypoint.transform)
+
+            # Reset velocity to zero
+            self.player_car.set_target_velocity(carla.Vector3D(0, 0, 0))
+
+            # Reset progressive input state
+            self._current_throttle = 0.0
+            self._current_brake = 0.0
+            self._current_steer = 0.0
+
+            print("Player respawned at nearest waypoint")
+        except Exception as e:
+            print(f"Failed to respawn player: {e}")
+
     def get_telemetry(self, vehicle: carla.Vehicle) -> Dict:
         """Get telemetry for a vehicle including control state."""
         transform = vehicle.get_transform()

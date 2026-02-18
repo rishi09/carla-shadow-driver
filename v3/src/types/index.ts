@@ -19,6 +19,8 @@ export interface RaceState {
   fps: number;
   winner?: string | null;
   countdown?: number | null;
+  jpeg_quality?: number;
+  checkpoints?: Array<{ x: number; y: number }>;
 }
 
 export interface RacerState {
@@ -36,6 +38,8 @@ export interface RacerState {
   brake?: number;
   steer?: number;
   gap_seconds?: number | null;
+  x?: number;
+  y?: number;
 }
 
 /** Race finished message from server */
@@ -63,6 +67,8 @@ export type ServerMessage = RaceState | RaceFinished | HandshakeAck | {
   type: 'model_switched';
   model: string;
   success: boolean;
+} | {
+  type: 'respawn_ack';
 } | {
   type: 'error';
   message: string;

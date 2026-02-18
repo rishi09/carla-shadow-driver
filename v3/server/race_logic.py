@@ -37,6 +37,12 @@ class RaceState:
         self.ai_finished = False
         self.ai_finish_time: Optional[float] = None
 
+        # Current positions (for minimap)
+        self.player_x: float = 0.0
+        self.player_y: float = 0.0
+        self.ai_x: float = 0.0
+        self.ai_y: float = 0.0
+
         # Race timing
         self.race_start_time: Optional[float] = None
         self.countdown_start: Optional[float] = None
@@ -76,6 +82,8 @@ class RaceState:
 
     def update_player(self, x: float, y: float, speed_kmh: float):
         """Update player position and check checkpoints."""
+        self.player_x = x
+        self.player_y = y
         if self.status != "racing" or self.player_finished:
             return
 
@@ -104,6 +112,8 @@ class RaceState:
 
     def update_ai(self, x: float, y: float, speed_kmh: float):
         """Update AI position and check checkpoints."""
+        self.ai_x = x
+        self.ai_y = y
         if self.status != "racing" or self.ai_finished:
             return
 
@@ -189,6 +199,8 @@ class RaceState:
                 "best_lap": round(self.player_best_lap, 1) if self.player_best_lap else None,
                 "position": positions["player"],
                 "finished": self.player_finished,
+                "x": round(self.player_x, 1),
+                "y": round(self.player_y, 1),
             },
             "ai": {
                 "speed_kmh": 0,  # Filled in by caller
@@ -199,10 +211,13 @@ class RaceState:
                 "best_lap": round(self.ai_best_lap, 1) if self.ai_best_lap else None,
                 "position": positions["ai"],
                 "finished": self.ai_finished,
+                "x": round(self.ai_x, 1),
+                "y": round(self.ai_y, 1),
             },
             "race_status": self.status,
             "winner": self.winner,
             "countdown": self.get_countdown(),
+            "checkpoints": [{"x": round(cx, 1), "y": round(cy, 1)} for cx, cy, _ in self.checkpoints],
         }
 
 

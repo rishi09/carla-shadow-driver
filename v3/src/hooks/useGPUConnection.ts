@@ -38,6 +38,7 @@ export interface UseGPUConnectionReturn {
   sendControls: (keys: KeyState) => void;
   sendStartRace: (track: string, laps: number, weather: string) => void;
   sendSwitchModel: (model: string) => void;
+  sendRespawn: () => void;
   clearError: () => void;
   isConnected: boolean;
   isProvisioningActive: boolean;
@@ -76,6 +77,7 @@ export function useGPUConnection(): UseGPUConnectionReturn {
   // Refs to avoid stale closures
   const stopGPUInternalRef = useRef<() => Promise<void>>(() => Promise.resolve());
   const startGPUInternalRef = useRef<(isRetry: boolean) => Promise<void>>(() => Promise.resolve());
+  const latencyMsRef = useRef<number | null>(null);
 
   // --- Cleanup helpers ---
   const clearPolling = useCallback(() => {
@@ -153,7 +155,9 @@ export function useGPUConnection(): UseGPUConnectionReturn {
           } else if (data.type === 'pong') {
             const pong = data as { timestamp: number };
             if (pong.timestamp) {
-              setLatencyMs(Date.now() - pong.timestamp);
+              const ms = Date.now() - pong.timestamp;
+              latencyMsRef.current = ms;
+              setLatencyMs(ms);
             }
           } else if (data.type === 'model_switched') {
             const switched = data as { model: string; success: boolean };
@@ -330,7 +334,11 @@ export function useGPUConnection(): UseGPUConnectionReturn {
   // --- Game communication ---
   const sendControls = useCallback((keys: KeyState) => {
     if (wsRef.current?.readyState !== WebSocket.OPEN) return;
-    wsRef.current.send(JSON.stringify({ type: 'control', keys }));
+    const msg: Record<string, unknown> = { type: 'control', keys };
+    if (latencyMsRef.current !== null) {
+      msg.latency = latencyMsRef.current;
+    }
+    wsRef.current.send(JSON.stringify(msg));
   }, []);
 
   const sendStartRace = useCallback((track: string, laps: number, weather: string) => {
@@ -341,6 +349,11 @@ export function useGPUConnection(): UseGPUConnectionReturn {
   const sendSwitchModel = useCallback((model: string) => {
     if (wsRef.current?.readyState !== WebSocket.OPEN) return;
     wsRef.current.send(JSON.stringify({ type: 'switch_model', model }));
+  }, []);
+
+  const sendRespawn = useCallback(() => {
+    if (wsRef.current?.readyState !== WebSocket.OPEN) return;
+    wsRef.current.send(JSON.stringify({ type: 'respawn' }));
   }, []);
 
   const onBinaryFrame = useCallback((handler: ((data: Blob) => void) | null) => {
@@ -362,7 +375,7 @@ export function useGPUConnection(): UseGPUConnectionReturn {
     provisioningState, connectionState, instanceData, error,
     raceState, raceFinished, availableModels, activeModel, latencyMs,
     retryCount, maxRetries: MAX_RETRIES,
-    startGPU, stopGPU, sendControls, sendStartRace, sendSwitchModel,
+    startGPU, stopGPU, sendControls, sendStartRace, sendSwitchModel, sendRespawn,
     clearError, onBinaryFrame,
     isConnected: connectionState === 'connected',
     isProvisioningActive: provisioningState === 'starting' || provisioningState === 'running',

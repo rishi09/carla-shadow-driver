@@ -43,6 +43,10 @@ class FrameEncoder:
         self.quality = max(1, min(100, quality))
         self.encode_params = [cv2.IMWRITE_JPEG_QUALITY, self.quality]
 
+    def get_quality(self) -> int:
+        """Return current JPEG quality (1-100)."""
+        return self.quality
+
     def set_resolution(self, width: int, height: int):
         """Update max resolution."""
         self.max_width = width
