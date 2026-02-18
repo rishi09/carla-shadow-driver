@@ -1,6 +1,9 @@
 # Shadow Driver v3 - Python dependencies
 # Install torch/torchvision separately via --index-url for CUDA builds
 
+# CARLA Python API (must match simulator version)
+carla==0.9.15
+
 # WebSocket server
 websockets==14.1
 

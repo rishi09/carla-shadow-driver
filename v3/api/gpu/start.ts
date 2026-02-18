@@ -20,8 +20,52 @@ interface VastOffer {
 }
 
 // v3 onstart: Vast.ai overrides Docker ENTRYPOINT, so we must launch our entrypoint from here.
+// This script is self-contained — it patches the entrypoint and installs missing deps
+// so we don't need to rebuild the Docker image for every fix.
 const ONSTART_SCRIPT = `#!/bin/bash
-nohup /opt/shadow-driver/entrypoint.sh > /var/log/shadow-driver.log 2>&1 &
+exec > /var/log/onstart.log 2>&1
+echo "[onstart] Shadow Driver v3 onstart starting at $(date)"
+echo "[onstart] INSTANCE_ID=\${INSTANCE_ID}"
+echo "[onstart] CALLBACK_URL=\${CALLBACK_URL}"
+echo "[onstart] VAST_CONTAINERLABEL=\${VAST_CONTAINERLABEL}"
+
+INST_ID="\${VAST_CONTAINERLABEL:-\${INSTANCE_ID:-unknown}}"
+CB_URL="\${CALLBACK_URL:-https://shadow-driver-v3.vercel.app/api/gpu/callback}"
+
+# Report status helper
+report() {
+  echo "[onstart] Status: \$1 - \$2"
+  curl -s -X POST "\$CB_URL" -H "Content-Type: application/json" \\
+    -d "{\\"instance_id\\":\\"\$INST_ID\\",\\"status\\":\\"\$1\\",\\"message\\":\\"\$2\\"}" || true
+}
+
+report "starting" "Installing dependencies..."
+
+# Install carla Python package (not in Docker image)
+echo "[onstart] Installing carla Python package..."
+pip install carla==0.9.15 2>&1 | tail -3
+
+# Patch entrypoint.sh: remove set -e so errors don't silently kill it
+if [ -f /opt/shadow-driver/entrypoint.sh ]; then
+  sed -i 's/^set -e/#set -e  # disabled by onstart/' /opt/shadow-driver/entrypoint.sh
+  echo "[onstart] Patched entrypoint.sh (disabled set -e)"
+fi
+
+report "starting" "Launching CARLA and race server..."
+
+echo "[onstart] Launching entrypoint.sh..."
+/opt/shadow-driver/entrypoint.sh > /var/log/shadow-driver.log 2>&1 &
+ENTRY_PID=\$!
+echo "[onstart] entrypoint.sh launched with PID \$ENTRY_PID"
+
+sleep 3
+if kill -0 \$ENTRY_PID 2>/dev/null; then
+  echo "[onstart] entrypoint.sh is running (PID \$ENTRY_PID)"
+else
+  echo "[onstart] ERROR: entrypoint.sh died. Log:"
+  cat /var/log/shadow-driver.log 2>&1 | tail -50
+  report "error" "Entrypoint crashed on startup"
+fi
 `;
 
 async function setData(key: string, data: unknown): Promise<void> {
@@ -103,7 +147,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (createResponse.ok) {
           const instance = await createResponse.json();
           const instanceId = instance.new_contract;
-          await setData(`offer_${offer.id}`, { pending: true, instance_id: instanceId });
+
+          // Store callback data under multiple keys so status lookup always finds it
+          const initialData = { pending: true, instance_id: String(instanceId), status: 'provisioning', message: 'GPU provisioned, waiting for setup...' };
+          await setData(`offer_${offer.id}`, initialData);
+          await setData(String(instanceId), initialData);
+          // Vast.ai sets VAST_CONTAINERLABEL to C.{instance_id}
+          await setData(`C.${instanceId}`, initialData);
 
           console.log(`[v3-start] Instance created: ${instanceId} (offer: ${offer.id})`);
 
