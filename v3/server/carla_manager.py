@@ -129,8 +129,15 @@ class RaceManager:
             if not self.player_car:
                 return False
 
-            # Spawn AI car at adjacent spawn point
-            ai_spawn = spawn_points[1]
+            # Spawn AI car next to player (offset sideways for side-by-side start)
+            ai_spawn = carla.Transform(
+                carla.Location(
+                    x=spawn_points[0].location.x + spawn_points[0].get_right_vector().x * 4.0,
+                    y=spawn_points[0].location.y + spawn_points[0].get_right_vector().y * 4.0,
+                    z=spawn_points[0].location.z,
+                ),
+                spawn_points[0].rotation,
+            )
             self.ai_car = self._spawn_vehicle(
                 ai_spawn,
                 self.config['vehicle'].get('ai_model', 'vehicle.audi.etron')
@@ -386,15 +393,28 @@ class RaceManager:
 
     def enable_ai_autopilot(self):
         """Enable CARLA's built-in autopilot for the AI car.
-        Used as fallback when no trained model weights are available."""
-        if not self.ai_car:
+        Configured for racing: ignore traffic lights, drive aggressively."""
+        if not self.ai_car or not self.client:
             return
         try:
-            self.ai_car.set_autopilot(True)
+            tm = self.client.get_trafficmanager()
+            tm.set_synchronous_mode(True)
+            self.ai_car.set_autopilot(True, tm.get_port())
+
+            # Racing behavior: no traffic rules, aggressive driving
+            tm.ignore_lights_percentage(self.ai_car, 100.0)
+            tm.ignore_signs_percentage(self.ai_car, 100.0)
+            tm.ignore_walkers_percentage(self.ai_car, 100.0)
+            tm.vehicle_percentage_speed_difference(self.ai_car, -40.0)  # 40% faster than limit
+            tm.distance_to_leading_vehicle(self.ai_car, 1.0)
+            tm.auto_lane_change(self.ai_car, True)
+
             self._ai_autopilot = True
-            print("AI car: using CARLA autopilot")
+            print("AI car: using CARLA autopilot (racing mode)")
         except Exception as e:
             print(f"Failed to enable autopilot: {e}")
+            import traceback
+            traceback.print_exc()
 
     def apply_ai_control(self, prediction: Dict):
         """Apply model prediction to AI car. No-op if autopilot is active."""
