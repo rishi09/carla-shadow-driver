@@ -376,8 +376,7 @@ class RaceManager:
         else:
             self._current_brake = max(0.0, self._current_brake - dt * 5.0)
 
-        # --- Speed-sensitive steering ---
-        # Instant steering response (no ramp), clamped by speed
+        # --- Speed-sensitive steering with progressive ramping ---
         if speed_kmh < 30:
             steer_limit = 0.7
         elif speed_kmh < 80:
@@ -387,12 +386,22 @@ class RaceManager:
         else:
             steer_limit = 0.15
 
+        # Ramp toward target: fast attack (~150ms to full), medium release (~200ms to center)
+        steer_attack = dt * 6.5   # reaches 0.7 in ~3-4 frames
+        steer_release = dt * 5.0  # returns to 0 in ~4-6 frames
+
         if keys.get('a', False):
-            self._current_steer = -steer_limit
+            target_steer = -steer_limit
+            self._current_steer = max(target_steer, self._current_steer - steer_attack)
         elif keys.get('d', False):
-            self._current_steer = steer_limit
+            target_steer = steer_limit
+            self._current_steer = min(target_steer, self._current_steer + steer_attack)
         else:
-            self._current_steer = 0.0
+            # Return to center
+            if self._current_steer > 0:
+                self._current_steer = max(0.0, self._current_steer - steer_release)
+            elif self._current_steer < 0:
+                self._current_steer = min(0.0, self._current_steer + steer_release)
 
         # --- Handbrake ---
         hand_brake = keys.get('space', False)

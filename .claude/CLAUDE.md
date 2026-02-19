@@ -20,7 +20,7 @@ Shadow Driver is a browser-based racing game where you race against an AI car in
 - Direct WebSocket connection via `?ws=<tunnel_url>` query parameter
 - Player car controls: WASD + Space (handbrake), R (respawn), C (camera toggle)
 - AI opponent using CARLA autopilot (racing mode: ignores lights/signs, 40% over speed limit)
-- Steering: instant response, speed-limited (0.7 at high speed, 1.0 at low speed)
+- Steering: progressive ramping (~100-130ms attack, ~130-200ms release), speed-limited (0.7 low, 0.15 high)
 - Reverse: full throttle when S pressed and speed < 5 km/h
 - Compass navigation arrow pointing to next checkpoint
 - Race HUD: speedometer, lap timer, gap timer, throttle/brake/steer bars, connection quality
@@ -92,7 +92,53 @@ Vast.ai GPU Instance (Docker: rkshah09/shadow-driver-v3:latest)
 
 ---
 
-## Quick Start (Testing with Direct Link)
+## Deploy & Test (Server Changes)
+
+Server code lives locally at `v3/server/`. To test changes on a running Vast.ai instance:
+
+### Prerequisites
+- SSH key loaded: `ssh-add ~/.ssh/id_ed25519` (key labeled "carla-shadow-driver")
+- A running Vast.ai instance with Docker image `rkshah09/shadow-driver-v3:latest`
+
+### Get SSH port and IP from Vast.ai
+1. Go to https://cloud.vast.ai/instances/
+2. Click the SSH icon (terminal `>_` button) on your instance
+3. Copy the port and IP from the connection string: `ssh -p <PORT> root@<IP>`
+
+### One-command deploy
+From the `v3/` directory, run the deploy script which copies server files, restarts the server, starts a new Cloudflare tunnel, and prints the game link:
+
+```bash
+cd v3 && bash deploy.sh <PORT> <IP>
+```
+
+Example:
+```bash
+cd v3 && bash deploy.sh 50156 66.115.179.154
+```
+
+Output will include:
+```
+Game link:
+https://shadow-driver-v3.vercel.app/race?ws=https://xxx.trycloudflare.com
+```
+
+Open that link in your browser to play.
+
+### Manual deploy (if deploy.sh doesn't work)
+```bash
+scp -P <PORT> v3/server/carla_manager.py v3/server/race_server.py v3/server/race_logic.py root@<IP>:/opt/shadow-driver/server/
+ssh -p <PORT> root@<IP>
+pkill -f race_server; sleep 1
+cd /opt/shadow-driver && python3 -u server/race_server.py &
+```
+
+### Check server logs
+```bash
+ssh -p <PORT> root@<IP> 'tail -30 /tmp/race.log'
+```
+
+## Quick Start (Fresh Instance)
 
 1. Rent a GPU on Vast.ai (RTX 3090+, Docker image: `rkshah09/shadow-driver-v3:latest`)
 2. Wait for instance to start, SSH in to check logs:
@@ -103,15 +149,6 @@ Vast.ai GPU Instance (Docker: rkshah09/shadow-driver-v3:latest)
 3. Get the Cloudflare tunnel URL from logs (looks like `https://xxx.trycloudflare.com`)
 4. Open: `https://shadow-driver-v3.vercel.app/race?ws=<tunnel_url>`
 5. Configure track/weather/laps, click Start Race
-
-## Quick Start (SCP updated server code to running instance)
-
-```bash
-scp -P <PORT> v3/server/carla_manager.py root@<IP>:/opt/shadow-driver/server/carla_manager.py
-ssh -p <PORT> root@<IP>
-pkill -f race_server; sleep 1
-cd /opt/shadow-driver && python3 -u server/race_server.py &
-```
 
 ---
 
