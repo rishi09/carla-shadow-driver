@@ -9,6 +9,7 @@ import { GPUConnectionModal } from '../components/GPUConnectionModal.tsx';
 import { RaceResults } from '../components/RaceResults.tsx';
 import { RaceSetup } from '../components/RaceSetup.tsx';
 import { Minimap } from '../components/Minimap.tsx';
+import { ControlsHint } from '../components/ControlsHint.tsx';
 import type { KeyState } from '../types/index.ts';
 import { useEffect, useRef } from 'react';
 
@@ -34,6 +35,10 @@ export function Race() {
 
   // Track previous race_status for countdown detection
   const prevRaceStatusRef = useRef<string | null>(null);
+
+  // Controls hint: show when race transitions from countdown to racing
+  const [showControlsHint, setShowControlsHint] = useState(false);
+  const controlsHintTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // --- Screen shake state ---
   const [shakeX, setShakeX] = useState(0);
@@ -74,6 +79,12 @@ export function Race() {
     const status = gpu.raceState?.race_status ?? null;
     if (status === 'countdown' && prevRaceStatusRef.current !== 'countdown') {
       engineSound.playCountdownBeeps();
+    }
+    // Show controls hint when transitioning from countdown to racing
+    if (status === 'racing' && prevRaceStatusRef.current === 'countdown') {
+      setShowControlsHint(true);
+      if (controlsHintTimeoutRef.current) clearTimeout(controlsHintTimeoutRef.current);
+      controlsHintTimeoutRef.current = setTimeout(() => setShowControlsHint(false), 4000);
     }
     prevRaceStatusRef.current = status;
   }, [gpu.raceState?.race_status, engineSound.playCountdownBeeps]);
@@ -203,6 +214,12 @@ export function Race() {
         clearTimeout(respawnTimeoutRef.current);
         respawnTimeoutRef.current = null;
       }
+      if (controlsHintTimeoutRef.current) {
+        clearTimeout(controlsHintTimeoutRef.current);
+        controlsHintTimeoutRef.current = null;
+      }
+      // Reset key state so stale keys don't persist across view changes
+      keysRef.current = { w: false, a: false, s: false, d: false, space: false };
     };
   }, [view, gpu.sendControls, gpu.sendRespawn, gpu.sendCameraMode]);
 
@@ -218,28 +235,25 @@ export function Race() {
   }, []);
 
   // Track pending demo race config to send once WebSocket connects
-  const pendingDemoRaceRef = useRef<{ track: string; laps: number; weather: string } | null>(null);
+  const pendingDemoRaceRef = useRef<{ track: string; laps: number; weather: string; model?: string } | null>(null);
 
   // --- Send start_race once connected in demo mode ---
   useEffect(() => {
     if ((isDemo || directWsUrl) && gpu.isConnected && pendingDemoRaceRef.current) {
-      const { track, laps, weather } = pendingDemoRaceRef.current;
+      const { track, laps, weather, model } = pendingDemoRaceRef.current;
       pendingDemoRaceRef.current = null;
-      gpu.sendStartRace(track, laps, weather);
+      gpu.sendStartRace(track, laps, weather, model);
     }
-  }, [isDemo, gpu.isConnected, gpu.sendStartRace]);
+  }, [isDemo, directWsUrl, gpu.isConnected, gpu.sendStartRace]);
 
   const handleStartRace = useCallback((track: string, laps: number, weather: string, model?: string) => {
     setView('racing');
     if (isDemo || directWsUrl) {
-      pendingDemoRaceRef.current = { track, laps, weather };
+      pendingDemoRaceRef.current = { track, laps, weather, model };
       const wsUrl = directWsUrl || DEMO_WS_URL;
       gpu.connectDirect(wsUrl.replace('https://', 'wss://').replace('http://', 'ws://'));
     } else {
-      gpu.sendStartRace(track, laps, weather);
-    }
-    if (model) {
-      gpu.sendSwitchModel(model);
+      gpu.sendStartRace(track, laps, weather, model);
     }
   }, [gpu, isDemo, directWsUrl]);
 
@@ -361,6 +375,20 @@ export function Race() {
               </div>
             </div>
           )}
+
+          {/* Connecting overlay: shown when WS is not yet connected */}
+          {!gpu.isConnected && (
+            <div className="absolute inset-0 flex items-center justify-center z-40 pointer-events-none">
+              <div className="bg-black/70 backdrop-blur-md rounded-xl px-10 py-6 border border-white/20 flex flex-col items-center gap-3">
+                <div className="w-8 h-8 border-3 border-white/30 border-t-accent rounded-full animate-spin" />
+                <span className="text-white text-xl font-bold font-mono">Connecting to GPU...</span>
+                <span className="text-white/50 text-sm font-mono">Setting up CARLA race</span>
+              </div>
+            </div>
+          )}
+
+          {/* Controls hint: appears briefly when race starts after countdown */}
+          <ControlsHint visible={showControlsHint} />
         </div>
       )}
 

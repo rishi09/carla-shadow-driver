@@ -43,11 +43,20 @@ class RaceServer:
         self.fps = 0.0
         self._fps_timer = time.time()
         self._fps_count = 0
+        self._race_task: Optional[asyncio.Task] = None
         self._telemetry_task: Optional[asyncio.Task] = None
+        self._controls_received = False  # Track if we've ever received controls
+        self.difficulty: str = 'easy'  # Current difficulty: 'easy', 'medium', 'hard'
 
     async def handle_client(self, websocket):
         """Handle a single WebSocket client connection."""
         print(f"Client connected: {websocket.remote_address}")
+
+        # If there's an existing race running, stop it gracefully before accepting new client
+        if self.running or self._race_task or self._telemetry_task:
+            print("New client connected while race active — stopping previous race...")
+            await self._reset_race()
+
         self.ws_client = websocket
 
         try:
@@ -62,7 +71,7 @@ class RaceServer:
                     await websocket.send(json.dumps({
                         'type': 'handshake_ack',
                         'server': 'shadow-driver-v3',
-                        'models': ['carla_pilotnet', 'alpamayo'],
+                        'models': ['carla_pilotnet', 'pilotnet', 'alpamayo'],
                     }))
 
                 elif msg_type == 'control':
@@ -74,6 +83,12 @@ class RaceServer:
                         'd': keys.get('d', False),
                         'space': keys.get('space', False),
                     }
+                    # Log first control message for debugging
+                    if not self._controls_received:
+                        self._controls_received = True
+                        active = [k for k, v in self.player_keys.items() if v]
+                        race_status = self.race_state.status if self.race_state else "no_race"
+                        print(f"First control received (race_status={race_status}, keys={active or 'none'})")
                     # Adaptive JPEG quality based on client latency
                     latency = data.get('latency')
                     if latency is not None:
@@ -92,7 +107,9 @@ class RaceServer:
                     track = data.get('track', 'Town03')
                     laps = data.get('laps', 3)
                     weather = data.get('weather', 'clear')
-                    await self._start_race(track, laps, weather)
+                    model = data.get('model', 'carla_pilotnet')
+                    self.current_model_name = model
+                    await self._start_race(track, laps, weather, model)
 
                 elif msg_type == 'ping':
                     await websocket.send(json.dumps({
@@ -117,8 +134,11 @@ class RaceServer:
         except websockets.exceptions.ConnectionClosed:
             print("Client disconnected")
         finally:
+            # Cancel race loop tasks but do NOT destroy CARLA actors
+            # This keeps the server alive for reconnecting clients
+            await self._reset_race()
             self.ws_client = None
-            self.running = False
+            print("Client disconnected, waiting for reconnect...")
 
     async def _switch_model(self, model_name: str):
         """Switch the AI driving model."""
@@ -133,9 +153,64 @@ class RaceServer:
                 'success': success,
             }))
 
-    async def _start_race(self, track: str, laps: int, weather: str = 'clear'):
+    async def _reset_race(self):
+        """Stop the current race loop and telemetry loop without destroying CARLA actors.
+        Called on client disconnect to keep the server alive for reconnections.
+        Full cleanup (actor destruction) only happens when starting a new race."""
+        self.running = False
+
+        # Cancel the race loop task
+        if self._race_task and not self._race_task.done():
+            self._race_task.cancel()
+            try:
+                await self._race_task
+            except asyncio.CancelledError:
+                pass
+        self._race_task = None
+
+        # Cancel the telemetry loop task
+        if self._telemetry_task and not self._telemetry_task.done():
+            self._telemetry_task.cancel()
+            try:
+                await self._telemetry_task
+            except asyncio.CancelledError:
+                pass
+        self._telemetry_task = None
+
+        # Reset input state
+        self.player_keys = {'w': False, 'a': False, 's': False, 'd': False, 'space': False}
+        self._controls_received = False
+        self.race_state = None
+        self.difficulty = 'easy'
+        self.frame_count = 0
+        self.fps = 0.0
+        self._fps_count = 0
+        self._fps_timer = time.time()
+
+        print("Race reset (actors preserved for reconnect)")
+
+    # Model ID -> difficulty mapping
+    MODEL_DIFFICULTY_MAP = {
+        'carla_pilotnet': 'easy',
+        'pilotnet': 'medium',
+        'alpamayo': 'hard',
+    }
+
+    async def _start_race(self, track: str, laps: int, weather: str = 'clear', model: str = 'carla_pilotnet'):
         """Initialize and start a race."""
-        print(f"Starting race: track={track}, laps={laps}, weather={weather}")
+        difficulty = self.MODEL_DIFFICULTY_MAP.get(model, 'medium')
+        self.difficulty = difficulty
+        print(f"Starting race: track={track}, laps={laps}, weather={weather}, model={model}, difficulty={difficulty}")
+
+        # Stop any existing race loop first
+        await self._reset_race()
+        # Restore difficulty after reset
+        self.difficulty = difficulty
+
+        # Clean up existing CARLA actors before setting up fresh
+        if self.carla.has_actors():
+            print("Cleaning up previous race actors...")
+            self.carla.cleanup()
 
         # Connect to CARLA and set up race
         if not self.carla.connect():
@@ -157,14 +232,36 @@ class RaceServer:
         # Apply weather settings
         self.carla.set_weather(weather)
 
-        # Load AI model
-        weights = self.config['model'].get('weights', {}).get(self.current_model_name)
-        model_loaded = self.model.load_model(self.current_model_name, weights=weights)
+        # Set up AI based on difficulty
+        if difficulty == 'easy':
+            # Easy: CARLA autopilot at slow/cautious settings, no model needed
+            print("AI Mode: EASY - CARLA autopilot (slow, cautious)")
+            self.carla.enable_ai_autopilot(difficulty='easy')
 
-        # If no trained weights available, use CARLA's built-in autopilot for AI
-        if not model_loaded or not weights or not __import__('pathlib').Path(weights).exists():
-            print("No trained model weights found — using CARLA autopilot for AI car")
-            self.carla.enable_ai_autopilot()
+        elif difficulty == 'medium':
+            # Medium: PilotNet neural network for steering + rule-based throttle/brake
+            print("AI Mode: MEDIUM - PilotNet neural network")
+            model_loaded = self.model.load_model('pilotnet')
+            if model_loaded and getattr(self.model.current_model, 'has_weights', False):
+                # Neural net loaded with weights - disable autopilot, race loop handles control
+                self.carla.disable_ai_autopilot()
+                print("  PilotNet weights loaded successfully - using neural network control")
+            else:
+                # Weights failed to load - fall back to medium autopilot
+                print("  PilotNet weights not available - falling back to CARLA autopilot (medium)")
+                self.carla.enable_ai_autopilot(difficulty='medium')
+                self.difficulty = 'easy'  # Treat as easy so race loop skips inference
+
+        elif difficulty == 'hard':
+            # Hard: CARLA autopilot at maximum aggression, no model needed
+            print("AI Mode: HARD - CARLA autopilot (aggressive)")
+            self.carla.enable_ai_autopilot(difficulty='hard')
+
+        else:
+            # Unknown difficulty, default to easy autopilot
+            print(f"Unknown difficulty '{difficulty}', defaulting to easy autopilot")
+            self.carla.enable_ai_autopilot(difficulty='easy')
+            self.difficulty = 'easy'
 
         # Generate checkpoints from CARLA map, starting from player spawn
         checkpoints = generate_checkpoints_from_waypoints(
@@ -187,7 +284,7 @@ class RaceServer:
         self.running = True
 
         # Run the frame loop (30fps) and telemetry loop (60Hz) concurrently
-        asyncio.create_task(self._race_loop())
+        self._race_task = asyncio.create_task(self._race_loop())
         self._telemetry_task = asyncio.create_task(self._telemetry_loop())
 
     async def _race_loop(self):
@@ -203,19 +300,36 @@ class RaceServer:
                     countdown = self.race_state.get_countdown()
                     if countdown == 0:
                         self.race_state.start_race()
-                    # Still send frames during countdown
+                        # Log any pre-buffered key state so we know controls are flowing
+                        active_keys = [k for k, v in self.player_keys.items() if v]
+                        if active_keys:
+                            print(f"Race started! Active keys at start: {active_keys}")
+                        else:
+                            print("Race started! Controls now active (no keys pressed yet)")
+                    # Still send frames during countdown (but don't apply controls)
                     await self._send_frame()
 
                 elif self.race_state.status == "racing":
                     # 1. Apply player controls
                     self.carla.apply_player_control(self.player_keys)
 
-                    # 2. Get AI camera frame and run inference
-                    ai_frame = self.carla.get_ai_frame()
-                    if ai_frame is not None:
-                        prediction = self.model.predict(ai_frame)
-                        if prediction:
-                            self.carla.apply_ai_control(prediction)
+                    # 2. AI control based on difficulty
+                    if self.difficulty == 'medium':
+                        # Neural network mode: get AI camera frame, run PilotNet, apply control
+                        ai_frame = self.carla.get_ai_frame()
+                        if ai_frame is not None:
+                            try:
+                                prediction = self.model.predict(ai_frame)
+                                if prediction:
+                                    # Use neural net steering + rule-based throttle/brake
+                                    ai_telem_for_control = self.carla.get_telemetry(self.carla.ai_car)
+                                    self.carla.apply_neural_ai_control(
+                                        prediction['steering'],
+                                        ai_telem_for_control['speed_kmh']
+                                    )
+                            except Exception as e:
+                                print(f"Neural net inference error: {e}")
+                    # For easy/hard, CARLA autopilot handles AI control automatically
 
                     # 3. Tick CARLA
                     self.carla.tick()
@@ -283,7 +397,9 @@ class RaceServer:
                 self._fps_count = 0
                 self._fps_timer = now
 
-        # Cleanup after race
+        # Race loop ended (finished or client disconnected)
+        # Don't cleanup actors here — _reset_race handles loop cancellation,
+        # and _start_race handles actor cleanup before new races.
         if self._telemetry_task and not self._telemetry_task.done():
             self._telemetry_task.cancel()
             try:
@@ -291,7 +407,7 @@ class RaceServer:
             except asyncio.CancelledError:
                 pass
             self._telemetry_task = None
-        self.carla.cleanup()
+        print("Race loop ended")
 
     async def _send_frame(self):
         """Encode and send chase camera frame as binary WebSocket message."""

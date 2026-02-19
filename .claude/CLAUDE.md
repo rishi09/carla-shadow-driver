@@ -1,198 +1,149 @@
-# Shadow Driver - Project Instructions
+# Shadow Driver v3 - Project Instructions
 
 ## Project Overview
 
-Shadow Driver is a 2D racing game with GPU-powered "realistic mode" that streams from CARLA simulator. The frontend is deployed on Vercel, with a separate API project for GPU provisioning.
+Shadow Driver is a browser-based racing game where you race against an AI car in CARLA simulator running on a cloud GPU. The frontend is a React/Vite app deployed on Vercel. The backend is a Python WebSocket server running inside a Docker container on Vast.ai GPU instances, streaming JPEG frames from CARLA.
 
 **Key URLs:**
-- Game: https://v2-sigma-lemon.vercel.app
-- API: https://carla-shadow-driver.vercel.app
+- Game (v3): https://shadow-driver-v3.vercel.app
+- Docker image: rkshah09/shadow-driver-v3:latest
+- GitHub: https://github.com/rishi09/carla-shadow-driver
+
+**Active branch:** `v3`
 
 ---
 
-## MANDATORY: Pre-Deploy Checklist
+## Current Status (Feb 18, 2026)
 
-**Before declaring ANY work complete, you MUST run through this checklist.**
+### Working
+- CARLA 0.9.15 running on Vast.ai GPU (RTX 3090, root privilege fix applied)
+- Direct WebSocket connection via `?ws=<tunnel_url>` query parameter
+- Player car controls: WASD + Space (handbrake), R (respawn), C (camera toggle)
+- AI opponent using CARLA autopilot (racing mode: ignores lights/signs, 40% over speed limit)
+- Steering: instant response, speed-limited (0.7 at high speed, 1.0 at low speed)
+- Reverse: full throttle when S pressed and speed < 5 km/h
+- Compass navigation arrow pointing to next checkpoint
+- Race HUD: speedometer, lap timer, gap timer, throttle/brake/steer bars, connection quality
+- Minimap with player/AI positions
+- Countdown overlay (3-2-1-GO with traffic light colors)
+- Screen shake + impact sound on collisions
+- Engine sound + background music with speed-based intensity
+- Model selector on RaceSetup screen (Easy/Medium/Hard - UI only, no weights yet)
+- GitHub Actions auto-builds Docker image on push to v3 (server/docker/configs paths)
+- Vercel auto-deploys frontend on push to v3
 
-This exists because multiple bugs shipped that could have been caught with basic verification:
-1. API URL bug: Frontend called relative URL, resolved to wrong domain
-2. Cold start bug: GPU callback data lost on Vercel function restart
-
-### Quick Verification (5 minutes)
-
-```markdown
-## Pre-Deploy Verification
-
-### 0. Root Directory Check (CRITICAL!)
-Before editing any files:
-- [ ] Run: `npx vercel project inspect | grep "Root Directory"`
-- [ ] Verify you're editing files in the Root Directory path
-- [ ] If not, sync changes to correct location after editing
-
-### 1. API Smoke Test (MANDATORY)
-For each API endpoint the frontend calls:
-- [ ] curl the endpoint from the DEPLOYED domain
-- [ ] Verify response is JSON (starts with { or [), not HTML
-- [ ] If HTML returned, the URL is WRONG
-
-### 2. Serverless State Check
-- [ ] Is any state stored in-memory (global, module vars)?
-- [ ] If yes, will it survive cold starts? (Use Upstash Redis instead)
-- [ ] Check: Does response include "using_redis: true"?
-
-### 3. Async Flow Check
-For multi-step operations (start → callback → poll):
-- [ ] Test each step with curl independently
-- [ ] Wait 2 min between steps to simulate cold start
-- [ ] Verify data persists across the delay
-
-### 4. Failure Mode Questions
-- [ ] What if the network fails?
-- [ ] What if the server restarts?
-- [ ] What if data is missing?
-- [ ] What if URLs are wrong?
-
-### 5. User Flow Test
-- [ ] Click through the main user flow in browser
-- [ ] Check browser console for errors
-- [ ] Check Network tab for failed requests
-```
-
----
-
-## Skills Reference
-
-Use these skills during development:
-
-| Skill | Use When |
-|-------|----------|
-| `failure-mode-checklist.md` | Before any deployment - ask "what if?" |
-| `serverless-patterns.md` | Working with Vercel functions, state storage |
-| `deployment-contract-validator.md` | Cross-project API integration |
-| `e2e-browser-testing.md` | Testing complete user flows |
-| `infrastructure-audit-agent.md` | Auditing serverless code for anti-patterns |
-| `multi-agent-orchestration.md` | Managing parallel agent work |
-| `retrospective-agent.md` | After bugs are discovered |
-
----
-
-## Agent Team Structure
-
-When spawning multiple agents, ALWAYS include these roles:
-
-| Role | Responsibility | When to Spawn |
-|------|----------------|---------------|
-| **Game Engine Lead** | Core logic, physics, AI | Game feature work |
-| **UI/UX Lead** | Components, styling | Frontend changes |
-| **QA Lead** | Testing, bug fixes | Always |
-| **Infrastructure Audit** | Serverless patterns, state, URLs | Any API/serverless work |
-
-**CRITICAL:** The Infrastructure Audit agent must run for ANY serverless code changes. It prevented 3 bugs from shipping (cold start × 3 files).
-
-### Agent Workflow
-
-1. **Before Implementation:**
-   - Read TEAM_KNOWLEDGE.md (v2/TEAM_KNOWLEDGE.md)
-   - Read relevant skills
-   - Run failure-mode-checklist questions
-
-2. **During Implementation:**
-   - Update TEAM_KNOWLEDGE.md with decisions
-   - Commit frequently (every 30-60 min)
-
-3. **Before Declaring Done:**
-   - Run infrastructure audit (grep for anti-patterns)
-   - Run pre-deploy checklist (this file)
-   - Curl all API endpoints
-   - Click through user flow in browser
+### Not Working / TODO
+- **Server SIGABRT crash (mitigated)**: Cleanup now disables autopilot and sync mode before destroying actors, sensors destroyed before vehicles. Server no longer calls cleanup on client disconnect — only on new race start. Still close extra tabs to be safe.
+- **No trained model weights**: AI uses CARLA autopilot fallback. PilotNet weights available at HuggingFace (sergiopaniego/OptimizedPilotNet, 200x66 input). Alpamayo is 10B params (~20GB), probably won't fit alongside CARLA on 24GB GPU.
+- **Full provisioning flow untested**: The "Play Game" button flow (Vast.ai auto-provision + Cloudflare tunnel + callback) hasn't been tested end-to-end with the v3 Docker image.
+- **Docker Hub token**: May need to regenerate Docker Hub access token for GitHub Actions (was getting "Password required" error).
 
 ---
 
 ## Architecture
 
-### Deployment Topology
-
 ```
-v2-sigma-lemon.vercel.app (Frontend)
+shadow-driver-v3.vercel.app (Frontend - React/Vite/Tailwind v4)
     │
-    │ API calls (MUST use absolute URLs)
+    ├─ /race?ws=<url>   → Direct WebSocket connection (dev/testing)
+    ├─ /race?demo=true  → Demo mode (connects to localhost:8765)
+    └─ /race            → Full flow: GPU provisioning modal
+    │
+    │ API calls for provisioning
     ▼
-carla-shadow-driver.vercel.app (API)
+shadow-driver-v3.vercel.app/api/gpu/* (Vercel API routes)
     │
-    ├─ /api/gpu/start  → Provisions GPU on Vast.ai
-    ├─ /api/gpu/status → Checks GPU status + tunnel URL
+    ├─ /api/gpu/start    → Provisions GPU on Vast.ai
+    ├─ /api/gpu/status   → Polls GPU status + tunnel URL
     ├─ /api/gpu/callback → Receives tunnel URL from GPU
-    └─ /api/gpu/stop   → Destroys GPU instance
+    └─ /api/gpu/stop     → Destroys GPU instance
     │
     ▼
-Upstash Redis (via Vercel Marketplace - required for callback persistence)
+Vast.ai GPU Instance (Docker: rkshah09/shadow-driver-v3:latest)
     │
-    ▼
-Vast.ai GPU → Cloudflare Tunnel → WebSocket to browser
+    ├─ CARLA 0.9.15 (headless, run as 'carla' user)
+    ├─ Race Server (Python, WebSocket on port 8765)
+    └─ Cloudflare Tunnel (exposes WS to browser)
 ```
 
-### Environment Variables (carla-shadow-driver project)
+### Key Files
 
-```
-VASTAI_API_KEY              - Vast.ai API key for GPU provisioning
-KV_REST_API_URL             - Upstash Redis endpoint (via Vercel Marketplace)
-KV_REST_API_TOKEN           - Upstash Redis auth token (via Vercel Marketplace)
-UPSTASH_REDIS_REST_URL      - Alt naming if using Upstash directly
-UPSTASH_REDIS_REST_TOKEN    - Alt naming if using Upstash directly
-```
+**Frontend (v3/src/):**
+- `pages/Race.tsx` - Main racing page, keyboard controls, view state machine
+- `components/RaceSetup.tsx` - Pre-race config: track, weather, laps, AI model
+- `components/RaceHUD.tsx` - HUD overlay: speed, laps, gap, inputs, checkpoint arrow
+- `components/VideoCanvas.tsx` - Renders binary JPEG frames to canvas
+- `components/Minimap.tsx` - Top-down minimap with positions
+- `hooks/useGPUConnection.ts` - WebSocket connection + GPU provisioning state
+- `hooks/useEngineSound.ts` - Web Audio API engine sounds
+- `types/index.ts` - TypeScript interfaces (RaceState, RacerState, etc.)
 
-**Note:** Upstash via Vercel Marketplace uses KV_* naming for compatibility. Code checks both naming conventions.
+**Server (v3/server/):**
+- `race_server.py` - WebSocket server, race loop (30Hz frames + 30Hz telemetry)
+- `carla_manager.py` - CARLA vehicle/camera/control management, physics
+- `race_logic.py` - Checkpoints, lap tracking, race state
+- `model_manager.py` - AI model loading (PilotNet/Alpamayo)
+
+**Infrastructure:**
+- `v3/docker/Dockerfile` - Based on carlasim/carla:0.9.15 + Miniconda + PyTorch
+- `v3/docker/entrypoint.sh` - Starts CARLA (as carla user) + race server + cloudflare tunnel
+- `v3/api/gpu/start.ts` - Vast.ai provisioning with onstart script
+- `.github/workflows/docker-build.yml` - Auto Docker build on push
+
+---
+
+## Quick Start (Testing with Direct Link)
+
+1. Rent a GPU on Vast.ai (RTX 3090+, Docker image: `rkshah09/shadow-driver-v3:latest`)
+2. Wait for instance to start, SSH in to check logs:
+   ```bash
+   ssh -p <PORT> root@<IP>
+   cat /tmp/shadow-driver.log
+   ```
+3. Get the Cloudflare tunnel URL from logs (looks like `https://xxx.trycloudflare.com`)
+4. Open: `https://shadow-driver-v3.vercel.app/race?ws=<tunnel_url>`
+5. Configure track/weather/laps, click Start Race
+
+## Quick Start (SCP updated server code to running instance)
+
+```bash
+scp -P <PORT> v3/server/carla_manager.py root@<IP>:/opt/shadow-driver/server/carla_manager.py
+ssh -p <PORT> root@<IP>
+pkill -f race_server; sleep 1
+cd /opt/shadow-driver && python3 -u server/race_server.py &
+```
 
 ---
 
 ## Known Issues & Fixes
 
-### Issue: "Starting server..." spins forever
-**Cause:** Upstash Redis not configured, callback data lost on cold start
-**Fix:** Set up Upstash Redis for the carla-shadow-driver project via Vercel Marketplace
+### Issue: CARLA "Refusing to run with root privileges"
+**Cause:** CARLA/UE4 checks getuid()==0 and exits. Vast.ai containers run as root.
+**Fix:** Run CARLA as `carla` user via `su -s /bin/bash -c "..." carla` in entrypoint.sh
 
-### Issue: "Unexpected token '<'" JSON parse error
-**Cause:** API URL resolving to wrong domain, returning HTML 404
-**Fix:** Use absolute URLs in useGPUConnection.ts
+### Issue: Server crashes with SIGABRT (exit code 134)
+**Cause:** CARLA actor cleanup while traffic manager is active, triggered by reconnecting clients
+**Fix (applied):** Server no longer calls `cleanup()` on client disconnect. Instead, `_reset_race()` cancels loop tasks and resets state while keeping actors alive. Full `cleanup()` is only called when starting a new race. Cleanup order: disable autopilot, disable TM sync, disable world sync, destroy sensors, destroy vehicles (with sleeps between).
+
+### Issue: AI car not visible / drives into walls
+**Cause:** No trained model weights, neural network outputs random controls
+**Fix:** Fallback to CARLA autopilot when weights not found
+
+### Issue: Docker build "Password required" on GitHub Actions
+**Cause:** DOCKERHUB_TOKEN secret empty or expired
+**Fix:** Generate new Docker Hub access token, update repository secret
 
 ---
 
-## Testing Commands
+## Environment Variables
 
-```bash
-# Check if API returns JSON (not HTML)
-curl -s https://carla-shadow-driver.vercel.app/api/gpu/callback | head -1
-# Good: {"entries":0,"data":{},...}
-# Bad: <!DOCTYPE html> or The page...
-
-# Check if Redis is enabled
-curl -s https://carla-shadow-driver.vercel.app/api/gpu/callback | grep using_redis
-# Should show: "using_redis":true
-
-# Test callback persistence (simulates GPU callback)
-curl -X POST https://carla-shadow-driver.vercel.app/api/gpu/callback \
-  -H "Content-Type: application/json" \
-  -d '{"instance_id":"test123","status":"testing"}'
-
-# Wait 2 min, then verify data persisted
-sleep 120
-curl "https://carla-shadow-driver.vercel.app/api/gpu/callback?instance_id=test123"
-# Should show the test data if KV is working
+**Vercel (shadow-driver-v3 project):**
+```
+VASTAI_API_KEY              - Vast.ai API key for GPU provisioning
 ```
 
----
-
-## Commit Guidelines
-
-- Run pre-deploy checklist before pushing
-- Include "Tested:" section in commit messages for API changes
-- Reference skills used in complex changes
-
----
-
-## When Things Go Wrong
-
-1. **Use retrospective-agent.md** - Document what happened
-2. **Update relevant skills** - Prevent recurrence
-3. **Update this CLAUDE.md** - Add to Known Issues
-4. **Create new skill if needed** - Capture the learning
+**GitHub (repository secrets):**
+```
+DOCKERHUB_USERNAME          - Docker Hub username (rkshah09)
+DOCKERHUB_TOKEN             - Docker Hub access token
+```

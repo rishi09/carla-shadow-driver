@@ -7,13 +7,13 @@ interface TrackOption {
 }
 
 const TRACKS: TrackOption[] = [
-  { id: 'Town01', name: 'Town01', description: 'Small town with river and bridges' },
-  { id: 'Town02', name: 'Town02', description: 'Residential area with narrow streets' },
-  { id: 'Town03', name: 'Town03', description: 'Simple town with highway' },
-  { id: 'Town04', name: 'Town04', description: 'Infinite loop highway with small town' },
-  { id: 'Town05', name: 'Town05', description: 'Urban grid with multilane roads' },
-  { id: 'Town07', name: 'Town07', description: 'Rural countryside with farmland' },
-  { id: 'Town10HD', name: 'Town10HD', description: 'Downtown city with skyscrapers' },
+  { id: 'Town07', name: 'Town07', description: 'Rural highway loop - open roads, easy to follow (Recommended)' },
+  { id: 'Town04', name: 'Town04', description: 'Highway circuit - long straights with a small town section' },
+  { id: 'Town01', name: 'Town01', description: 'Small town - river crossings, bridges, moderate intersections' },
+  { id: 'Town05', name: 'Town05', description: 'Urban grid - wide multilane roads, many intersections' },
+  { id: 'Town03', name: 'Town03', description: 'Mixed town - suburban streets and highway, complex intersections' },
+  { id: 'Town02', name: 'Town02', description: 'Residential - narrow winding streets, tight corners (Hard)' },
+  { id: 'Town10HD', name: 'Town10HD', description: 'Downtown city - dense skyscraper blocks, tight turns (Hard)' },
 ];
 
 interface WeatherOption {
@@ -42,9 +42,9 @@ interface ModelOption {
 }
 
 const AI_MODELS: ModelOption[] = [
-  { id: 'carla_pilotnet', name: 'Steady Driver', difficulty: 'Easy', diffColor: 'text-green-400 border-green-500/40 bg-green-500/20', description: 'Follows the road steadily. Good for learning the track.' },
-  { id: 'pilotnet', name: 'Weekend Racer', difficulty: 'Medium', diffColor: 'text-amber-400 border-amber-500/40 bg-amber-500/20', description: 'More aggressive cornering, occasionally misjudges turns.' },
-  { id: 'alpamayo', name: 'Pro Racer', difficulty: 'Hard', diffColor: 'text-red-400 border-red-500/40 bg-red-500/20', description: 'Alpamayo vision model. Pushes the limits.' },
+  { id: 'carla_pilotnet', name: 'Sunday Driver', difficulty: 'Easy', diffColor: 'text-green-400 border-green-500/40 bg-green-500/20', description: 'Rule-based AI that follows traffic. Drives cautiously at the speed limit.' },
+  { id: 'pilotnet', name: 'Neural Network', difficulty: 'Medium', diffColor: 'text-amber-400 border-amber-500/40 bg-amber-500/20', description: 'AI-powered PilotNet neural network. Makes human-like mistakes at corners.' },
+  { id: 'alpamayo', name: 'Speed Demon', difficulty: 'Hard', diffColor: 'text-red-400 border-red-500/40 bg-red-500/20', description: 'Aggressive rule-based AI. Ignores all traffic rules, 50% over speed limit.' },
 ];
 
 interface RaceSetupProps {
@@ -53,7 +53,7 @@ interface RaceSetupProps {
 }
 
 export function RaceSetup({ onStartRace, onBack }: RaceSetupProps) {
-  const [selectedTrack, setSelectedTrack] = useState('Town03');
+  const [selectedTrack, setSelectedTrack] = useState('Town07');
   const [selectedWeather, setSelectedWeather] = useState('clear');
   const [selectedLaps, setSelectedLaps] = useState(3);
   const [selectedModel, setSelectedModel] = useState('carla_pilotnet');

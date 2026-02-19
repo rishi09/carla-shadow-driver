@@ -1,4 +1,4 @@
-import { useRef, useEffect, useMemo } from 'react';
+import { useRef, useEffect, useMemo, useState } from 'react';
 import type { RaceState } from '../types/index.ts';
 
 interface MinimapProps {
@@ -12,6 +12,18 @@ const DRAW_AREA = MAP_SIZE - PADDING * 2;
 /** Canvas-based minimap showing car positions on the track. */
 export function Minimap({ raceState }: MinimapProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [pulsePhase, setPulsePhase] = useState(0);
+
+  // Animate pulse for next checkpoint highlight
+  useEffect(() => {
+    let frame: number;
+    const animate = () => {
+      setPulsePhase(Date.now() % 2000 / 2000); // 0..1 over 2 seconds
+      frame = requestAnimationFrame(animate);
+    };
+    frame = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(frame);
+  }, []);
 
   // Compute the bounding box from all known positions (checkpoints + cars)
   const bounds = useMemo(() => {
@@ -125,11 +137,14 @@ export function Minimap({ raceState }: MinimapProps) {
       return [cx, cy];
     }
 
-    // Draw checkpoint connections (track outline)
+    // Draw checkpoint connections (route line in cyan)
     const checkpoints = raceState.checkpoints;
+    const nextCheckpointIdx = raceState.player.checkpoint ?? 0;
     if (checkpoints && checkpoints.length > 1) {
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
-      ctx.lineWidth = 1.5;
+      // Draw the full route as a semi-transparent cyan line
+      ctx.strokeStyle = 'rgba(0, 210, 255, 0.35)';
+      ctx.lineWidth = 2.5;
+      ctx.setLineDash([]);
       ctx.beginPath();
       const [sx, sy] = toCanvas(checkpoints[0].x, checkpoints[0].y);
       ctx.moveTo(sx, sy);
@@ -137,20 +152,63 @@ export function Minimap({ raceState }: MinimapProps) {
         const [px, py] = toCanvas(checkpoints[i].x, checkpoints[i].y);
         ctx.lineTo(px, py);
       }
-      // Close the loop
+      // Close the loop back to start
       ctx.lineTo(sx, sy);
+      ctx.stroke();
+
+      // Highlight the segment leading to the next checkpoint (brighter)
+      const prevIdx = (nextCheckpointIdx - 1 + checkpoints.length) % checkpoints.length;
+      const [px1, py1] = toCanvas(checkpoints[prevIdx].x, checkpoints[prevIdx].y);
+      const [px2, py2] = toCanvas(checkpoints[nextCheckpointIdx % checkpoints.length].x, checkpoints[nextCheckpointIdx % checkpoints.length].y);
+      ctx.strokeStyle = 'rgba(0, 230, 255, 0.7)';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(px1, py1);
+      ctx.lineTo(px2, py2);
       ctx.stroke();
     }
 
-    // Draw checkpoint dots
+    // Draw checkpoint dots and numbers
     if (checkpoints) {
-      for (const cp of checkpoints) {
+      const pulseSize = 1 + Math.sin(pulsePhase * Math.PI * 2) * 0.6; // oscillates 0.4..1.6
+
+      for (let i = 0; i < checkpoints.length; i++) {
+        const cp = checkpoints[i];
         const [cx, cy] = toCanvas(cp.x, cp.y);
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
-        ctx.beginPath();
-        ctx.arc(cx, cy, 2.5, 0, Math.PI * 2);
-        ctx.fill();
+        const isNext = i === (nextCheckpointIdx % checkpoints.length);
+
+        if (isNext) {
+          // Next checkpoint: pulsing glow effect
+          ctx.shadowColor = '#00D2FF';
+          ctx.shadowBlur = 8 + pulseSize * 4;
+          ctx.fillStyle = 'rgba(0, 210, 255, 0.9)';
+          ctx.beginPath();
+          ctx.arc(cx, cy, 4 + pulseSize, 0, Math.PI * 2);
+          ctx.fill();
+          // Inner white dot
+          ctx.shadowBlur = 0;
+          ctx.fillStyle = '#FFFFFF';
+          ctx.beginPath();
+          ctx.arc(cx, cy, 2, 0, Math.PI * 2);
+          ctx.fill();
+        } else {
+          // Regular checkpoint dot
+          ctx.shadowBlur = 0;
+          ctx.fillStyle = 'rgba(0, 210, 255, 0.35)';
+          ctx.beginPath();
+          ctx.arc(cx, cy, 2.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        // Checkpoint number label (only show if enough space - skip if too many checkpoints)
+        if (checkpoints.length <= 20) {
+          ctx.shadowBlur = 0;
+          ctx.fillStyle = isNext ? 'rgba(0, 230, 255, 0.9)' : 'rgba(255, 255, 255, 0.3)';
+          ctx.font = isNext ? 'bold 8px monospace' : '7px monospace';
+          ctx.fillText(String(i + 1), cx + 5, cy + 3);
+        }
       }
+      ctx.shadowBlur = 0;
     }
 
     // Draw AI car (blue, drawn first so player appears on top)
@@ -237,7 +295,7 @@ export function Minimap({ raceState }: MinimapProps) {
       ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
       ctx.fillText('GHOST', PADDING + 78, legendY + 3);
     }
-  }, [raceState, bounds]);
+  }, [raceState, bounds, pulsePhase]);
 
   return (
     <canvas

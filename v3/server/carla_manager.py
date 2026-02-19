@@ -384,9 +384,13 @@ class RaceManager:
         )
         self.player_car.apply_control(control)
 
-    def enable_ai_autopilot(self):
+    def enable_ai_autopilot(self, difficulty: str = 'medium'):
         """Enable CARLA's built-in autopilot for the AI car.
-        Configured for racing: ignore traffic lights, drive aggressively."""
+        Difficulty levels adjust autopilot aggressiveness:
+          - easy:   Slow and cautious, follows some traffic rules
+          - medium: 20% over speed limit, ignores lights, auto lane changes
+          - hard:   50% over speed limit, ignores all rules, tailgates aggressively
+        """
         if not self.ai_car or not self.client:
             return
         try:
@@ -394,20 +398,99 @@ class RaceManager:
             tm.set_synchronous_mode(True)
             self.ai_car.set_autopilot(True, tm.get_port())
 
-            # Racing behavior: no traffic rules, aggressive driving
-            tm.ignore_lights_percentage(self.ai_car, 100.0)
-            tm.ignore_signs_percentage(self.ai_car, 100.0)
-            tm.ignore_walkers_percentage(self.ai_car, 100.0)
-            tm.vehicle_percentage_speed_difference(self.ai_car, -40.0)  # 40% faster than limit
-            tm.distance_to_leading_vehicle(self.ai_car, 1.0)
-            tm.auto_lane_change(self.ai_car, True)
+            difficulty = difficulty.lower()
+
+            if difficulty == 'easy':
+                # Cautious driving: 10% slower than limit, sometimes follows rules
+                tm.ignore_lights_percentage(self.ai_car, 50.0)
+                tm.ignore_signs_percentage(self.ai_car, 0.0)
+                tm.ignore_walkers_percentage(self.ai_car, 0.0)
+                tm.vehicle_percentage_speed_difference(self.ai_car, 10.0)  # 10% SLOWER than limit
+                tm.distance_to_leading_vehicle(self.ai_car, 5.0)
+                tm.auto_lane_change(self.ai_car, False)
+            elif difficulty == 'hard':
+                # Maximum aggression: 50% over speed limit, ignores everything
+                tm.ignore_lights_percentage(self.ai_car, 100.0)
+                tm.ignore_signs_percentage(self.ai_car, 100.0)
+                tm.ignore_walkers_percentage(self.ai_car, 100.0)
+                tm.vehicle_percentage_speed_difference(self.ai_car, -50.0)  # 50% faster than limit
+                tm.distance_to_leading_vehicle(self.ai_car, 0.5)
+                tm.auto_lane_change(self.ai_car, True)
+            else:
+                # Medium (default): 20% over speed limit, ignores lights, auto lane changes
+                tm.ignore_lights_percentage(self.ai_car, 100.0)
+                tm.ignore_signs_percentage(self.ai_car, 100.0)
+                tm.ignore_walkers_percentage(self.ai_car, 100.0)
+                tm.vehicle_percentage_speed_difference(self.ai_car, -20.0)  # 20% faster than limit
+                tm.distance_to_leading_vehicle(self.ai_car, 2.0)
+                tm.auto_lane_change(self.ai_car, True)
 
             self._ai_autopilot = True
-            print("AI car: using CARLA autopilot (racing mode)")
+            print(f"AI car: using CARLA autopilot (difficulty={difficulty})")
         except Exception as e:
             print(f"Failed to enable autopilot: {e}")
             import traceback
             traceback.print_exc()
+
+    def disable_ai_autopilot(self):
+        """Disable CARLA's built-in autopilot for the AI car.
+        Used when switching to neural network control (Medium difficulty).
+        """
+        if not self.ai_car:
+            return
+        try:
+            self.ai_car.set_autopilot(False)
+            self._ai_autopilot = False
+            print("AI car: autopilot disabled (switching to neural network control)")
+        except Exception as e:
+            print(f"Failed to disable autopilot: {e}")
+
+    def apply_neural_ai_control(self, steering: float, speed_kmh: float):
+        """Apply neural network steering + rule-based throttle/brake to AI car.
+
+        Used for Medium difficulty: the neural net provides steering predictions,
+        and simple heuristics handle throttle and braking.
+
+        Args:
+            steering: Neural net steering prediction in [-1, 1]
+            speed_kmh: Current AI car speed in km/h
+        """
+        if not self.ai_car or self._ai_autopilot:
+            return
+
+        abs_steer = abs(steering)
+        throttle = 0.8
+        brake = 0.0
+
+        # Rule-based throttle/brake based on steering angle
+        if abs_steer > 0.3:
+            # Sharp turn: brake slightly, reduce throttle
+            throttle = 0.3
+            brake = 0.2
+        elif abs_steer > 0.15:
+            # Moderate turn: reduce throttle, no brake
+            throttle = 0.5
+            brake = 0.0
+        # else: straight road, full throttle (0.8)
+
+        # Speed limiting: brake if going too fast
+        if speed_kmh > 120:
+            throttle = max(0.1, throttle - 0.3)
+            brake = max(brake, 0.3)
+        elif speed_kmh > 100:
+            throttle = max(0.2, throttle - 0.1)
+
+        # Unstuck: if nearly stopped and not turning much, floor it
+        if speed_kmh < 5.0 and abs_steer < 0.1:
+            throttle = 1.0
+            brake = 0.0
+
+        control = carla.VehicleControl(
+            throttle=max(0.0, min(1.0, throttle)),
+            steer=max(-1.0, min(1.0, steering)),
+            brake=max(0.0, min(1.0, brake)),
+        )
+        self.ai_car.apply_control(control)
 
     def apply_ai_control(self, prediction: Dict):
         """Apply model prediction to AI car. No-op if autopilot is active."""
@@ -487,15 +570,74 @@ class RaceManager:
         return self.ai_buffer.get()
 
     def cleanup(self):
-        """Destroy all actors and reset."""
+        """Destroy all actors and reset. Order matters to avoid SIGABRT:
+        1. Disable autopilot (detach from traffic manager)
+        2. Disable synchronous mode (so CARLA isn't waiting for ticks)
+        3. Stop and destroy sensors first (they hold callbacks)
+        4. Destroy vehicles last
+        5. Small sleep between destructions to let CARLA process
+        """
         print("Cleaning up CARLA actors...")
-        for actor in reversed(self._actors):
+
+        # 1. Disable autopilot on AI car before touching traffic manager
+        if self.ai_car is not None and self._ai_autopilot:
             try:
-                if hasattr(actor, 'stop'):
-                    actor.stop()
-                actor.destroy()
-            except Exception:
-                pass
+                self.ai_car.set_autopilot(False)
+                print("  AI autopilot disabled")
+            except Exception as e:
+                print(f"  Warning: failed to disable autopilot: {e}")
+            self._ai_autopilot = False
+
+        # 2. Disable traffic manager synchronous mode
+        if self.client is not None:
+            try:
+                tm = self.client.get_trafficmanager()
+                tm.set_synchronous_mode(False)
+                print("  Traffic manager sync mode disabled")
+            except Exception as e:
+                print(f"  Warning: failed to disable TM sync mode: {e}")
+
+        # 3. Disable world synchronous mode BEFORE destroying actors
+        if self.world:
+            try:
+                settings = self.world.get_settings()
+                settings.synchronous_mode = False
+                self.world.apply_settings(settings)
+                print("  World sync mode disabled")
+            except Exception as e:
+                print(f"  Warning: failed to disable world sync mode: {e}")
+
+        # 4. Separate sensors and vehicles for ordered destruction
+        sensors = []
+        vehicles = []
+        for actor in self._actors:
+            if hasattr(actor, 'stop') and hasattr(actor, 'listen'):
+                sensors.append(actor)
+            else:
+                vehicles.append(actor)
+
+        # 5. Stop and destroy sensors first
+        for sensor in sensors:
+            try:
+                sensor.stop()
+            except Exception as e:
+                print(f"  Warning: failed to stop sensor: {e}")
+            try:
+                sensor.destroy()
+                print(f"  Destroyed sensor {sensor.id}")
+            except Exception as e:
+                print(f"  Warning: failed to destroy sensor {sensor.id}: {e}")
+            time.sleep(0.05)  # Small sleep between destructions
+
+        # 6. Destroy vehicles
+        for vehicle in reversed(vehicles):
+            try:
+                vehicle.destroy()
+                print(f"  Destroyed vehicle {vehicle.id}")
+            except Exception as e:
+                print(f"  Warning: failed to destroy vehicle {vehicle.id}: {e}")
+            time.sleep(0.05)
+
         self._actors.clear()
         self.player_car = None
         self.ai_car = None
@@ -505,13 +647,16 @@ class RaceManager:
         with self._collision_lock:
             self._collisions.clear()
 
-        # Reset synchronous mode
-        if self.world:
-            settings = self.world.get_settings()
-            settings.synchronous_mode = False
-            self.world.apply_settings(settings)
+        # Reset progressive input state
+        self._current_throttle = 0.0
+        self._current_brake = 0.0
+        self._current_steer = 0.0
 
         print("Cleanup complete")
+
+    def has_actors(self) -> bool:
+        """Return True if there are any spawned actors."""
+        return len(self._actors) > 0
 
     def __enter__(self):
         return self

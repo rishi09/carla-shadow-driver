@@ -264,7 +264,7 @@ function formatTime(seconds: number): string {
 }
 
 /** Large directional arrow pointing toward the next checkpoint */
-function CheckpointArrow({ playerX, playerY, playerYaw, targetX, targetY }: {
+function CheckpointArrow({ playerX, playerY, playerYaw, targetX, targetY, checkpoint, totalCheckpoints }: {
   playerX: number; playerY: number; playerYaw?: number; targetX: number; targetY: number;
   checkpoint?: number; totalCheckpoints?: number;
 }) {
@@ -279,29 +279,60 @@ function CheckpointArrow({ playerX, playerY, playerYaw, targetX, targetY }: {
   while (relativeAngle > 180) relativeAngle -= 360;
   while (relativeAngle < -180) relativeAngle += 360;
 
-  // Simple direction hint
+  // Turn direction hint based on relative angle
   let hint: string;
-  if (Math.abs(relativeAngle) < 30) hint = 'GO';
-  else if (relativeAngle > 0) hint = 'RIGHT';
-  else hint = 'LEFT';
+  let hintColor: string;
+  if (Math.abs(relativeAngle) < 20) {
+    hint = 'STRAIGHT';
+    hintColor = 'text-green-400';
+  } else if (Math.abs(relativeAngle) < 60) {
+    hint = relativeAngle > 0 ? 'SLIGHT RIGHT' : 'SLIGHT LEFT';
+    hintColor = 'text-accent';
+  } else if (Math.abs(relativeAngle) < 120) {
+    hint = relativeAngle > 0 ? 'TURN RIGHT' : 'TURN LEFT';
+    hintColor = 'text-amber-400';
+  } else {
+    hint = relativeAngle > 0 ? 'HARD RIGHT' : 'HARD LEFT';
+    hintColor = 'text-red-400';
+  }
 
-  // Color: green when close, white when far
+  // Color: green when close, accent when far
   const isClose = dist < 30;
+
+  // Format distance
+  const distText = dist >= 1000 ? `${(dist / 1000).toFixed(1)}km` : `${Math.round(dist)}m`;
+
+  // Checkpoint counter
+  const cpNum = (checkpoint ?? 0) + 1; // checkpoint is 0-indexed, display 1-indexed
+  const cpTotal = totalCheckpoints ?? 10;
 
   return (
     <div className="absolute top-[108px] left-1/2 -translate-x-1/2 z-10 flex flex-col items-center gap-1">
-      {/* Rotating compass arrow */}
-      <div className={`rounded-full w-14 h-14 flex items-center justify-center ${isClose ? 'bg-green-500/30 border-2 border-green-400' : 'bg-black/60 border border-white/20'}`}>
-        <svg width="32" height="32" viewBox="0 0 32 32"
-          className={isClose ? 'text-green-400' : 'text-accent'}
-          style={{ transform: `rotate(${relativeAngle}deg)`, transition: 'transform 0.2s ease-out' }}>
-          <path d="M16 4L22 14H18V26H14V14H10L16 4Z" fill="currentColor" />
+      {/* Checkpoint counter */}
+      <div className="bg-black/60 backdrop-blur-sm rounded-md px-2.5 py-0.5 border border-white/15 mb-0.5">
+        <span className="text-cyan-400 text-xs font-mono font-bold">CP {cpNum}/{cpTotal}</span>
+      </div>
+
+      {/* Rotating compass arrow - larger and more prominent */}
+      <div className={`rounded-full w-20 h-20 flex items-center justify-center ${isClose ? 'bg-green-500/30 border-2 border-green-400 shadow-[0_0_20px_rgba(34,197,94,0.5)]' : 'bg-black/70 border-2 border-cyan-500/50 shadow-[0_0_15px_rgba(0,210,255,0.3)]'}`}>
+        <svg width="48" height="48" viewBox="0 0 32 32"
+          className={isClose ? 'text-green-400' : 'text-cyan-400'}
+          style={{ transform: `rotate(${relativeAngle}deg)`, transition: 'transform 0.15s ease-out', filter: `drop-shadow(0 0 6px currentColor)` }}>
+          <path d="M16 2L24 16H19V28H13V16H8L16 2Z" fill="currentColor" />
         </svg>
       </div>
-      {/* Compact label */}
-      <div className={`text-xs font-mono font-bold px-2 py-0.5 rounded ${isClose ? 'text-green-400 bg-green-500/20' : 'text-white/60 bg-black/40'}`}>
-        {isClose ? 'CHECKPOINT!' : `${hint} · ${Math.round(dist)}m`}
+
+      {/* Distance */}
+      <div className={`text-sm font-mono font-bold px-2.5 py-0.5 rounded ${isClose ? 'text-green-400 bg-green-500/20' : 'text-white bg-black/50'}`}>
+        {isClose ? 'CHECKPOINT!' : distText}
       </div>
+
+      {/* Turn direction hint */}
+      {!isClose && (
+        <div className={`${hintColor} text-xs font-mono font-bold px-2 py-0.5 rounded bg-black/40`}>
+          {hint}
+        </div>
+      )}
     </div>
   );
 }

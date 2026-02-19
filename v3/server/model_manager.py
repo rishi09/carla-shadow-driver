@@ -2,13 +2,137 @@
 Flexible Model Manager - Swap between different driving models
 Supports: PilotNet, CARLAPilotNet, Alpamayo
 """
+import os
 import torch
 import torch.nn as nn
 import numpy as np
 import cv2
+import urllib.request
 from abc import ABC, abstractmethod
 from typing import Optional, Dict, Tuple
 from pathlib import Path
+
+
+# HuggingFace weights URL for PilotNet
+PILOTNET_WEIGHTS_URL = "https://huggingface.co/sergiopaniego/OptimizedPilotNet/resolve/main/pilotnet_model.pth"
+PILOTNET_WEIGHTS_PATH = "models/pilotnet_model.pth"
+
+
+def download_weights(url: str, dest_path: str) -> bool:
+    """Download model weights from a URL if they don't already exist locally.
+
+    Args:
+        url: URL to download weights from
+        dest_path: Local file path to save weights to
+
+    Returns:
+        True if weights are available (already existed or downloaded), False on error
+    """
+    dest = Path(dest_path)
+    if dest.exists():
+        print(f"Weights already exist at {dest_path}")
+        return True
+
+    # Create parent directory if needed
+    dest.parent.mkdir(parents=True, exist_ok=True)
+
+    print(f"Downloading weights from {url}")
+    print(f"  -> {dest_path}")
+
+    try:
+        def _progress_hook(block_num, block_size, total_size):
+            downloaded = block_num * block_size
+            if total_size > 0:
+                percent = min(100, downloaded * 100 // total_size)
+                mb_downloaded = downloaded / (1024 * 1024)
+                mb_total = total_size / (1024 * 1024)
+                print(f"\r  Progress: {percent}% ({mb_downloaded:.1f}/{mb_total:.1f} MB)", end="", flush=True)
+            else:
+                mb_downloaded = downloaded / (1024 * 1024)
+                print(f"\r  Downloaded: {mb_downloaded:.1f} MB", end="", flush=True)
+
+        urllib.request.urlretrieve(url, dest_path, reporthook=_progress_hook)
+        print()  # Newline after progress
+        print(f"Download complete: {dest_path}")
+        return True
+    except Exception as e:
+        print(f"\nFailed to download weights: {e}")
+        # Clean up partial download
+        if dest.exists():
+            dest.unlink()
+        return False
+
+
+def _remap_state_dict(source_dict: dict, target_model: nn.Module) -> dict:
+    """Remap a state_dict from a source model to a target model by matching layer shapes.
+
+    The HuggingFace PilotNet weights may use different layer names than our model.
+    This function maps parameters by matching their shapes in order.
+
+    Args:
+        source_dict: State dict loaded from the weights file
+        target_model: Our target model instance
+
+    Returns:
+        Remapped state dict with target model's keys
+    """
+    target_dict = target_model.state_dict()
+
+    source_keys = list(source_dict.keys())
+    target_keys = list(target_dict.keys())
+
+    print(f"  Source keys ({len(source_keys)}): {source_keys}")
+    print(f"  Target keys ({len(target_keys)}): {target_keys}")
+
+    # First try direct loading (keys match exactly)
+    if set(source_keys) == set(target_keys):
+        print("  Keys match exactly - no remapping needed")
+        return source_dict
+
+    # Try mapping by shape order: match source params to target params by shape
+    remapped = {}
+    used_source_keys = set()
+
+    # Group by shape to handle the mapping
+    source_by_shape = {}
+    for k, v in source_dict.items():
+        shape = tuple(v.shape)
+        if shape not in source_by_shape:
+            source_by_shape[shape] = []
+        source_by_shape[shape].append(k)
+
+    target_by_shape = {}
+    for k, v in target_dict.items():
+        shape = tuple(v.shape)
+        if shape not in target_by_shape:
+            target_by_shape[shape] = []
+        target_by_shape[shape].append(k)
+
+    # For each target key, find a source key with matching shape (in order)
+    shape_counters = {}  # Track which index we're at for each shape
+    for target_key in target_keys:
+        target_shape = tuple(target_dict[target_key].shape)
+        if target_shape not in shape_counters:
+            shape_counters[target_shape] = 0
+
+        idx = shape_counters[target_shape]
+
+        if target_shape in source_by_shape and idx < len(source_by_shape[target_shape]):
+            source_key = source_by_shape[target_shape][idx]
+            remapped[target_key] = source_dict[source_key]
+            used_source_keys.add(source_key)
+            shape_counters[target_shape] = idx + 1
+            if source_key != target_key:
+                print(f"  Mapped: {source_key} -> {target_key} (shape {target_shape})")
+        else:
+            print(f"  Warning: No source match for {target_key} (shape {target_shape})")
+            remapped[target_key] = target_dict[target_key]  # Keep random init
+
+    unmapped_source = set(source_keys) - used_source_keys
+    if unmapped_source:
+        print(f"  Unmapped source keys: {unmapped_source}")
+
+    return remapped
 
 
 class DrivingModel(ABC):
@@ -98,11 +222,26 @@ class PilotNetModel(DrivingModel):
 
     def load_weights(self, weights_path: str):
         try:
-            state_dict = torch.load(weights_path, map_location=self.device)
-            self.model.load_state_dict(state_dict)
-            print(f"Loaded weights from {weights_path}")
+            state_dict = torch.load(weights_path, map_location=self.device, weights_only=True)
+
+            # Try direct load first; if keys mismatch, remap by shape
+            try:
+                self.model.load_state_dict(state_dict)
+                print(f"Loaded weights from {weights_path} (direct key match)")
+            except RuntimeError as e:
+                print(f"Direct load failed ({e}), attempting shape-based remapping...")
+                remapped = _remap_state_dict(state_dict, self.model)
+                self.model.load_state_dict(remapped)
+                print(f"Loaded weights from {weights_path} (remapped keys)")
+
+            self._weights_loaded = True
         except Exception as e:
             print(f"Warning: Could not load weights - {e}")
+            self._weights_loaded = False
+
+    @property
+    def has_weights(self) -> bool:
+        return getattr(self, '_weights_loaded', False)
 
     def preprocess(self, frame: np.ndarray) -> torch.Tensor:
         h, w = frame.shape[:2]
@@ -293,13 +432,26 @@ class ModelManager:
             print(f"Loading model: {model_name}")
             self.current_model = ModelRegistry.get_model(model_name, device=device)
             self.model_name = model_name
+
+            # For PilotNet, auto-download weights from HuggingFace if not provided
+            if model_name == 'pilotnet' and not weights:
+                weights = PILOTNET_WEIGHTS_PATH
+
             if weights:
                 weights_path = Path(weights)
+                if not weights_path.exists() and model_name == 'pilotnet':
+                    # Auto-download PilotNet weights
+                    print("  Weights not found locally, attempting download...")
+                    downloaded = download_weights(PILOTNET_WEIGHTS_URL, weights)
+                    if not downloaded:
+                        print("  Warning: Could not download weights, model will use random initialization")
+
                 if weights_path.exists():
                     self.current_model.load_weights(str(weights_path))
                 else:
                     print(f"  Warning: Weights file not found: {weights}")
-            print(f"  Status: Ready")
+
+            print(f"  Status: Ready (has_weights={getattr(self.current_model, 'has_weights', 'N/A')})")
             return True
         except Exception as e:
             print(f"  Error loading model: {e}")
