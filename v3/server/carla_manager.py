@@ -353,11 +353,7 @@ class RaceManager:
             print("[CTRL] WARNING: player_car is None!")
             return
 
-        # Debug: log first time a key is pressed
-        if any(keys.values()) and not getattr(self, '_logged_first_key', False):
-            self._logged_first_key = True
-            active = [k for k, v in keys.items() if v]
-            print(f"[CTRL] First key press applied: {active}")
+        self._ctrl_frame = getattr(self, '_ctrl_frame', 0) + 1
 
         dt = 1.0 / 30.0  # Approximate frame delta
 
@@ -411,6 +407,10 @@ class RaceManager:
                 reverse=True
             )
             self.player_car.apply_control(control)
+            # Log every 30th frame
+            if self._ctrl_frame % 30 == 0:
+                active = [k for k, v in keys.items() if v]
+                print(f"[CTRL#{self._ctrl_frame}] REVERSE keys={active} spd={speed_kmh:.1f} thr=1.0 steer={control.steer:.2f} brk=0.0")
             return
 
         control = carla.VehicleControl(
@@ -420,6 +420,15 @@ class RaceManager:
             hand_brake=hand_brake,
         )
         self.player_car.apply_control(control)
+
+        # Diagnostic: log every 30th frame with full control details
+        if self._ctrl_frame % 30 == 0:
+            active = [k for k, v in keys.items() if v]
+            # Read back what CARLA actually has
+            rb = self.player_car.get_control()
+            print(f"[CTRL#{self._ctrl_frame}] keys={active} spd={speed_kmh:.1f} "
+                  f"thr={control.throttle:.2f} steer={control.steer:.2f} brk={control.brake:.2f} | "
+                  f"readback: thr={rb.throttle:.2f} steer={rb.steer:.2f} brk={rb.brake:.2f}")
 
     def enable_ai_autopilot(self, difficulty: str = 'medium'):
         """Enable CARLA's built-in autopilot for the AI car.
