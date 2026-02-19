@@ -15,6 +15,9 @@ Pillow==10.4.0
 # Config parsing
 PyYAML==6.0.2
 
+# WebRTC streaming
+aiortc>=1.9.0
+
 # ML model inference
 # torch and torchvision installed separately with CUDA index
 transformers==4.46.3

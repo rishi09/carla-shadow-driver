@@ -6,7 +6,10 @@ USER root
 # Install system dependencies
 RUN apt-get update -qq && \
     apt-get install -y -qq --no-install-recommends \
-    curl wget && \
+    curl wget \
+    libavformat-dev libavcodec-dev libavdevice-dev libavutil-dev \
+    libswscale-dev libswresample-dev libavfilter-dev \
+    libopus-dev libvpx-dev libx264-dev && \
     rm -rf /var/lib/apt/lists/*
 
 # Install Miniconda (provides Python 3.10, since CARLA base has Python 3.6 which is too old for PyTorch)
