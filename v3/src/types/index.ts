@@ -89,6 +89,10 @@ export type ServerMessage = RaceState | RaceFinished | HandshakeAck | {
 } | {
   type: 'error';
   message: string;
+} | {
+  type: 'webrtc_answer';
+  sdp: string;
+  sdpType: RTCSdpType;
 };
 
 /** GPU provisioning states */

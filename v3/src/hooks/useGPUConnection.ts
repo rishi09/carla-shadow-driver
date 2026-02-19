@@ -47,6 +47,8 @@ export interface UseGPUConnectionReturn {
   isProvisioningActive: boolean;
   // Expose frame handler registration for VideoCanvas
   onBinaryFrame: (handler: ((data: Blob) => void) | null) => void;
+  // WebRTC remote video stream (null until track arrives)
+  remoteStream: MediaStream | null;
 }
 
 export function useGPUConnection(): UseGPUConnectionReturn {
@@ -67,6 +69,8 @@ export function useGPUConnection(): UseGPUConnectionReturn {
   const [cameraMode, setCameraMode] = useState<string>('chase');
 
   const wsRef = useRef<WebSocket | null>(null);
+  const pcRef = useRef<RTCPeerConnection | null>(null);
+  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollStartTimeRef = useRef<number | null>(null);
   const pingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -96,6 +100,12 @@ export function useGPUConnection(): UseGPUConnectionReturn {
   // --- WebSocket ---
   const closeWebSocket = useCallback(() => {
     clearPingInterval();
+    // Close WebRTC peer connection
+    if (pcRef.current) {
+      pcRef.current.close();
+      pcRef.current = null;
+    }
+    setRemoteStream(null);
     if (wsRef.current) {
       wsRef.current.onopen = null; wsRef.current.onclose = null;
       wsRef.current.onerror = null; wsRef.current.onmessage = null;
@@ -135,7 +145,7 @@ export function useGPUConnection(): UseGPUConnectionReturn {
         }, PING_INTERVAL);
       };
 
-      ws.onmessage = (event) => {
+      ws.onmessage = async (event) => {
         if (!isMountedRef.current) return;
 
         // Binary = JPEG frame
@@ -156,6 +166,53 @@ export function useGPUConnection(): UseGPUConnectionReturn {
           } else if (data.type === 'handshake_ack') {
             const ack = data as { models: string[] };
             setAvailableModels(ack.models || []);
+
+            // Initiate WebRTC for video streaming
+            try {
+              if (pcRef.current) { pcRef.current.close(); pcRef.current = null; }
+              const pc = new RTCPeerConnection({ iceServers: [] });
+              pcRef.current = pc;
+              pc.addTransceiver('video', { direction: 'recvonly' });
+              pc.ontrack = (e) => {
+                console.log('[v3] WebRTC track received');
+                setRemoteStream(e.streams[0]);
+              };
+              const offer = await pc.createOffer();
+              await pc.setLocalDescription(offer);
+              // Wait for ICE gathering to complete
+              await new Promise<void>((resolve) => {
+                if (pc.iceGatheringState === 'complete') { resolve(); return; }
+                const check = () => {
+                  if (pc.iceGatheringState === 'complete') {
+                    pc.removeEventListener('icegatheringstatechange', check);
+                    resolve();
+                  }
+                };
+                pc.addEventListener('icegatheringstatechange', check);
+              });
+              if (ws.readyState === WebSocket.OPEN && pc.localDescription) {
+                ws.send(JSON.stringify({
+                  type: 'webrtc_offer',
+                  sdp: pc.localDescription.sdp,
+                  sdpType: pc.localDescription.type,
+                }));
+                console.log('[v3] WebRTC offer sent');
+              }
+            } catch (err) {
+              console.warn('[v3] WebRTC setup failed, falling back to JPEG:', err);
+            }
+          } else if (data.type === 'webrtc_answer') {
+            const answer = data as { sdp: string; sdpType: RTCSdpType };
+            try {
+              if (pcRef.current) {
+                await pcRef.current.setRemoteDescription(
+                  new RTCSessionDescription({ sdp: answer.sdp, type: answer.sdpType })
+                );
+                console.log('[v3] WebRTC answer applied');
+              }
+            } catch (err) {
+              console.warn('[v3] Failed to apply WebRTC answer:', err);
+            }
           } else if (data.type === 'pong') {
             const pong = data as { timestamp: number };
             if (pong.timestamp) {
@@ -397,7 +454,7 @@ export function useGPUConnection(): UseGPUConnectionReturn {
     raceState, raceFinished, availableModels, activeModel, latencyMs, cameraMode,
     retryCount, maxRetries: MAX_RETRIES,
     startGPU, stopGPU, sendControls, sendStartRace, sendSwitchModel, sendRespawn, sendCameraMode,
-    connectDirect, clearError, onBinaryFrame,
+    connectDirect, clearError, onBinaryFrame, remoteStream,
     isConnected: connectionState === 'connected',
     isProvisioningActive: provisioningState === 'starting' || provisioningState === 'running',
   };

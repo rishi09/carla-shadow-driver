@@ -3,6 +3,7 @@ import { useGPUConnection } from '../hooks/useGPUConnection.ts';
 import { useEngineSound } from '../hooks/useEngineSound.ts';
 import { useBackgroundMusic } from '../hooks/useBackgroundMusic.ts';
 import { VideoCanvas } from '../components/VideoCanvas.tsx';
+import { WebRTCVideo } from '../components/WebRTCVideo.tsx';
 import { RaceHUD } from '../components/RaceHUD.tsx';
 import { SpeedEffects } from '../components/SpeedEffects.tsx';
 import { GPUConnectionModal } from '../components/GPUConnectionModal.tsx';
@@ -299,11 +300,18 @@ export function Race() {
           className="relative w-full h-screen"
           style={{ transform: `translate(${shakeX}px, ${shakeY}px)` }}
         >
-          {/* Video feed */}
-          <VideoCanvas
-            onBinaryFrame={gpu.onBinaryFrame}
-            className="absolute inset-0 w-full h-full object-cover"
-          />
+          {/* Video feed: prefer WebRTC, fall back to JPEG canvas */}
+          {gpu.remoteStream ? (
+            <WebRTCVideo
+              remoteStream={gpu.remoteStream}
+              className="absolute inset-0 w-full h-full object-cover"
+            />
+          ) : (
+            <VideoCanvas
+              onBinaryFrame={gpu.onBinaryFrame}
+              className="absolute inset-0 w-full h-full object-cover"
+            />
+          )}
 
           {/* Speed effects overlay (speed lines + vignette) */}
           <SpeedEffects speedKmh={gpu.raceState?.player.speed_kmh ?? 0} />
