@@ -92,6 +92,9 @@ class RaceServer:
                         active = [k for k, v in self.player_keys.items() if v]
                         race_status = self.race_state.status if self.race_state else "no_race"
                         print(f"First control received (race_status={race_status}, keys={active or 'none'})")
+                    elif self._control_msg_count % 30 == 0:
+                        active = [k for k, v in self.player_keys.items() if v]
+                        print(f"Controls #{self._control_msg_count}: {active or 'none'}")
                     # Adaptive JPEG quality based on client latency
                     latency = data.get('latency')
                     if latency is not None:
