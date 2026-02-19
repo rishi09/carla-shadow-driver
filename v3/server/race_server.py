@@ -16,7 +16,7 @@ import websockets
 from carla_manager import RaceManager
 from model_manager import ModelManager
 from frame_encoder import FrameEncoder
-from race_logic import RaceState, generate_checkpoints_from_waypoints
+from race_logic import RaceState, generate_checkpoints_from_waypoints, RaceDirector, AIMistakeGenerator
 
 
 class RaceServer:
@@ -47,6 +47,8 @@ class RaceServer:
         self._telemetry_task: Optional[asyncio.Task] = None
         self._controls_received = False  # Track if we've ever received controls
         self.difficulty: str = 'easy'  # Current difficulty: 'easy', 'medium', 'hard'
+        self.race_director: Optional[RaceDirector] = None
+        self.mistake_generator: Optional[AIMistakeGenerator] = None
 
     async def handle_client(self, websocket):
         """Handle a single WebSocket client connection."""
@@ -181,6 +183,8 @@ class RaceServer:
         self.player_keys = {'w': False, 'a': False, 's': False, 'd': False, 'space': False}
         self._controls_received = False
         self.race_state = None
+        self.race_director = None
+        self.mistake_generator = None
         self.difficulty = 'easy'
         self.frame_count = 0
         self.fps = 0.0
@@ -282,6 +286,8 @@ class RaceServer:
         self.race_state = RaceState(checkpoints, total_laps=laps)
         self.race_state.start_countdown()
         self.running = True
+        self.race_director = RaceDirector(difficulty=self.difficulty)
+        self.mistake_generator = AIMistakeGenerator(difficulty=self.difficulty)
 
         # Run the frame loop (30fps) and telemetry loop (60Hz) concurrently
         self._race_task = asyncio.create_task(self._race_loop())
@@ -344,6 +350,21 @@ class RaceServer:
                     self.race_state.update_ai(
                         ai_telem['x'], ai_telem['y'], ai_telem['speed_kmh']
                     )
+
+                    # Race Director: dynamically adjust AI speed
+                    if self.race_director and self.carla._ai_autopilot:
+                        gap = self.race_state.get_gap_seconds()
+                        progress = self.race_director.get_race_progress(self.race_state)
+                        speed_adj = self.race_director.get_speed_adjustment(gap, progress, time.time())
+                        if abs(speed_adj) > 0.5:  # Only apply if meaningful
+                            self.carla.adjust_ai_speed(speed_adj)
+
+                    # AI Mistakes: periodically slow the AI to create overtaking opportunities
+                    if self.mistake_generator and self.carla._ai_autopilot:
+                        gap = self.race_state.get_gap_seconds()
+                        mistake = self.mistake_generator.update(time.time(), gap)
+                        if mistake:
+                            self.carla.apply_ai_mistake(mistake)
 
                     # 5. Record player position for ghost replay
                     lap_time = self.race_state.get_current_lap_time("player")
@@ -500,6 +521,11 @@ class RaceServer:
         gap = self.race_state.get_gap_seconds()
         state['player']['gap_seconds'] = round(gap, 2) if gap is not None else None
         state['ai']['gap_seconds'] = round(-gap, 2) if gap is not None else None
+
+        # Race Director info
+        if self.race_director:
+            progress = self.race_director.get_race_progress(self.race_state)
+            state['race_progress'] = round(progress, 2)
 
         try:
             await self.ws_client.send(json.dumps(state))

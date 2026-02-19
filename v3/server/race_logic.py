@@ -371,6 +371,147 @@ class RaceState:
         return result
 
 
+class RaceDirector:
+    """Monitors race gap and dynamically adjusts AI speed to keep races close."""
+
+    def __init__(self, difficulty: str = 'medium'):
+        self.difficulty = difficulty
+
+        # Target gap windows in seconds (positive = player ahead)
+        self.target_gaps = {
+            'easy':   {'min': -3.0, 'max': 5.0},   # AI can be 3s behind to 5s ahead
+            'medium': {'min': -2.0, 'max': 3.0},
+            'hard':   {'min': -1.0, 'max': 2.0},
+        }
+
+        # Max speed adjustment percentage
+        self.max_adjustment = {
+            'easy': 0.15,
+            'medium': 0.10,
+            'hard': 0.05,
+        }
+
+        self._smoothed_modifier = 0.0  # Smoothed speed modifier (0 = no change)
+        self._update_interval = 2.0    # Update every 2 seconds
+        self._last_update = 0.0
+
+    def get_speed_adjustment(self, gap_seconds: float, race_progress: float, current_time: float) -> float:
+        """Returns speed difference adjustment for the AI car.
+
+        Args:
+            gap_seconds: positive = player ahead, negative = AI ahead
+            race_progress: 0.0 to 1.0
+            current_time: current time.time()
+
+        Returns:
+            Adjustment to add to the base speed_difference (e.g., +5 means 5% slower, -5 means 5% faster)
+        """
+        # Only update every _update_interval seconds for smooth changes
+        if current_time - self._last_update < self._update_interval:
+            return self._smoothed_modifier
+        self._last_update = current_time
+
+        target = dict(self.target_gaps.get(self.difficulty, self.target_gaps['medium']))
+        max_adj = self.max_adjustment.get(self.difficulty, 0.10)
+
+        # Tighten gap target in final 25% of race for drama
+        if race_progress > 0.75:
+            intensity = (race_progress - 0.75) / 0.25
+            target['min'] *= (1.0 - intensity * 0.4)
+            target['max'] *= (1.0 - intensity * 0.4)
+
+        if gap_seconds is None:
+            target_modifier = 0.0
+        elif gap_seconds > target['max']:
+            # Player too far ahead - speed up AI (make speed_difference more negative)
+            excess = gap_seconds - target['max']
+            raw = min(excess * 0.03, max_adj)  # 3% per second of excess
+            target_modifier = -raw * 100  # Convert to speed_difference scale (e.g., -10 = 10% faster)
+        elif gap_seconds < target['min']:
+            # AI too far ahead - slow down AI (make speed_difference more positive)
+            excess = target['min'] - gap_seconds
+            raw = min(excess * 0.03, max_adj)
+            target_modifier = raw * 100
+        else:
+            target_modifier = 0.0
+
+        # Smooth the adjustment
+        self._smoothed_modifier += (target_modifier - self._smoothed_modifier) * 0.1
+
+        return self._smoothed_modifier
+
+    def get_race_progress(self, race_state: 'RaceState') -> float:
+        """Calculate overall race progress (0.0 to 1.0)."""
+        total_cps = race_state.total_laps * len(race_state.checkpoints)
+        if total_cps == 0:
+            return 0.0
+        leader_progress = max(
+            race_state.player_lap * len(race_state.checkpoints) + (race_state.player_checkpoint % len(race_state.checkpoints)),
+            race_state.ai_lap * len(race_state.checkpoints) + (race_state.ai_checkpoint % len(race_state.checkpoints)),
+        )
+        return min(1.0, leader_progress / total_cps)
+
+
+class AIMistakeGenerator:
+    """Periodically introduces controlled mistakes into AI driving."""
+
+    def __init__(self, difficulty: str = 'medium'):
+        self.difficulty = difficulty
+        self._base_intervals = {
+            'easy': 8.0,
+            'medium': 25.0,
+            'hard': 50.0,
+        }
+        self._last_mistake_time = 0.0
+        self._active_mistake = None
+        self._mistake_end_time = 0.0
+
+    def update(self, current_time: float, gap_seconds: float) -> dict | None:
+        """Check if AI should make a mistake. Returns mistake dict or None.
+
+        Returns dict with keys: 'speed_reduction' (0-1 multiplier), 'steering_offset' (added to steering), 'duration' (seconds)
+        """
+        import random
+
+        # If a mistake is currently active, return it until it expires
+        if self._active_mistake and current_time < self._mistake_end_time:
+            return self._active_mistake
+        elif self._active_mistake and current_time >= self._mistake_end_time:
+            self._active_mistake = None
+
+        # Check if it's time for a new mistake
+        interval = self._base_intervals.get(self.difficulty, 25.0)
+
+        # More mistakes when AI is ahead (gives player catch-up chances)
+        if gap_seconds is not None:
+            if gap_seconds < -2.0:
+                interval *= 0.5  # Twice as frequent
+            elif gap_seconds > 3.0:
+                interval *= 2.0  # Half as frequent
+
+        # Add randomness (+-30%)
+        jittered_interval = interval * (0.7 + random.random() * 0.6)
+
+        if current_time - self._last_mistake_time < jittered_interval:
+            return None
+
+        # Generate a mistake
+        self._last_mistake_time = current_time
+
+        mistakes = [
+            {'speed_reduction': 0.6, 'steering_offset': 0.0, 'duration': 1.5, 'type': 'late_brake'},
+            {'speed_reduction': 0.8, 'steering_offset': 0.12, 'duration': 2.0, 'type': 'wide_exit'},
+            {'speed_reduction': 0.5, 'steering_offset': 0.0, 'duration': 1.0, 'type': 'hesitation'},
+            {'speed_reduction': 0.9, 'steering_offset': -0.08, 'duration': 0.8, 'type': 'overcorrect'},
+        ]
+
+        mistake = random.choice(mistakes)
+        self._active_mistake = mistake
+        self._mistake_end_time = current_time + mistake['duration']
+
+        return mistake
+
+
 def generate_checkpoints_from_waypoints(world, num_checkpoints: int = 10,
                                          radius: float = 15.0,
                                          start_location=None) -> List[Tuple[float, float, float]]:
