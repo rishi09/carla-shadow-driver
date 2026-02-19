@@ -115,6 +115,19 @@ class RaceManager:
             settings.fixed_delta_seconds = 1.0 / 30.0  # 30 FPS
             self.world.apply_settings(settings)
 
+            # Destroy any orphaned actors from previous runs
+            for actor in self.world.get_actors().filter('vehicle.*'):
+                try:
+                    actor.destroy()
+                except Exception:
+                    pass
+            for actor in self.world.get_actors().filter('sensor.*'):
+                try:
+                    actor.destroy()
+                except Exception:
+                    pass
+            time.sleep(0.5)
+
             # Get spawn points
             spawn_points = self.world.get_map().get_spawn_points()
             if len(spawn_points) < 2:
@@ -321,6 +334,12 @@ class RaceManager:
         """Convert WASD keys to vehicle control with progressive steering and ramping."""
         if not self.player_car:
             return
+
+        # Debug: log first time a key is pressed
+        if any(keys.values()) and not getattr(self, '_logged_first_key', False):
+            self._logged_first_key = True
+            active = [k for k, v in keys.items() if v]
+            print(f"[CTRL] First key press applied: {active}")
 
         dt = 1.0 / 30.0  # Approximate frame delta
 
