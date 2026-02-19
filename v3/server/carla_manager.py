@@ -363,18 +363,18 @@ class RaceManager:
 
         # --- Throttle ramping ---
         if keys.get('w', False):
-            # Ramp up over ~300ms
-            self._current_throttle = min(1.0, self._current_throttle + dt * 3.3)
+            # Ramp up fast (~150ms to full) for snappy acceleration
+            self._current_throttle = min(1.0, self._current_throttle + dt * 6.5)
         else:
-            # Decay over ~200ms
-            self._current_throttle = max(0.0, self._current_throttle - dt * 5.0)
+            # Decay quickly (~100ms) so car responds to lift-off
+            self._current_throttle = max(0.0, self._current_throttle - dt * 10.0)
 
         # --- Brake ramping ---
         if keys.get('s', False):
-            # Brake ramps faster: ~100ms
-            self._current_brake = min(1.0, self._current_brake + dt * 10.0)
+            # Near-instant brake (~60ms)
+            self._current_brake = min(1.0, self._current_brake + dt * 16.0)
         else:
-            self._current_brake = max(0.0, self._current_brake - dt * 5.0)
+            self._current_brake = max(0.0, self._current_brake - dt * 10.0)
 
         # --- Speed-sensitive steering with progressive ramping ---
         if speed_kmh < 30:
@@ -407,10 +407,11 @@ class RaceManager:
         hand_brake = keys.get('space', False)
 
         # --- Reverse if braking while slow or stopped ---
-        if keys.get('s', False) and speed_kmh < 5.0:
+        # Raise threshold so car commits to reverse once slowed down enough
+        if keys.get('s', False) and speed_kmh < 15.0:
             control = carla.VehicleControl(
                 throttle=1.0,
-                steer=max(-1.0, min(1.0, self._current_steer)),  # Same steering direction as forward
+                steer=max(-1.0, min(1.0, self._current_steer)),
                 brake=0.0,
                 hand_brake=hand_brake,
                 reverse=True
