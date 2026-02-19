@@ -13,6 +13,9 @@ from typing import Optional, Dict
 
 import websockets
 
+from aiortc import RTCPeerConnection, RTCSessionDescription, RTCRtpSender
+from webrtc_track import CarlaVideoTrack, force_codec
+
 from carla_manager import RaceManager
 from model_manager import ModelManager
 from frame_encoder import FrameEncoder
@@ -49,6 +52,8 @@ class RaceServer:
         self.difficulty: str = 'easy'  # Current difficulty: 'easy', 'medium', 'hard'
         self.race_director: Optional[RaceDirector] = None
         self.mistake_generator: Optional[AIMistakeGenerator] = None
+        self.pc: Optional[RTCPeerConnection] = None
+        self.video_track: Optional[CarlaVideoTrack] = None
 
     async def handle_client(self, websocket):
         """Handle a single WebSocket client connection."""
@@ -137,6 +142,9 @@ class RaceServer:
                         'mode': self.carla._camera_mode,
                     }))
 
+                elif msg_type == 'webrtc_offer':
+                    await self._handle_webrtc_offer(websocket, data)
+
         except websockets.exceptions.ConnectionClosed:
             print("Client disconnected")
         finally:
@@ -145,6 +153,44 @@ class RaceServer:
             await self._reset_race()
             self.ws_client = None
             print("Client disconnected, waiting for reconnect...")
+
+    async def _handle_webrtc_offer(self, websocket, data):
+        """Handle a WebRTC offer from the client: create peer connection, add video track, send answer."""
+        # Close any existing peer connection
+        if self.pc is not None:
+            await self.pc.close()
+            self.pc = None
+            self.video_track = None
+
+        self.pc = RTCPeerConnection()
+        self.video_track = CarlaVideoTrack(self.carla)
+
+        # Log connection state changes
+        @self.pc.on("connectionstatechange")
+        async def on_connectionstatechange():
+            state = self.pc.connectionState
+            print(f"WebRTC connection state: {state}")
+            if state in ("failed", "closed"):
+                await self.pc.close()
+                self.pc = None
+                self.video_track = None
+
+        # Add video track and force H.264
+        sender = self.pc.addTrack(self.video_track)
+        force_codec(self.pc, sender, forced_codec="video/H264")
+
+        # Set remote offer and create answer
+        offer = RTCSessionDescription(sdp=data["sdp"], type=data["sdpType"])
+        await self.pc.setRemoteDescription(offer)
+        answer = await self.pc.createAnswer()
+        await self.pc.setLocalDescription(answer)
+
+        await websocket.send(json.dumps({
+            "type": "webrtc_answer",
+            "sdp": self.pc.localDescription.sdp,
+            "sdpType": self.pc.localDescription.type,
+        }))
+        print("WebRTC answer sent — video track active")
 
     async def _switch_model(self, model_name: str):
         """Switch the AI driving model."""
@@ -194,6 +240,13 @@ class RaceServer:
         self.fps = 0.0
         self._fps_count = 0
         self._fps_timer = time.time()
+
+        # Close WebRTC peer connection
+        if self.pc is not None:
+            await self.pc.close()
+            self.pc = None
+            self.video_track = None
+            print("WebRTC peer connection closed")
 
         print("Race reset (actors preserved for reconnect)")
 
@@ -444,8 +497,13 @@ class RaceServer:
         print("Race loop ended")
 
     async def _send_frame(self):
-        """Encode and send chase camera frame as binary WebSocket message."""
+        """Encode and send chase camera frame as binary WebSocket message.
+        Skipped when WebRTC is active (video flows via the RTP track instead)."""
         if not self.ws_client:
+            return
+
+        # When WebRTC is streaming video, skip JPEG-over-WebSocket
+        if self.pc is not None:
             return
 
         frame = self.carla.get_chase_frame()
