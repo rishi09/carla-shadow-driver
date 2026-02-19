@@ -24,6 +24,7 @@ export function Race() {
   const [view, setView] = useState<RaceView>(isDemo || directWsUrl ? 'pre_race' : 'setup');
   const [showRespawning, setShowRespawning] = useState(false);
   const keysRef = useRef<KeyState>({ w: false, a: false, s: false, d: false, space: false });
+  const [debugKeys, setDebugKeys] = useState<KeyState>({ w: false, a: false, s: false, d: false, space: false });
   const keyIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const respawnTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cameraIndexRef = useRef(0);
@@ -166,6 +167,7 @@ export function Race() {
 
     const handleKeyDown = (e: KeyboardEvent) => {
       const key = e.key.toLowerCase();
+      console.log('[KEYS] keydown:', key);
       if (key === 'r') {
         gpu.sendRespawn();
         setShowRespawning(true);
@@ -184,6 +186,7 @@ export function Race() {
       } else if (key in keysRef.current) {
         keysRef.current = { ...keysRef.current, [key]: true };
       }
+      setDebugKeys({ ...keysRef.current });
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
@@ -193,6 +196,7 @@ export function Race() {
       } else if (key in keysRef.current) {
         keysRef.current = { ...keysRef.current, [key]: false };
       }
+      setDebugKeys({ ...keysRef.current });
     };
 
     window.addEventListener('keydown', handleKeyDown);
@@ -389,6 +393,18 @@ export function Race() {
 
           {/* Controls hint: appears briefly when race starts after countdown */}
           <ControlsHint visible={showControlsHint} />
+
+          {/* Debug: key state indicator */}
+          <div className="absolute top-4 right-4 z-50 bg-black/80 rounded-lg px-3 py-2 font-mono text-xs flex gap-1">
+            {(['w', 'a', 's', 'd'] as const).map(k => (
+              <span key={k} className={`px-2 py-1 rounded border ${debugKeys[k] ? 'bg-green-500 border-green-400 text-black font-bold' : 'bg-black/60 border-white/20 text-white/30'}`}>
+                {k.toUpperCase()}
+              </span>
+            ))}
+            <span className={`px-2 py-1 rounded border ${debugKeys.space ? 'bg-green-500 border-green-400 text-black font-bold' : 'bg-black/60 border-white/20 text-white/30'}`}>
+              SPC
+            </span>
+          </div>
         </div>
       )}
 

@@ -95,6 +95,9 @@ class RaceServer:
                     elif active and self._control_msg_count % 30 == 0:
                         # Log active keys every ~1 second when keys are pressed
                         print(f"Controls #{self._control_msg_count}: keys={active}")
+                    elif self._control_msg_count % 90 == 0:
+                        # Log every ~3 seconds even when no keys pressed
+                        print(f"Controls #{self._control_msg_count}: keys=none (raw={data.get('keys', {})})")
                     # Adaptive JPEG quality based on client latency
                     latency = data.get('latency')
                     if latency is not None:

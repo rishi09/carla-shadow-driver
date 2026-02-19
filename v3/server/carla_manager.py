@@ -333,6 +333,7 @@ class RaceManager:
     def apply_player_control(self, keys: Dict[str, bool]):
         """Convert WASD keys to vehicle control with progressive steering and ramping."""
         if not self.player_car:
+            print("[CTRL] WARNING: player_car is None!")
             return
 
         # Debug: log first time a key is pressed
@@ -402,6 +403,11 @@ class RaceManager:
             hand_brake=hand_brake,
         )
         self.player_car.apply_control(control)
+
+        # Debug: log applied control periodically when throttle is non-zero
+        self._ctrl_log_count = getattr(self, '_ctrl_log_count', 0) + 1
+        if self._current_throttle > 0.01 and self._ctrl_log_count % 30 == 0:
+            print(f"[CTRL] throttle={self._current_throttle:.2f} steer={self._current_steer:.2f} brake={self._current_brake:.2f} speed={speed_kmh:.1f} car_id={self.player_car.id}")
 
     def enable_ai_autopilot(self, difficulty: str = 'medium'):
         """Enable CARLA's built-in autopilot for the AI car.
