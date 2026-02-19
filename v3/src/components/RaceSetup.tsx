@@ -7,13 +7,13 @@ interface TrackOption {
 }
 
 const TRACKS: TrackOption[] = [
-  { id: 'Town07', name: 'Town07', description: 'Rural highway loop - open roads, easy to follow (Recommended)' },
+  { id: 'Town03', name: 'Town03', description: 'Mixed town - suburban streets and highway (Recommended)' },
   { id: 'Town04', name: 'Town04', description: 'Highway circuit - long straights with a small town section' },
   { id: 'Town01', name: 'Town01', description: 'Small town - river crossings, bridges, moderate intersections' },
   { id: 'Town05', name: 'Town05', description: 'Urban grid - wide multilane roads, many intersections' },
-  { id: 'Town03', name: 'Town03', description: 'Mixed town - suburban streets and highway, complex intersections' },
   { id: 'Town02', name: 'Town02', description: 'Residential - narrow winding streets, tight corners (Hard)' },
   { id: 'Town10HD', name: 'Town10HD', description: 'Downtown city - dense skyscraper blocks, tight turns (Hard)' },
+  { id: 'Town07', name: 'Town07', description: 'Rural highway loop - requires additional CARLA maps package' },
 ];
 
 interface WeatherOption {
@@ -53,7 +53,7 @@ interface RaceSetupProps {
 }
 
 export function RaceSetup({ onStartRace, onBack }: RaceSetupProps) {
-  const [selectedTrack, setSelectedTrack] = useState('Town07');
+  const [selectedTrack, setSelectedTrack] = useState('Town03');
   const [selectedWeather, setSelectedWeather] = useState('clear');
   const [selectedLaps, setSelectedLaps] = useState(3);
   const [selectedModel, setSelectedModel] = useState('carla_pilotnet');
