@@ -87,17 +87,11 @@ class RaceServer:
                     }
                     # Debug logging for controls
                     self._control_msg_count = getattr(self, '_control_msg_count', 0) + 1
-                    active = [k for k, v in self.player_keys.items() if v]
                     if not self._controls_received:
                         self._controls_received = True
+                        active = [k for k, v in self.player_keys.items() if v]
                         race_status = self.race_state.status if self.race_state else "no_race"
                         print(f"First control received (race_status={race_status}, keys={active or 'none'})")
-                    elif active and self._control_msg_count % 30 == 0:
-                        # Log active keys every ~1 second when keys are pressed
-                        print(f"Controls #{self._control_msg_count}: keys={active}")
-                    elif self._control_msg_count % 90 == 0:
-                        # Log every ~3 seconds even when no keys pressed
-                        print(f"Controls #{self._control_msg_count}: keys=none (raw={data.get('keys', {})})")
                     # Adaptive JPEG quality based on client latency
                     latency = data.get('latency')
                     if latency is not None:

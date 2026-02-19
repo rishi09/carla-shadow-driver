@@ -185,9 +185,26 @@ class RaceManager:
             # Attach collision sensor to player car
             self._collision_sensor = self._attach_collision_sensor(self.player_car)
 
-            # Tick once to initialize cameras
+            # Tick several times to initialize cameras and let physics settle
+            # CARLA needs multiple ticks after spawning for vehicle physics to activate
+            for _ in range(10):
+                self.world.tick()
+            time.sleep(0.3)
+
+            # Verify physics: apply brief throttle and check velocity
+            test_control = carla.VehicleControl(throttle=0.5, steer=0.0, brake=0.0)
+            self.player_car.apply_control(test_control)
             self.world.tick()
-            time.sleep(0.5)
+            vel = self.player_car.get_velocity()
+            speed = 3.6 * math.sqrt(vel.x**2 + vel.y**2 + vel.z**2)
+            print(f"Physics check: speed={speed:.1f} km/h after test throttle")
+
+            # Reset: stop the car and clear controls
+            self.player_car.apply_control(carla.VehicleControl(throttle=0.0, brake=1.0))
+            self.world.tick()
+            self.player_car.apply_control(carla.VehicleControl(throttle=0.0, brake=0.0))
+            self.player_car.set_target_velocity(carla.Vector3D(0, 0, 0))
+            self.world.tick()
 
             print("Race setup complete: 2 cars + 2 cameras")
             return True
@@ -403,11 +420,6 @@ class RaceManager:
             hand_brake=hand_brake,
         )
         self.player_car.apply_control(control)
-
-        # Debug: log applied control periodically when throttle is non-zero
-        self._ctrl_log_count = getattr(self, '_ctrl_log_count', 0) + 1
-        if self._current_throttle > 0.01 and self._ctrl_log_count % 30 == 0:
-            print(f"[CTRL] throttle={self._current_throttle:.2f} steer={self._current_steer:.2f} brake={self._current_brake:.2f} speed={speed_kmh:.1f} car_id={self.player_car.id}")
 
     def enable_ai_autopilot(self, difficulty: str = 'medium'):
         """Enable CARLA's built-in autopilot for the AI car.
