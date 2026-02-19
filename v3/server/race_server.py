@@ -320,6 +320,12 @@ class RaceServer:
                     await self._send_frame()
 
                 elif self.race_state.status == "racing":
+                    # Yield to let the message handler update player_keys
+                    # world.tick() blocks the event loop for ~30ms, starving
+                    # the message handler coroutine. This sleep(0) gives it
+                    # a chance to process queued WebSocket messages.
+                    await asyncio.sleep(0)
+
                     # 1. Apply player controls
                     self.carla.apply_player_control(self.player_keys)
 
@@ -341,8 +347,11 @@ class RaceServer:
                                 print(f"Neural net inference error: {e}")
                     # For easy/hard, CARLA autopilot handles AI control automatically
 
-                    # 3. Tick CARLA
+                    # 3. Tick CARLA (blocking call ~30ms)
                     self.carla.tick()
+
+                    # Yield again after tick to process any queued messages
+                    await asyncio.sleep(0)
 
                     # 4. Update race state with vehicle positions
                     player_telem = self.carla.get_telemetry(self.carla.player_car)
