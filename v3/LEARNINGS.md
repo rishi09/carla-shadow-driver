@@ -410,3 +410,80 @@ Format: `## [timestamp] Category: Short description`
 - **Rule**: Never call `apply_physics_control()` every frame. It's designed for one-time setup, not real-time animation. Use state-transition detection (edge trigger) to call it only when the physical model actually needs to change.
 
 ---
+
+## [2026-02-19] Frame pipeline optimization: adaptive quality, delta detection, speed scaling, perf monitoring
+
+### Adaptive JPEG quality (latency-driven, asymmetric stepping)
+- **Rewritten**: `frame_encoder.py` `adapt_quality()` now uses four explicit latency tiers with asymmetric step sizes. Quality drops fast (step=8 per call) to react immediately to lag spikes, but rises slowly (step=2 per call) to prevent oscillation at threshold boundaries.
+- **Tiers**: >150ms -> q25 + 960x540 (emergency), 80-150ms -> q40 + 1280x720, 50-80ms -> q60, <50ms -> q75 (best). MAX_QUALITY raised from 70 to 75 for better image quality on excellent connections.
+- **Resolution changes**: Resolution drops are immediate (latency spikes need instant relief), but resolution increases wait until quality has stabilized near its target (prevents premature resolution jump while quality is still climbing).
+- **Latency source**: Client piggybacks measured RTT on every control message (`{ type: 'control', keys: {...}, latency: <ms> }`). Also supported via dedicated `latency_report` message type.
+- **Rule**: Asymmetric step sizes are essential for stable adaptive systems. If up and down steps are equal, the system oscillates at threshold boundaries as each adjustment pushes the metric across the threshold and triggers the opposite adjustment.
+
+### Frame delta detection (block-mean perceptual hash)
+- **Implemented**: `FrameEncoder.is_frame_similar()` computes a fast perceptual hash by converting the frame to grayscale (luminance weights 0.299R + 0.587G + 0.114B), reshaping into an 8x8 grid of blocks, and computing the mean luminance of each block. The mean absolute difference between the current and previous hash is compared against a threshold (3.0 on a 0-255 scale).
+- **Performance**: Runs in <0.5ms on a 1280x720 frame because all operations are vectorized numpy (no loops). The hash is 64 float32 values = 256 bytes, trivial memory.
+- **Integration with position-based skip**: Position-based skip (speed <2 km/h + position delta <0.1m + yaw delta <0.5deg) fires first and skips silently (no message sent). Frame delta detection fires second, after the position check passes but before encoding, and sends a lightweight `{ type: 'no_change' }` JSON message to keep the connection alive.
+- **Why not pixel-exact**: Pixel-exact comparison would flag every frame as different because CARLA renders with floating-point precision and camera sensors have slight noise. The block-mean hash is robust to per-pixel jitter while still detecting meaningful scene changes.
+- **Frontend handling**: The `no_change` message is received but ignored -- the VideoCanvas simply keeps displaying the last rendered frame. No action needed.
+- **Rule**: For frame similarity detection, always use a perceptual hash (block means, average hash, pHash) rather than pixel-exact comparison. Renderer noise makes pixel-exact comparison useless for "is the scene the same?" detection.
+
+### Speed-based resolution scaling
+- **Implemented**: `FrameEncoder.update_speed_resolution()` drops render resolution from 1280x720 to 960x540 when player speed exceeds 200 km/h, and restores it when speed drops below 150 km/h.
+- **Hysteresis gap**: The 50 km/h gap between the downscale threshold (200) and restore threshold (150) prevents flapping when speed oscillates around a single threshold. Without hysteresis, a player hovering at 200 km/h would trigger resolution changes every frame.
+- **Interaction with latency-based resolution**: Speed-based downscaling overrides latency-based resolution. When speed drops back below 150 km/h, the resolution returns to whatever the latency adaptation has set (not necessarily 1280x720 -- if latency is >150ms, it stays at 960x540).
+- **Rule**: Always use hysteresis for threshold-based state transitions in real-time systems. The gap should be large enough that normal oscillation around the operating point doesn't cross both thresholds.
+
+### Performance monitoring (rolling averages + auto-reduction)
+- **Rolling averages**: `FrameEncoder` now tracks the last 30 encode times and frame sizes using `collections.deque(maxlen=30)`. The encoder itself (not the race server) owns this data, which simplifies the server code.
+- **Auto-reduction**: If the rolling average encode time exceeds 15ms (at 30fps, encoding should take <10ms to leave headroom), quality is automatically reduced by 5 points down to MIN_QUALITY. This provides a safety net for GPU instances where JPEG encoding competes with CARLA rendering for CPU time.
+- **perf_stats message**: A new `perf_stats` message type is sent to the client every 3 seconds containing: avg_encode_ms, avg_frame_size_kb, quality, resolution, speed_downscaled flag, auto_reduced flag, samples count, fps, and frames_sent. The frontend logs this to console for debugging. Future: display in a debug overlay.
+- **Server log format**: Enhanced from `encode=X.Xms, avg_encode=X.Xms, size=XKB, fps=X.X, quality=XX, skipped=X` to include resolution, separate position-skip and delta-skip counts, and an `[AUTO-REDUCED]` flag when the encoder has auto-reduced quality.
+- **Rule**: Move performance tracking into the component that owns the data (the encoder, not the server). This follows the single-responsibility principle and prevents the server from needing to maintain parallel tracking state.
+
+---
+
+## [2026-02-19] FTUE: Enhanced countdown, post-race flow, HUD fade-in
+
+### Enhanced Countdown (CountdownOverlay in RaceHUD.tsx)
+- **Slam-in animation**: Numbers use `countdown-slam` keyframes: start at scale(2.5) opacity 0, slam down to scale(0.9), bounce to scale(1.05), settle at scale(1.0). The `cubic-bezier(0.34, 1.56, 0.64, 1)` easing creates an elastic overshoot feel.
+- **GO! explode animation**: "GO!" uses a separate `go-text` keyframe that starts at scale(0.5) and punches up to scale(1.1) before settling. Behind it, a `go-flash` keyframe fires a bright green radial gradient that scales from 0.3 to 2.5 and fades to transparent, creating a flash-burst effect.
+- **Screen shake on GO**: When countdown reaches 0, `triggerScreenShake(6, 250)` fires a 6px magnitude shake over 250ms using the existing RAF-based shake system. A `goShakeTriggeredRef` prevents double-firing.
+- **Radial gradient flash**: Each number gets a radial gradient circle (400px diameter for numbers, 600px for GO) with the countdown color at 30% opacity center, fading to transparent. Uses `flash-burst` / `go-flash` keyframes.
+- **Traffic light dots**: Enlarged from w-5 to w-7, with a `traffic-light-pulse` animation that scales 1.0 -> 1.3 -> 1.0 when each dot activates.
+- **Font size**: Numbers are `clamp(10rem, 25vw, 16rem)` (responsive), GO is `clamp(8rem, 20vw, 14rem)`. `font-black` weight with multiple `text-shadow` layers for glow.
+- **Rev hint**: "Hold W to rev" text shown with `animate-pulse` below the countdown numbers.
+- **Rule**: Use CSS `clamp()` for responsive text sizing in full-screen overlays. Fixed `text-9xl` can be too small on large screens or overflow on mobile. Clamp provides a fluid range with min/max bounds.
+- **Rule**: Always use a ref (`goShakeTriggeredRef`) to prevent one-shot effects from double-firing when React re-renders the effect due to related state changes.
+
+### Engine Rev During Countdown (Race.tsx)
+- **Approach**: During countdown, the keyboard handler only accepts the W key and sets `countdownRevRef.current = true/false`. The engine sound update loop (RAF) checks the race status: during countdown, it calls `engineSound.update(revRpm, revThrottle, 0, 0)` with synthetic values (RPM 4000, throttle 0.8 when W held, idle otherwise). No control messages are sent to the server during countdown.
+- **Key detail**: Other keys (A, S, D, Space, R, C) are blocked during countdown via an early return. Only W is processed. The W key state is tracked in a ref (`countdownRevRef`), not in the `keysRef` that gets sent to the server, so the car never receives throttle during countdown.
+- **Rule**: For countdown rev effects, reuse the existing oscillator-based engine sound by feeding it synthetic RPM/throttle values. Do not create separate audio nodes -- this avoids audio context management complexity and ensures the rev sound uses the same harmonics/filters as the actual engine.
+
+### Camera Zoom Animation (Race.tsx)
+- **During countdown**: The video feed wrapper gets `transform: scale(0.95) translateY(-10px)` with a 1.0s ease-out transition, creating a slightly pulled-back, aerial view.
+- **On GO**: Transitions to `scale(1.0) translateY(0px)` with a 0.5s elastic easing (`cubic-bezier(0.34, 1.56, 0.64, 1)`), creating a satisfying snap-in as the race begins.
+- **Interaction with speed FOV**: During countdown, the countdown zoom style takes priority. Once racing, the existing speed-based FOV scale (`1.0 + speed/150 * 0.05`) and steering prediction transforms take over.
+- **Rule**: When composing multiple CSS transform sources (countdown zoom, speed FOV, steering prediction), use a conditional that picks the active transform source rather than trying to compose all of them simultaneously. The countdown zoom and the speed FOV occupy the same `transform` property, so they must be mutually exclusive.
+
+### HUD Fade-in on Race Start (RaceHUD.tsx)
+- **Approach**: During countdown, all HUD elements (position bar, progress bar, checkpoint arrow, speedometer, lap timer, FPS/latency) get `opacity: 0` via a shared CSS class. When `race_status` transitions from `countdown` to `racing`, a state flag (`hudVisible`) flips to true.
+- **Staggered timing**: Each HUD element has a different `transitionDelay` (0ms for top bar, 100ms for progress bar, 150ms for checkpoint arrow, 200ms for speedometer, 300ms for lap timer, 350ms for FPS/latency). Combined with `transition: opacity 500ms ease-out`, this creates a staggered reveal cascade.
+- **Reconnect handling**: If the race status is already `racing` when the component mounts (e.g., reconnecting mid-race), `hudVisible` is set to true immediately without waiting for a countdown->racing transition.
+- **Rule**: For staggered CSS transitions, use inline `style={{ transitionDelay: '...' }}` rather than dynamic Tailwind classes. Tailwind does not generate arbitrary delay classes by default, and using `style` gives precise control.
+- **Rule**: Track the previous race status in a ref to detect specific transitions (countdown -> racing). React's `useEffect` fires on any change to the dependency, so without a ref-based previous value check, you cannot distinguish "just entered racing from countdown" from "re-rendered while racing."
+
+### Post-Race Results Enhancement (RaceResults.tsx)
+- **Victory/defeat**: "VICTORY" in green with a `victory-glow` animation (text-shadow pulsing), "DEFEATED" in red with a `defeat-pulse` animation. A `banner-slam` keyframe (scale 0.3 -> 1.1 -> 0.95 -> 1.0) gives the header a dramatic entrance.
+- **Particle burst**: On victory, 30 colored particles (green/gold palette) burst from center using CSS custom properties (`--px`, `--py`) and a `particle-burst` keyframe. Each particle has random offset, size, duration, and delay for organic feel.
+- **Staggered reveal**: 10 reveal steps at 150ms intervals. Each stat section uses a `revealStyle(step)` helper that returns `{ opacity, transform, transition }` based on whether the current `revealStep` has reached that step. Sections slide up from `translateY(20px)` to `0` with `opacity 0 -> 1`.
+- **Extended stats**: Best lap, worst lap (only shown when >1 lap), top speed, average speed (computed from distance/time * 3.6), distance, collisions. Per-stat winner highlighting: the faster/higher value gets `text-green-400 font-bold`.
+- **Time difference callout**: A pill badge showing the margin of victory/defeat (e.g., "-2.3s ahead" in green, "+1.5s behind" in red).
+- **Instant Race Again**: "Race Again" button calls `onInstantReplay` which uses saved `lastRaceSettingsRef` to restart with identical settings. Enter key shortcut on results screen.
+- **Share button**: Builds a URL with track, laps, weather, and model as query parameters, copies to clipboard via `navigator.clipboard.writeText()`.
+- **Keyboard shortcut**: Enter key on results screen triggers instant replay via a dedicated `useEffect` listener.
+- **Rule**: For staggered reveal animations, use a single incrementing counter (revealStep) with setTimeout rather than individual timers per element. This keeps the timing logic centralized and makes it easy to adjust the cascade speed.
+- **Rule**: CSS custom properties (`--px`, `--py`) in animation keyframes enable per-element variation in a shared `@keyframes` rule. Without custom properties, you would need unique keyframes per particle, which scales poorly.
+
+---

@@ -7,11 +7,13 @@ import json
 import time
 import signal
 import sys
+import os
 import yaml
 import numpy as np
-from typing import Optional, Dict
+from typing import Optional, Dict, Set
 
 import websockets
+import aiohttp
 
 from aiortc import RTCPeerConnection, RTCSessionDescription, RTCRtpSender
 from webrtc_track import CarlaVideoTrack, force_codec
@@ -21,6 +23,135 @@ from model_manager import ModelManager
 from frame_encoder import FrameEncoder
 from race_logic import RaceState, generate_checkpoints_from_waypoints, RaceDirector, AIMistakeGenerator
 from weather_transitions import WeatherTransitionManager
+
+
+# ---------------------------------------------------------------------------
+# Auto-shutdown: destroy Vast.ai instance after 10 min with no connections
+# ---------------------------------------------------------------------------
+
+IDLE_TIMEOUT_SECONDS = 10 * 60  # 10 minutes
+IDLE_LOG_INTERVAL = 60          # Log countdown every 60 seconds
+
+class AutoShutdownManager:
+    """Tracks WebSocket connections and destroys the Vast.ai instance after
+    a configurable idle period with zero connected clients."""
+
+    def __init__(self):
+        self.connected_clients: Set[websockets.WebSocketServerProtocol] = set()
+        self._idle_task: Optional[asyncio.Task] = None
+        self._shutdown_in_progress = False
+
+        # Resolve Vast.ai instance ID from environment
+        container_label = os.environ.get("VAST_CONTAINERLABEL", "")  # "C.{id}"
+        if container_label.startswith("C."):
+            self.instance_id = container_label[2:]
+        else:
+            self.instance_id = os.environ.get("INSTANCE_ID", "")
+
+        self.api_key = os.environ.get("VASTAI_API_KEY", "")
+
+        if self.instance_id:
+            print(f"[auto-shutdown] Vast.ai instance ID: {self.instance_id}")
+        else:
+            print("[auto-shutdown] WARNING: No instance ID found (VAST_CONTAINERLABEL / INSTANCE_ID). "
+                  "Auto-shutdown will only terminate the process, not the instance.")
+
+        if not self.api_key:
+            print("[auto-shutdown] WARNING: VASTAI_API_KEY not set. "
+                  "Auto-shutdown will only terminate the process, not the instance.")
+
+    def client_connected(self, ws: websockets.WebSocketServerProtocol):
+        """Register a new client connection and cancel any pending shutdown."""
+        self.connected_clients.add(ws)
+        count = len(self.connected_clients)
+        print(f"[auto-shutdown] Client connected. Active connections: {count}")
+
+        # Cancel the idle timer if one is running
+        if self._idle_task and not self._idle_task.done():
+            self._idle_task.cancel()
+            self._idle_task = None
+            print("[auto-shutdown] Idle shutdown timer cancelled (client connected)")
+
+    def client_disconnected(self, ws: websockets.WebSocketServerProtocol):
+        """Unregister a client and start the idle timer if no clients remain."""
+        self.connected_clients.discard(ws)
+        count = len(self.connected_clients)
+        print(f"[auto-shutdown] Client disconnected. Active connections: {count}")
+
+        if count == 0 and not self._shutdown_in_progress:
+            print(f"[auto-shutdown] No connections. Starting {IDLE_TIMEOUT_SECONDS // 60}-minute shutdown timer...")
+            self._idle_task = asyncio.create_task(self._idle_countdown())
+
+    async def _idle_countdown(self):
+        """Wait for the idle timeout, logging progress each minute."""
+        remaining = IDLE_TIMEOUT_SECONDS
+        try:
+            while remaining > 0:
+                minutes_left = remaining // 60
+                seconds_left = remaining % 60
+                if seconds_left == 0:
+                    print(f"[auto-shutdown] Auto-shutdown in {minutes_left} minute{'s' if minutes_left != 1 else ''} (no connections)")
+                await asyncio.sleep(IDLE_LOG_INTERVAL)
+                remaining -= IDLE_LOG_INTERVAL
+
+            # Timer expired — destroy the instance
+            await self._destroy_instance()
+
+        except asyncio.CancelledError:
+            # Timer was cancelled because a client reconnected
+            pass
+
+    async def _destroy_instance(self):
+        """Notify remaining clients and destroy the Vast.ai GPU instance."""
+        self._shutdown_in_progress = True
+        print("[auto-shutdown] No connections for 10 minutes, destroying instance")
+
+        # Send shutdown warning to any clients that may have connected in the last moment
+        shutdown_msg = json.dumps({
+            "type": "server_shutdown",
+            "reason": "idle_timeout",
+            "message": "Server shutting down due to inactivity",
+        })
+        for ws in list(self.connected_clients):
+            try:
+                await ws.send(shutdown_msg)
+                await ws.close()
+            except Exception:
+                pass
+
+        # Attempt to destroy the Vast.ai instance via API
+        if self.instance_id and self.api_key:
+            api_base = "https://console.vast.ai/api/v0"
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            }
+
+            try:
+                async with aiohttp.ClientSession() as session:
+                    # First try: PUT state=stopped
+                    stop_url = f"{api_base}/instances/{self.instance_id}/"
+                    print(f"[auto-shutdown] Sending stop request: PUT {stop_url}")
+                    async with session.put(stop_url, headers=headers,
+                                           json={"state": "stopped"}) as resp:
+                        body = await resp.text()
+                        print(f"[auto-shutdown] Stop response: {resp.status} {body[:200]}")
+
+                    # Also try: DELETE to fully destroy
+                    destroy_url = f"{api_base}/instances/{self.instance_id}/"
+                    print(f"[auto-shutdown] Sending destroy request: DELETE {destroy_url}")
+                    async with session.delete(destroy_url, headers=headers) as resp:
+                        body = await resp.text()
+                        print(f"[auto-shutdown] Destroy response: {resp.status} {body[:200]}")
+
+            except Exception as e:
+                print(f"[auto-shutdown] API error: {e}")
+        else:
+            print("[auto-shutdown] No instance ID or API key — cannot call Vast.ai API")
+
+        # Forcefully exit the process as a fallback
+        print("[auto-shutdown] Exiting process...")
+        sys.exit(0)
 
 
 class RaceServer:
@@ -57,6 +188,9 @@ class RaceServer:
         self.pc: Optional[RTCPeerConnection] = None
         self.video_track: Optional[CarlaVideoTrack] = None
 
+        # Auto-shutdown manager (shared across all client connections)
+        self.shutdown_manager = AutoShutdownManager()
+
         # --- Frame skip state (stationary camera optimization) ---
         self._last_sent_x: Optional[float] = None
         self._last_sent_y: Optional[float] = None
@@ -68,6 +202,9 @@ class RaceServer:
     async def handle_client(self, websocket):
         """Handle a single WebSocket client connection."""
         print(f"Client connected: {websocket.remote_address}")
+
+        # Track connection for auto-shutdown
+        self.shutdown_manager.client_connected(websocket)
 
         # If there's an existing race running, stop it gracefully before accepting new client
         if self.running or self._race_task or self._telemetry_task:

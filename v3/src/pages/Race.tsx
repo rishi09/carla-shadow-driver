@@ -3,12 +3,15 @@ import { useGPUConnection } from '../hooks/useGPUConnection.ts';
 import { useEngineSound } from '../hooks/useEngineSound.ts';
 import { useBackgroundMusic } from '../hooks/useBackgroundMusic.ts';
 import { useSteeringPrediction } from '../hooks/useSteeringPrediction.ts';
+import { useLeaderboard } from '../hooks/useLeaderboard.ts';
 import { VideoCanvas } from '../components/VideoCanvas.tsx';
 import { WebRTCVideo } from '../components/WebRTCVideo.tsx';
 import { RaceHUD } from '../components/RaceHUD.tsx';
 import { SpeedEffects } from '../components/SpeedEffects.tsx';
 import { SpeedLines } from '../components/SpeedLines.tsx';
 import { ParticleOverlay } from '../components/ParticleOverlay.tsx';
+import { DriftOverlay } from '../components/DriftOverlay.tsx';
+import { CommentaryOverlay } from '../components/CommentaryOverlay.tsx';
 import { GPUConnectionModal } from '../components/GPUConnectionModal.tsx';
 import { RaceResults } from '../components/RaceResults.tsx';
 import { RaceSetup } from '../components/RaceSetup.tsx';
@@ -40,7 +43,11 @@ export function Race() {
   const gpu = useGPUConnection();
   const engineSound = useEngineSound();
   const bgMusic = useBackgroundMusic();
+  const leaderboard = useLeaderboard();
   const steeringPrediction = useSteeringPrediction(keysRef, view === 'racing', gpu.raceState?.player?.speed_kmh ?? 0);
+
+  // Track race config for leaderboard saving
+  const raceConfigRef = useRef<{ track: string; laps: number; model: string; playerCar: string } | null>(null);
 
   // Track previous race_status for countdown detection
   const prevRaceStatusRef = useRef<string | null>(null);
@@ -281,6 +288,24 @@ export function Race() {
   useEffect(() => {
     if (gpu.raceFinished) {
       setView('results');
+
+      // Save to leaderboard
+      if (raceConfigRef.current && gpu.raceFinished.player_time != null) {
+        const config = raceConfigRef.current;
+        const bestLap = gpu.raceFinished.player_laps.length > 0
+          ? Math.min(...gpu.raceFinished.player_laps)
+          : gpu.raceFinished.player_time;
+        leaderboard.addResult({
+          track: config.track,
+          laps: config.laps,
+          time: gpu.raceFinished.player_time,
+          bestLap,
+          maxSpeed: gpu.raceFinished.player_max_speed ?? 0,
+          driftScore: gpu.raceFinished.total_drift_score ?? 0,
+          difficulty: config.model,
+          playerCar: config.playerCar,
+        });
+      }
     }
   }, [gpu.raceFinished]);
 
@@ -334,6 +359,13 @@ export function Race() {
   const handleStartRace = useCallback((track: string, laps: number, weather: string, model?: string, playerCar?: string) => {
     // Save settings for instant replay
     lastRaceSettingsRef.current = { track, laps, weather, model, playerCar };
+    // Save config for leaderboard
+    raceConfigRef.current = {
+      track,
+      laps,
+      model: model ?? 'carla_pilotnet',
+      playerCar: playerCar ?? 'vehicle.tesla.model3',
+    };
     setView('racing');
     setRaceWeather(weather);
     if (isDemo || directWsUrl) {
@@ -458,6 +490,15 @@ export function Race() {
 
           {/* HUD overlay */}
           <RaceHUD raceState={gpu.raceState} latencyMs={gpu.latencyMs} />
+
+          {/* Drift score overlay */}
+          <DriftOverlay
+            drift={gpu.raceState?.drift}
+            totalDriftScore={gpu.raceState?.total_drift_score}
+          />
+
+          {/* AI race commentary */}
+          <CommentaryOverlay messages={gpu.commentary} />
 
           {/* Exit button */}
           <button

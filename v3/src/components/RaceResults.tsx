@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { RaceFinished } from '../types/index.ts';
+import type { PersonalBestResult } from '../hooks/usePersonalBests.ts';
 import { RacingLineViz } from './RacingLineViz.tsx';
 
 interface RaceResultsProps {
@@ -16,9 +17,17 @@ interface RaceResultsProps {
   };
   /** Instant race again: same settings, skip setup */
   onInstantReplay?: () => void;
+  /** Personal best result info */
+  personalBestResult?: PersonalBestResult | null;
 }
 
-export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onInstantReplay }: RaceResultsProps) {
+const MEDAL_ICONS: Record<string, string> = {
+  gold: '\uD83E\uDD47',
+  silver: '\uD83E\uDD48',
+  bronze: '\uD83E\uDD49',
+};
+
+export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onInstantReplay, personalBestResult }: RaceResultsProps) {
   const playerWon = result.winner === 'player';
 
   // Staggered reveal animation state
@@ -245,6 +254,29 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
                   {result.player_collisions}
                 </div>
                 <div className="text-white/30">--</div>
+              </div>
+            )}
+
+            {/* Drift Score */}
+            {result.total_drift_score != null && result.total_drift_score > 0 && (
+              <div className="contents" style={revealStyle(7)}>
+                <div className="text-white/50">Drift Score</div>
+                <div className="text-purple-400 font-bold">
+                  {result.total_drift_score.toLocaleString()}
+                </div>
+                <div className="text-white/30">
+                  {result.drift_count != null ? `${result.drift_count} drifts` : '--'}
+                </div>
+              </div>
+            )}
+
+            {result.best_single_drift != null && result.best_single_drift > 0 && (
+              <div className="contents" style={revealStyle(7)}>
+                <div className="text-white/50">Best Drift</div>
+                <div className="text-orange-400">
+                  {result.best_single_drift.toLocaleString()}
+                </div>
+                <div className="text-white/30">pts</div>
               </div>
             )}
           </div>

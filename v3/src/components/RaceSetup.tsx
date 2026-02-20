@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { LeaderboardPanel } from './LeaderboardPanel.tsx';
 
 interface TrackOption {
   id: string;
@@ -198,6 +199,11 @@ export function RaceSetup({ onStartRace, onBack }: RaceSetupProps) {
               </button>
             ))}
           </div>
+        </div>
+
+        {/* Personal Records / Leaderboard */}
+        <div className="mb-6">
+          <LeaderboardPanel selectedTrack={selectedTrack} selectedLaps={selectedLaps} />
         </div>
 
         {/* Start Race Button */}

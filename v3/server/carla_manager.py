@@ -235,7 +235,8 @@ class RaceManager:
                 fov=chase_cfg['fov'],
                 x=chase_cfg['x'], y=0.0, z=chase_cfg['z'],
                 pitch=chase_cfg['pitch'],
-                callback=self.chase_buffer.update
+                callback=self.chase_buffer.update,
+                cinematic=True
             )
 
             # Attach front camera to AI car (for model inference)
@@ -297,6 +298,97 @@ class RaceManager:
         self.world.set_weather(weather_params)
         print(f"Weather set to: {weather}")
 
+    def set_time_of_day(self, preset: str):
+        """Set time-of-day lighting preset in CARLA.
+
+        Configures sun position, cloudiness, and atmospheric effects for
+        each time of day. Rain/wet road presets automatically enable
+        CARLA's wet surface reflections via precipitation_deposits and wetness.
+
+        Args:
+            preset: One of 'morning', 'noon', 'sunset', 'night', 'storm'.
+        """
+        if not self.world:
+            return
+
+        presets = {
+            'morning': {
+                'sun_altitude_angle': 25.0,
+                'sun_azimuth_angle': 90.0,
+                'cloudiness': 20.0,
+                'precipitation': 0.0,
+                'precipitation_deposits': 0.0,
+                'fog_density': 0.0,
+                'wind_intensity': 0.0,
+                'wetness': 0.0,
+            },
+            'noon': {
+                'sun_altitude_angle': 75.0,
+                'sun_azimuth_angle': 180.0,
+                'cloudiness': 10.0,
+                'precipitation': 0.0,
+                'precipitation_deposits': 0.0,
+                'fog_density': 0.0,
+                'wind_intensity': 0.0,
+                'wetness': 0.0,
+            },
+            'sunset': {
+                'sun_altitude_angle': 5.0,
+                'sun_azimuth_angle': 270.0,
+                'cloudiness': 40.0,
+                'precipitation': 0.0,
+                'precipitation_deposits': 0.0,
+                'fog_density': 5.0,
+                'wind_intensity': 0.0,
+                'wetness': 0.0,
+            },
+            'night': {
+                'sun_altitude_angle': -30.0,
+                'sun_azimuth_angle': 0.0,
+                'cloudiness': 80.0,
+                'precipitation': 0.0,
+                'precipitation_deposits': 0.0,
+                'fog_density': 0.0,
+                'wind_intensity': 0.0,
+                'wetness': 0.0,
+            },
+            'storm': {
+                'sun_altitude_angle': 30.0,
+                'sun_azimuth_angle': 180.0,
+                'cloudiness': 90.0,
+                'precipitation': 80.0,
+                'precipitation_deposits': 50.0,
+                'fog_density': 0.0,
+                'wind_intensity': 80.0,
+                'wetness': 100.0,
+            },
+        }
+
+        params = presets.get(preset)
+        if not params:
+            print(f"Unknown time_of_day preset: {preset}, ignoring")
+            return
+
+        try:
+            weather = self.world.get_weather()
+            weather.sun_altitude_angle = params['sun_altitude_angle']
+            weather.sun_azimuth_angle = params['sun_azimuth_angle']
+            weather.cloudiness = params['cloudiness']
+            weather.precipitation = params['precipitation']
+            weather.precipitation_deposits = params['precipitation_deposits']
+            weather.fog_density = params['fog_density']
+            weather.wind_intensity = params['wind_intensity']
+            weather.wetness = params['wetness']
+            self.world.set_weather(weather)
+            print(f"Time of day set to: {preset} "
+                  f"(sun_alt={params['sun_altitude_angle']}, "
+                  f"sun_az={params['sun_azimuth_angle']}, "
+                  f"cloud={params['cloudiness']}, "
+                  f"rain={params['precipitation']}, "
+                  f"wet={params['wetness']})")
+        except Exception as e:
+            print(f"Failed to set time_of_day: {e}")
+
     def _spawn_vehicle(self, spawn_point, model: str) -> Optional[carla.Vehicle]:
         """Spawn a vehicle at the given transform."""
         bp_library = self.world.get_blueprint_library()
@@ -315,13 +407,30 @@ class RaceManager:
 
     def _attach_camera(self, vehicle, width: int, height: int, fov: int,
                        x: float, y: float, z: float, pitch: float,
-                       callback) -> Optional[carla.Sensor]:
-        """Attach RGB camera to vehicle."""
+                       callback, cinematic: bool = False) -> Optional[carla.Sensor]:
+        """Attach RGB camera to vehicle.
+
+        Args:
+            cinematic: If True, apply cinematic post-processing attributes
+                       (motion blur, histogram exposure). Used for chase cam.
+        """
         bp_library = self.world.get_blueprint_library()
         camera_bp = bp_library.find('sensor.camera.rgb')
         camera_bp.set_attribute('image_size_x', str(width))
         camera_bp.set_attribute('image_size_y', str(height))
         camera_bp.set_attribute('fov', str(fov))
+
+        # Cinematic post-processing for chase camera
+        if cinematic:
+            try:
+                camera_bp.set_attribute('motion_blur_intensity', '0.3')
+                camera_bp.set_attribute('motion_blur_max_distortion', '0.5')
+                camera_bp.set_attribute('motion_blur_min_object_screen_size', '0.1')
+                camera_bp.set_attribute('exposure_mode', 'histogram')
+                camera_bp.set_attribute('shutter_speed', '60.0')
+                camera_bp.set_attribute('iso', '100.0')
+            except Exception as e:
+                print(f"Some cinematic camera attributes not supported: {e}")
 
         transform = carla.Transform(
             carla.Location(x=x, y=y, z=z),
