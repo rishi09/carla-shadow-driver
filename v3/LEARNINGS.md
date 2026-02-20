@@ -372,3 +372,41 @@ Format: `## [timestamp] Category: Short description`
 - **Rule**: In canvas-based React components, always use the pattern `const c = ref.getContext('2d'); if (!c) return; const ctx: CanvasRenderingContext2D = c;` to get correct types in inner functions without non-null assertions.
 
 ---
+
+## [2026-02-19 14:00] Vehicle physics: five driving assists for keyboard control
+
+### Countersteer assist (auto-recovery from slides)
+- **Implemented**: `_compute_countersteer()` in `carla_manager.py` compares the vehicle's heading (yaw from `get_transform().rotation.yaw`) against its velocity direction (atan2 of `get_velocity()`). When these diverge by more than 15 degrees, it returns a steering correction toward the velocity direction.
+- **Scaling**: Uses a smoothstep curve (3t^2 - 2t^3) mapping from 0 at 15 degrees to max correction (0.25) at 45+ degrees. This gives a gentle onset that ramps to strong correction as the drift gets worse. At speeds above 100 km/h, the correction is further scaled down (min 0.3x at 300 km/h) to prevent high-speed overcorrection.
+- **Handbrake bypass**: Countersteer is disabled when handbrake is active, so players can intentionally drift without the assist fighting them.
+- **Angle normalization**: The heading-velocity angle difference is wrapped to [-180, 180] using a while loop. This handles the CARLA yaw wraparound at +/-180 degrees correctly.
+- **Rule**: For keyboard racing games, subtle auto-assists are essential. Binary input (key pressed = max steering) makes it nearly impossible to manually countersteer at the right angle. The assist acts as an invisible safety net, not a driving override.
+
+### Traction control (anti-wheelspin)
+- **Implemented**: `_apply_traction_control()` detects wheel spin by comparing expected vs actual acceleration. Two conditions: (1) launch spin -- at <10 km/h with >0.5 throttle, if acceleration is less than 20% of expected, cap throttle to 0.3. (2) Mid-speed traction loss -- at <50 km/h with >0.6 throttle, if speed is DROPPING (acceleration < -5 km/h/s), cap throttle to 0.4.
+- **Gradual cap**: The throttle cap (`_tc_throttle_cap`) ramps down at `dt * 4.0` (fast cut) and back up at `dt * 2.0` (slow restore). This creates a natural "engine management" feel rather than binary on/off.
+- **No CARLA wheel queries**: The implementation avoids calling `get_physics_control()` every frame (which would be expensive). Instead, it infers wheel spin from the discrepancy between throttle input and actual speed change -- a robust heuristic that works regardless of road surface.
+- **Rule**: For traction control, "expected vs actual acceleration" is a more reliable signal than trying to read wheel angular velocity. CARLA's physics queries are expensive, and the acceleration delta captures the same information indirectly.
+
+### Better tire friction model (front/rear split)
+- **Implemented**: Replaced uniform `tire_friction >= 3.5` with differentiated front/rear values: front wheels at 3.8, rear wheels at 3.2. Additionally set lateral stiffness values: front `lat_stiff_max_load=3.0, lat_stiff_value=20.0`, rear `lat_stiff_max_load=2.5, lat_stiff_value=17.0`.
+- **Rationale**: Higher front friction gives responsive turn-in and grip. Lower rear friction creates a mild oversteer tendency (rear slides slightly before front), which is more fun and more forgiving than understeer for keyboard drivers. The 3.8/3.2 split (15% difference) is subtle enough that the car still feels stable but rewards skilled driving.
+- **Lateral stiffness**: `lat_stiff_value` controls how much lateral force the tire generates at a given slip angle. Higher front values mean the car turns in crisply; lower rear values mean the rear slides more gradually at the limit. `lat_stiff_max_load` sets the normal force at which lateral grip maxes out.
+- **Original friction stored**: `_original_rear_friction` is captured after physics setup for the handbrake drift system to restore correct values.
+- **Rule**: For racing games, slight rear-biased grip loss (mild oversteer) is always more fun than understeer. Understeer feels unresponsive; oversteer feels alive. Keep the front/rear friction gap small (10-20%) to stay on the fun side without making the car undrivable.
+
+### Smooth speed-dependent steering (exponential curve)
+- **Implemented**: Replaced the step-function steering limits (`if speed < 30: 0.5, elif < 80: 0.3, ...`) with a continuous exponential decay: `steer_limit = 0.08 + 0.42 * exp(-speed / 70)`.
+- **Why exponential**: Linear interpolation (lerp) felt unnatural because equal speed increments caused equal steering changes. In reality, steering sensitivity drops off rapidly at low-to-medium speeds (where most cornering happens) and barely changes at high speed. The exponential curve `e^(-x/70)` naturally captures this: 65% of the change happens in the first 70 km/h.
+- **Values match**: At 0 km/h: 0.50 (same as old <30 bucket). At 70 km/h: 0.23 (between old 0.3 and 0.18). At 200 km/h: 0.10 (same as old >150 bucket). The curve passes through similar values as the old steps but eliminates the discontinuities.
+- **Frontend sync**: Updated `useSteeringPrediction.ts` `getSteerFactor()` to use the same exponential formula (`0.08 + 0.42 * Math.exp(-speed / 70)`) / 0.50. This keeps client-side visual prediction aligned with server-side steering authority.
+- **Rule**: When mapping a continuous input (speed) to a continuous output (steer limit), use a continuous function. Step functions create perceptible jumps at thresholds that players will notice as "the car suddenly steers differently." Exponential decay is a natural fit for diminishing sensitivity curves.
+
+### Handbrake drift mechanics (dynamic friction)
+- **Implemented**: `_apply_handbrake_friction()` modifies rear wheel tire friction on handbrake state transitions. On press: reduces to 30% of original. On release: restores to original values.
+- **State-transition only**: The physics control is only applied when `handbrake_active != self._handbrake_was_active` (a boolean edge detector). This means `apply_physics_control()` is called at most once per handbrake press and once per release, not every frame. CARLA's `apply_physics_control()` is relatively expensive (~1-2ms) as it reconstructs the vehicle's tire model.
+- **Why 30%**: At 30% of base rear friction (3.2 * 0.3 = 0.96), the rear tires have barely any lateral grip, causing them to slide out dramatically. This enables Mario Kart-style power slides where the rear swings wide while the front maintains grip. Values below 20% made the car completely uncontrollable; above 50% the drift effect was barely noticeable.
+- **Friction restore**: Original rear friction values are stored in `_original_rear_friction` (a list, since left and right rear could theoretically differ) during `setup_race()`. On handbrake release, these exact values are restored, not the base 3.2 -- this handles the case where the original vehicle blueprint has asymmetric friction.
+- **Rule**: Never call `apply_physics_control()` every frame. It's designed for one-time setup, not real-time animation. Use state-transition detection (edge trigger) to call it only when the physical model actually needs to change.
+
+---

@@ -20,9 +20,10 @@ The perceived lag stack when turning:
 ### Encoding: Faster frame pipeline
 - [ ] **NVENC JPEG encoding**: Replace OpenCV JPEG with `nvjpeg` (CUDA JPEG encoder). Drops encode from ~5-10ms to <1ms. Available via `pip install pynvjpeg` or PyTorch's `torchvision.io.encode_jpeg` with CUDA tensors.
 - [ ] **WebRTC with direct UDP**: Test on Vast.ai "Direct" mode with UDP ports exposed. This is the real WebRTC win — browser hardware H.264 decode + no rAF sync.
-- [ ] **Skip unchanged frames**: If car is stationary and camera hasn't moved, skip encoding entirely. Send a "no-change" signal instead.
-- [ ] **Adaptive quality**: Drop JPEG quality to 30 when latency spikes >150ms, raise to 60 when stable <80ms. Frontend sends latency back in telemetry.
-- [ ] **Resolution downscale at speed**: At 200+ km/h you can't see detail anyway — drop to 960x540 at high speed, full res when slow/stopped.
+- [x] **Skip unchanged frames**: Frame delta detection using block-mean perceptual hash (8x8 blocks, <0.5ms overhead). When frames are similar, sends lightweight `no_change` JSON instead of re-encoding JPEG. Combined with position-based skip for stationary cars.
+- [x] **Adaptive quality**: Four-tier latency-based quality: >150ms->q25/960x540, 80-150ms->q40/720p, 50-80ms->q60/720p, <50ms->q75/720p. Asymmetric stepping (fast down=8/call, slow up=2/call) prevents oscillation. Auto-reduces quality if average encode time >15ms.
+- [x] **Resolution downscale at speed**: At 200+ km/h, drops to 960x540. Restores at <150 km/h (50 km/h hysteresis gap prevents flapping).
+- [x] **Performance monitoring**: Rolling 30-frame averages for encode time and frame size. `perf_stats` message sent to client every 3s for debug overlay. Server logs enhanced with pos_skip/delta_skip counts and auto-reduction flags.
 
 ### Client-side prediction (biggest perceived improvement)
 - [x] **Steering prediction overlay**: When A/D pressed, immediately rotate the canvas by a few degrees in the steering direction BEFORE the next server frame arrives. Speed-dependent: matches server's steer limits (2.8deg at <30km/h, 0.56deg at >150km/h). Smooth rAF interpolation with attack/release curves. Also includes pitch tilt on W/S and lateral translateX shift.
