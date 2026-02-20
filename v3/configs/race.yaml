@@ -18,6 +18,14 @@ camera:
     x: -6.0    # Behind the car
     z: 3.0     # Above
     pitch: -15  # Looking down at car
+  # Rear-view mirror camera (small inset, facing backward)
+  rear:
+    width: 320
+    height: 120
+    fov: 110
+    x: -2.0    # Behind and above player
+    z: 2.0
+    pitch: 0   # Level
   # AI camera (front-facing, for model inference)
   ai:
     width: 640

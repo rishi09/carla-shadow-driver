@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import { useSocialPresence } from '../hooks/useSocialPresence.ts';
+import { RecentRaces } from '../components/RecentRaces.tsx';
 
 // ============================================================
 // SPEED CANVAS — road-like vanishing point with rushing light streaks
@@ -263,6 +265,7 @@ function TechBadge({ label, delay }: { label: string; delay: number }) {
 // ============================================================
 export function Landing() {
   const [mounted, setMounted] = useState(false);
+  const social = useSocialPresence();
 
   useEffect(() => {
     const t = setTimeout(() => setMounted(true), 80);
@@ -292,6 +295,10 @@ export function Landing() {
         @keyframes stat-count {
           from { opacity:0; transform:scale(0.8); }
           to { opacity:1; transform:scale(1); }
+        }
+        @keyframes live-pulse {
+          0%,100% { opacity:1; }
+          50% { opacity:0.4; }
         }
       `}</style>
 
@@ -342,7 +349,7 @@ export function Landing() {
             animation: mounted ? 'float-up 0.8s ease-out 0.45s forwards' : 'none',
             opacity: 0,
           }}>
-            <a href="/race" className="inline-block relative group">
+            <a href="/race?quickstart=true" className="inline-block relative group">
               <span
                 className="relative z-10 inline-block py-4 px-16 sm:py-5 sm:px-22 rounded-2xl text-white font-black text-2xl sm:text-3xl tracking-wide transition-transform duration-300 group-hover:scale-105"
                 style={{
@@ -366,6 +373,40 @@ export function Landing() {
           >
             No download &middot; No signup &middot; Just drive
           </p>
+
+          {/* Live player count + total races */}
+          {!social.loading && (
+            <div
+              className="mt-5 flex flex-col items-center gap-2"
+              style={{
+                animation: mounted ? 'float-up 0.7s ease-out 0.85s forwards' : 'none',
+                opacity: 0,
+              }}
+            >
+              {social.activePlayers > 0 ? (
+                <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-green-500/20 bg-green-500/[0.06]">
+                  <span
+                    className="w-2 h-2 rounded-full bg-green-400"
+                    style={{ animation: 'live-pulse 2s ease-in-out infinite' }}
+                  />
+                  <span className="text-green-400/80 text-xs sm:text-sm font-medium">
+                    {social.activePlayers} {social.activePlayers === 1 ? 'person' : 'people'} racing right now
+                  </span>
+                </div>
+              ) : (
+                <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-white/[0.06] bg-white/[0.02]">
+                  <span className="text-white/30 text-xs sm:text-sm">
+                    Be the first to race today!
+                  </span>
+                </div>
+              )}
+              {social.totalRaces > 0 && (
+                <span className="text-white/15 text-xs font-mono">
+                  {social.totalRaces.toLocaleString()} races completed
+                </span>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Scroll hint */}
@@ -468,17 +509,25 @@ export function Landing() {
           <p className="text-white/15 text-xs sm:text-sm font-mono">
             Shadow Driver &middot; CARLA Simulator + Cloud GPUs
           </p>
-          <a
-            href="https://github.com/rishi09/carla-shadow-driver"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-white/15 hover:text-white/40 transition-colors"
-            aria-label="GitHub"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
-            </svg>
-          </a>
+          <div className="flex items-center gap-6">
+            <a
+              href="/about"
+              className="text-white/15 hover:text-white/40 transition-colors text-xs sm:text-sm"
+            >
+              About
+            </a>
+            <a
+              href="https://github.com/rishi09/carla-shadow-driver"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-white/15 hover:text-white/40 transition-colors"
+              aria-label="GitHub"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+              </svg>
+            </a>
+          </div>
         </div>
       </footer>
     </div>
@@ -534,7 +583,7 @@ function FinalCTA() {
         Your browser is the only hardware you need.
       </p>
       <a
-        href="/race"
+        href="/race?quickstart=true"
         className="inline-block py-4 px-14 sm:py-5 sm:px-18 rounded-2xl text-white font-black text-xl sm:text-2xl transition-all duration-300 hover:scale-105"
         style={{
           background: 'linear-gradient(135deg, #22C55E 0%, #16A34A 100%)',

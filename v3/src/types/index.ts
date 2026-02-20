@@ -9,13 +9,25 @@ export interface KeyState {
   space: boolean;
 }
 
+/** Analog gamepad controls sent alongside (or instead of) keyboard keys */
+export interface GamepadControls {
+  /** Analog steering: -1.0 (full left) to 1.0 (full right) */
+  steer: number;
+  /** Analog throttle: 0.0 to 1.0 */
+  throttle: number;
+  /** Analog brake: 0.0 to 1.0 */
+  brake: number;
+  /** Handbrake on/off */
+  handbrake: boolean;
+}
+
 /** Race state received from server */
 export interface RaceState {
   type: 'race_state';
   player: RacerState;
   ai: RacerState;
   model: string;
-  race_status: 'countdown' | 'racing' | 'finished';
+  race_status: 'countdown' | 'racing' | 'finishing' | 'finished';
   fps: number;
   winner?: string | null;
   countdown?: number | null;
@@ -31,6 +43,14 @@ export interface RaceState {
     chain: number;
   };
   total_drift_score?: number;
+  weather_mood?: {
+    mood: 'CALM' | 'BUILDING' | 'TENSE' | 'DRAMATIC' | 'EPIC';
+    intensity: number;
+    precipitation: number;
+    fog_density: number;
+    wind_intensity: number;
+    cloudiness: number;
+  };
 }
 
 export interface RacerState {
@@ -106,8 +126,14 @@ export interface DriftEndEvent {
   total_score: number;
 }
 
+/** AI trash talk message from server */
+export interface AIChatMessage {
+  type: 'ai_chat';
+  text: string;
+}
+
 /** Any JSON message from the server */
-export type ServerMessage = RaceState | RaceFinished | HandshakeAck | PerfStats | DriftEndEvent | {
+export type ServerMessage = RaceState | RaceFinished | HandshakeAck | PerfStats | DriftEndEvent | AIChatMessage | {
   type: 'pong';
   timestamp: number;
 } | {
@@ -131,7 +157,13 @@ export type ServerMessage = RaceState | RaceFinished | HandshakeAck | PerfStats 
   sdp: string;
   sdpType: RTCSdpType;
 } | {
+  type: 'restart_ack';
+} | {
   type: 'no_change';
+} | {
+  type: 'server_shutdown';
+  reason: string;
+  message: string;
 };
 
 /** GPU provisioning states */

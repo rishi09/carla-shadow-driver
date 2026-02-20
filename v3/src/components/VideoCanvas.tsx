@@ -1,11 +1,13 @@
-import { useRef, useEffect, useCallback, useState } from 'react';
+import { useRef, useEffect, useCallback, useState, type RefObject } from 'react';
 
 interface VideoCanvasProps {
   onBinaryFrame: (handler: ((data: Blob) => void) | null) => void;
   className?: string;
+  /** Optional external ref to access the underlying canvas element (e.g. for replay recording) */
+  externalCanvasRef?: RefObject<HTMLCanvasElement | null>;
 }
 
-export function VideoCanvas({ onBinaryFrame, className = '' }: VideoCanvasProps) {
+export function VideoCanvas({ onBinaryFrame, className = '', externalCanvasRef }: VideoCanvasProps) {
   const frontCanvasRef = useRef<HTMLCanvasElement>(null);
   const backCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const backCtxRef = useRef<CanvasRenderingContext2D | null>(null);
@@ -15,6 +17,18 @@ export function VideoCanvas({ onBinaryFrame, className = '' }: VideoCanvasProps)
   const fpsIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [hasFirstFrame, setHasFirstFrame] = useState(false);
   const firstFrameReceivedRef = useRef(false);
+
+  // Sync external canvas ref with internal ref
+  useEffect(() => {
+    if (externalCanvasRef && 'current' in externalCanvasRef) {
+      (externalCanvasRef as React.MutableRefObject<HTMLCanvasElement | null>).current = frontCanvasRef.current;
+    }
+    return () => {
+      if (externalCanvasRef && 'current' in externalCanvasRef) {
+        (externalCanvasRef as React.MutableRefObject<HTMLCanvasElement | null>).current = null;
+      }
+    };
+  }, [externalCanvasRef]);
 
   // Lazily initialize the off-screen back buffer canvas
   const getBackBuffer = useCallback(() => {
@@ -130,16 +144,16 @@ export function VideoCanvas({ onBinaryFrame, className = '' }: VideoCanvasProps)
   }, [onBinaryFrame, getBackBuffer]);
 
   return (
-    <div className={`relative ${className}`} style={{ width: '100%', maxHeight: '80vh' }}>
+    <div className={`relative ${className}`}>
       <canvas
         ref={frontCanvasRef}
         width={1280}
         height={720}
-        className="bg-dark-500 rounded-lg"
-        style={{ width: '100%', height: 'auto', maxHeight: '80vh', objectFit: 'contain' }}
+        className="bg-dark-500 w-full h-full"
+        style={{ objectFit: 'cover' }}
       />
       {!hasFirstFrame && (
-        <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-dark-500">
+        <div className="absolute inset-0 flex items-center justify-center bg-dark-500">
           <span className="text-white/40 text-lg font-mono animate-pulse">
             Waiting for video feed...
           </span>

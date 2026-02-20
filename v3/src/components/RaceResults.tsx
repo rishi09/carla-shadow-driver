@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import type { RaceFinished } from '../types/index.ts';
 import type { PersonalBestResult } from '../hooks/usePersonalBests.ts';
 import { RacingLineViz } from './RacingLineViz.tsx';
+import { RaceResultCard } from './RaceResultCard.tsx';
 
 interface RaceResultsProps {
   result: RaceFinished;
@@ -14,11 +15,18 @@ interface RaceResultsProps {
     weather: string;
     model?: string;
     playerCar?: string;
+    timeOfDay?: string;
   };
   /** Instant race again: same settings, skip setup */
   onInstantReplay?: () => void;
   /** Personal best result info */
   personalBestResult?: PersonalBestResult | null;
+  /** Whether this was a daily challenge race */
+  isDailyChallenge?: boolean;
+  /** Daily challenge leaderboard position */
+  dailyChallengePosition?: { position: number; total: number; isNewBest: boolean } | null;
+  /** Streak info after recording the race */
+  streakResult?: { newStreak: number; isNewRecord: boolean } | null;
 }
 
 const MEDAL_ICONS: Record<string, string> = {
@@ -27,7 +35,7 @@ const MEDAL_ICONS: Record<string, string> = {
   bronze: '\uD83E\uDD49',
 };
 
-export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onInstantReplay, personalBestResult }: RaceResultsProps) {
+export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onInstantReplay, personalBestResult, isDailyChallenge, dailyChallengePosition, streakResult }: RaceResultsProps) {
   const playerWon = result.winner === 'player';
 
   // Staggered reveal animation state
@@ -37,13 +45,16 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
   // Share link copied state
   const [shareCopied, setShareCopied] = useState(false);
 
+  // Copy results text state
+  const [resultsCopied, setResultsCopied] = useState(false);
+
   useEffect(() => {
     // Stagger reveal: increment step every 150ms up to 10 steps
     let step = 0;
     const advance = () => {
       step++;
       setRevealStep(step);
-      if (step < 10) {
+      if (step < 12) {
         revealTimerRef.current = setTimeout(advance, 150);
       }
     };
@@ -76,6 +87,8 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
       params.set('laps', String(raceSettings.laps));
       params.set('weather', raceSettings.weather);
       if (raceSettings.model) params.set('model', raceSettings.model);
+      if (raceSettings.playerCar) params.set('playerCar', raceSettings.playerCar);
+      if (raceSettings.timeOfDay) params.set('timeOfDay', raceSettings.timeOfDay);
     }
     const baseUrl = window.location.origin + window.location.pathname;
     const shareUrl = `${baseUrl}?${params.toString()}`;
@@ -86,6 +99,40 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
       // Fallback: just ignore
     });
   }, [raceSettings]);
+
+  // Copy Wordle-style text results to clipboard
+  const handleCopyResults = useCallback(() => {
+    const DIFFICULTY_MAP: Record<string, string> = {
+      carla_pilotnet: 'Easy',
+      pilotnet: 'Medium',
+      alpamayo: 'Hard',
+    };
+
+    const trackName = raceSettings?.track ?? 'Unknown';
+    const timeStr = result.player_time != null ? formatRaceTime(result.player_time) : 'DNF';
+    const difficulty = raceSettings?.model ? (DIFFICULTY_MAP[raceSettings.model] ?? raceSettings.model) : 'Easy';
+
+    // Gap description
+    let gapStr = '';
+    if (result.player_time != null && result.ai_time != null) {
+      const gap = Math.abs(result.player_time - result.ai_time).toFixed(1);
+      gapStr = playerWon ? `beat AI by ${gap}s` : `lost to AI by ${gap}s`;
+    }
+
+    const topSpeed = result.player_max_speed != null ? `${result.player_max_speed.toFixed(0)} km/h` : '?';
+
+    const lines = [
+      `Shadow Driver v3 - ${trackName}`,
+      `${timeStr} (${gapStr})`,
+      `Top Speed: ${topSpeed} | Difficulty: ${difficulty}`,
+      `shadow-driver-v3.vercel.app/race`,
+    ];
+
+    navigator.clipboard.writeText(lines.join('\n')).then(() => {
+      setResultsCopied(true);
+      setTimeout(() => setResultsCopied(false), 2000);
+    }).catch(() => {});
+  }, [result, raceSettings, playerWon]);
 
   // Reveal helper: returns style for staggered animation
   const revealStyle = (step: number): React.CSSProperties => ({
@@ -132,6 +179,10 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
           60% { transform: translateY(4px) scale(1.05); }
           100% { transform: translateY(0) scale(1.0); opacity: 1; }
         }
+        @keyframes streak-results-glow {
+          0%, 100% { box-shadow: 0 0 8px rgba(249, 115, 22, 0.2); }
+          50% { box-shadow: 0 0 20px rgba(249, 115, 22, 0.4); }
+        }
       `}</style>
 
       <div className="bg-dark-300 rounded-xl border border-white/10 max-w-lg w-full p-8 text-center relative overflow-hidden">
@@ -159,6 +210,23 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
             {playerWon ? 'You beat the AI!' : 'The AI was faster this time.'}
           </p>
         </div>
+
+        {/* Daily Challenge badge */}
+        {isDailyChallenge && revealStep >= 1 && (
+          <div className="mb-4" style={revealStyle(1)}>
+            <div className="inline-flex items-center gap-2 rounded-full px-4 py-1.5 border border-amber-500/30 bg-amber-500/10">
+              <span className="text-amber-400 text-xs font-bold uppercase tracking-wider">Daily Challenge</span>
+              {dailyChallengePosition && (
+                <span className="text-amber-400/60 text-xs font-mono">
+                  #{dailyChallengePosition.position} of {dailyChallengePosition.total}
+                  {dailyChallengePosition.isNewBest && (
+                    <span className="text-amber-300 ml-1">-- New Best!</span>
+                  )}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Times comparison -- big cards */}
         <div className="grid grid-cols-2 gap-4 mb-6" style={revealStyle(2)}>
@@ -214,6 +282,30 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
                 )}
               </div>
             ) : null}
+          </div>
+        )}
+
+        {/* Streak update */}
+        {streakResult && streakResult.newStreak > 0 && revealStep >= 3 && (
+          <div style={revealStyle(3)} className="mb-4">
+            <div
+              className={`inline-flex items-center gap-2 rounded-full px-4 py-1.5 border ${
+                streakResult.isNewRecord
+                  ? 'border-orange-400/50 bg-orange-500/15'
+                  : 'border-orange-500/30 bg-orange-500/10'
+              }`}
+              style={streakResult.isNewRecord ? { animation: 'streak-results-glow 2s ease-in-out infinite' } : undefined}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none" className="text-orange-400">
+                <path d="M12 23c-3.6 0-7-2.4-7-7 0-3.1 2.1-5.7 4-7.6l.7-.8c.4-.4 1-.4 1.3.1L13 11l2.5-6.5c.2-.4.6-.6 1-.5.4.1.7.5.7.9V9c2.3 2 4 4.7 4 7.5 0 4.3-3.4 6.5-7 6.5h-2.2z"/>
+              </svg>
+              <span className="text-orange-400 text-xs font-bold">
+                Day {streakResult.newStreak} streak!
+              </span>
+              {streakResult.isNewRecord && (
+                <span className="text-orange-300 text-[10px] font-mono ml-1">New streak record!</span>
+              )}
+            </div>
           </div>
         )}
 
@@ -371,8 +463,16 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
           </div>
         )}
 
+        {/* Shareable race result card */}
+        <div className="mb-6" style={revealStyle(10)}>
+          <RaceResultCard
+            result={result}
+            raceSettings={raceSettings}
+          />
+        </div>
+
         {/* Action buttons */}
-        <div className="flex gap-3" style={revealStyle(9)}>
+        <div className="flex gap-3" style={revealStyle(11)}>
           {/* Instant Race Again (same settings) -- primary action */}
           <button
             onClick={onInstantReplay ?? onPlayAgain}
@@ -396,9 +496,19 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
           </button>
         </div>
 
-        {/* Share button */}
+        {/* Share buttons */}
         {raceSettings && (
-          <div className="mt-4" style={revealStyle(10)}>
+          <div className="mt-4 flex items-center justify-center gap-4" style={revealStyle(12)}>
+            <button
+              onClick={handleCopyResults}
+              className="text-white/40 hover:text-white/70 text-xs font-mono transition-colors inline-flex items-center gap-1.5"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+              </svg>
+              {resultsCopied ? 'Copied!' : 'Copy Results'}
+            </button>
             <button
               onClick={handleShare}
               className="text-white/40 hover:text-white/70 text-xs font-mono transition-colors inline-flex items-center gap-1.5"
@@ -408,13 +518,13 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
                 <polyline points="16 6 12 2 8 6" />
                 <line x1="12" y1="2" x2="12" y2="15" />
               </svg>
-              {shareCopied ? 'Link copied!' : 'Share this race'}
+              {shareCopied ? 'Link copied!' : 'Share race link'}
             </button>
           </div>
         )}
 
         {/* Keyboard shortcut hint */}
-        <div className="mt-3 text-white/20 text-xs font-mono" style={revealStyle(10)}>
+        <div className="mt-3 text-white/20 text-xs font-mono" style={revealStyle(12)}>
           Press Enter to race again
         </div>
       </div>

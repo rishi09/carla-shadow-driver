@@ -589,3 +589,190 @@ Comprehensive research into AI in games beyond self-driving, with concrete imple
 | RL Racing Agent (PPO) | 8/10 | 3/10 | Long-term |
 | Live Training Viz | 9/10 | 2/10 | Dream |
 | AI Track Generator | 6/10 | 2/10 | Dream |
+
+---
+
+## Latest AI Gaming Innovations (Feb 2026 Research)
+
+Deep research into what is hot right now in AI + games, with concrete ideas for Shadow Driver v3.
+
+### What's Hot Right Now
+
+#### 1. Neural Game Engines / World Models -- The Biggest Paradigm Shift
+
+The idea that AI can replace a traditional game engine entirely has exploded:
+
+- **GameNGen (Google, Aug 2024)**: First neural game engine. Runs DOOM at 20fps on a single TPU using a fine-tuned Stable Diffusion 1.4 model. Human raters cannot distinguish real DOOM from GameNGen output. The key insight: an RL agent plays the game to generate training data, then a diffusion model learns to predict the next frame given previous frames + player actions. Noise augmentation on context frames prevents visual drift during extended play.
+  - Ref: https://gamengen.github.io/
+
+- **Oasis (Decart + Etched, Oct 2024)**: Interactive Minecraft-like world generated entirely by a neural network at 20fps. Uses a ViT-based spatial autoencoder + DiT (Diffusion Transformer) backbone. Takes keyboard input and generates frames sequentially conditioned on player actions. 500M parameter version released publicly. Limitations: fuzzy distant visuals, limited long-context memory, temporal inconsistency.
+  - Ref: https://oasis-model.github.io/
+
+- **Genie 2 (DeepMind, Dec 2024)**: Foundation world model that generates playable 3D environments from a single image. Models physics (gravity, water, smoke), maintains coherent worlds for up to 60 seconds, animates NPCs, handles counterfactual scenarios. Autoregressive latent diffusion model with transformer-based dynamics. Still in research -- not real-time without distillation.
+  - Ref: https://deepmind.google/discover/blog/genie-2-a-large-scale-foundation-world-model/
+
+- **NVIDIA Cosmos (Jan 2025)**: Open-source world foundation models for physical AI. Three models: Cosmos Predict (generates 30s video from prompts), Cosmos Transfer (style transfer from sim to photoreal), Cosmos Reason (multimodal reasoning about physical environments). Targets autonomous vehicles and robotics but the Transfer model is directly relevant to game visual enhancement.
+  - Ref: https://www.nvidia.com/en-us/ai/cosmos/
+
+- **World Labs / Marble (Fei-Fei Li, Jan 2026)**: Generates spatially consistent, explorable 3D worlds from text/image/video. Public API launched Jan 2026. Can create, edit, and combine 3D spaces. Not game-focused but the tech is jaw-dropping.
+  - Ref: https://www.worldlabs.ai/
+
+**What this means for us**: The world-model paradigm is the biggest story in AI gaming. Shadow Driver uniquely sits at the intersection -- we ARE running a real simulator (CARLA) and streaming it. The "neural game engine" angle is our narrative hook for HackerNews.
+
+#### 2. AI NPCs with Personality -- Shipping in Real Games
+
+- **NVIDIA ACE (Avatar Cloud Engine)**: Suite of AI technologies for game characters. Speech (Riva ASR/TTS), Intelligence (Nemotron, Qwen3, Mistral, Llama models), Animation (Audio2Face-3D, Audio2Emotion). Key: the NVIGI SDK runs AI models in-process via CUDA. Games SHIPPING with ACE:
+  - **Total War: PHARAOH** -- AI strategic advisor powered by on-device LLM
+  - **PUBG** (KRAFTON) -- "Co-Player Characters" with natural language communication
+  - **inZOI** (KRAFTON) -- Smart Zois with planning/reflection, on-device sLM
+  - **MIR5** (Wemade) -- AI-powered adaptive bosses
+  - **Dead Meat** -- Interactive murder mystery with freeform NPC questioning
+  - Ref: https://developer.nvidia.com/ace
+
+- **Convai**: Platform for embodied AI characters with multimodal perception. Integrates with Unity, Unreal, PlayCanvas. Characters perceive environments, respond with dialogue + gestures, maintain narrative coherence. 65+ languages. ISO 27001 compliant for enterprise.
+  - Ref: https://convai.com/
+
+- **inZOI (KRAFTON, Jan 2025 Early Access)**: Life sim using on-device generative AI for text-to-texture, 2D-to-3D object creation, video-to-motion, and sLM-driven character behavior. This is the clearest example of "AI features people are actually using in a shipped game."
+  - Ref: https://store.steampowered.com/app/2456740/inZOI/
+
+**What this means for us**: The AI commentator and trash-talking opponent ideas (already in our TODO) are exactly aligned with where the industry is going. The difference: we can ship them faster because we have server-side GPU + Python, not client-side constraints.
+
+#### 3. DLSS 4 and Neural Rendering -- Multi-Frame Generation
+
+- **DLSS 4 (NVIDIA, Jan 2025)**: Generates up to 3 AI frames per rendered frame using 5th-gen Tensor Cores on RTX 50 series (5070/5080/5090). Includes transformer-based Super Resolution, Ray Reconstruction, and DLAA. DLSS 4.5 introduces Dynamic MFG that adapts frame generation to scene complexity.
+  - Ref: https://www.nvidia.com/en-us/geforce/technologies/dlss/
+
+**What this means for us**: Our client-side frame interpolation idea (already in TODO) mirrors DLSS Frame Generation but in the browser. The narrative is compelling: "We built browser-DLSS."
+
+#### 4. Real-Time Style Transfer -- StreamDiffusion
+
+- **StreamDiffusion (2024-2025)**: Real-time diffusion pipeline achieving 93fps image-to-image on RTX 4090 (1 denoising step) and 37fps with 4 steps. Key optimizations: Stream Batch, Residual CFG, Stochastic Similarity Filter (skips processing when frames haven't changed much). This makes real-time visual style transfer on game feeds actually practical.
+  - Ref: https://github.com/cumulo-autumn/StreamDiffusion
+
+**What this means for us**: On our RTX 3090, StreamDiffusion could do ~50-60fps img2img with SD-turbo at 1 step. We could offer "Comic Book Mode" or "Anime Mode" that transforms CARLA's realistic output into stylized visuals in real-time. This would be an absolute showstopper feature.
+
+#### 5. Racing AI -- Gran Turismo Sophy and Beyond
+
+- **Gran Turismo Sophy (Sony AI, Nature 2022, integrated into GT7 2023-2024)**: Superhuman racing AI using deep RL trained against a multi-agent league. Published on the cover of Nature. Players can race against Sophy in GT7 time-limited events. Key: the reward function shaped for clean racing (speed + etiquette), not just winning.
+  - Ref: https://www.gran-turismo.com/us/gran-turismo-sophy/
+
+- **Depth Anything V2 (NeurIPS 2024)**: Monocular depth estimation from single images. Multiple model sizes (25M to 1.3B params). 10x faster than diffusion-based alternatives. Could be used client-side to add parallax/3D effects to our 2D JPEG stream.
+  - Ref: https://depth-anything-v2.github.io/
+
+- **Orpheus TTS (Canopy Labs, Mar 2025)**: Open-source Llama-based Speech-LLM. ~200ms streaming latency (100ms with input streaming). Apache 2.0 license. Human-quality speech with emotion control via tags. Zero-shot voice cloning. Based on Meta-Llama-3.2-3B-Instruct. This is the TTS model to use for AI commentary.
+  - Ref: https://huggingface.co/canopylabs/orpheus-tts-0.1-finetune-prod
+
+### NEW Ideas Inspired by This Research
+
+#### TIER 1: Build This Week (Viral Potential: HIGH, Effort: LOW-MEDIUM)
+
+##### A. "Comic Book Mode" -- Real-Time Neural Style Transfer
+- **The pitch**: Toggle a button and your CARLA racing game transforms into a comic book / anime / GTA loading screen art style. In real-time. In a browser.
+- **How**: Run StreamDiffusion on the server GPU with SD-turbo (1 denoising step). Pipe CARLA frames through img2img with a style prompt ("comic book racing scene, speed lines, bold outlines") before JPEG encoding. At 1 step, should achieve 50-60fps on RTX 3090 -- enough for our 30fps target.
+- **VRAM**: SD-turbo ~4GB. With CARLA at ~10GB, total ~14GB. Fits on 24GB.
+- **Why it's viral**: People will clip the before/after toggle and post it everywhere. "This browser game can switch art styles in real-time" is front-page HN material.
+- **Implementation sketch**:
+  - [ ] Install StreamDiffusion in Docker image (pip install streamdiffusion)
+  - [ ] Load SD-turbo model at server start with StreamDiffusion pipeline
+  - [ ] Add `style_mode` to race config: "realistic" (bypass), "comic", "anime", "neon", "gta"
+  - [ ] Per-style LoRA or prompt template for consistent look
+  - [ ] Pipe CARLA camera frame -> StreamDiffusion img2img -> JPEG encode -> WebSocket
+  - [ ] Frontend: style selector dropdown in RaceSetup.tsx
+  - [ ] Benchmark: target >30fps throughput, <20ms added latency per frame
+
+##### B. AI Cinematic Replay Director
+- **The pitch**: After each race, an AI edits your replay with cinematic camera angles, slow-mo on key moments, and dramatic music cues. Like a motorsport broadcast highlight reel, auto-generated.
+- **How**: CARLA supports placing cameras anywhere in the world. During the race, record vehicle transforms at 30Hz. After race, "replay" by re-rendering from cinematic camera positions: tracking shot, helicopter view, hood cam, dramatic angle for overtakes. Use the telemetry-based highlight detection (already planned) to identify key moments. Apply slow-mo (render extra frames at 0.5x speed) for crashes and overtakes.
+- **Why it's viral**: Auto-generated highlight reels are inherently shareable. "My AI-directed race replay" clips will get shared.
+- **Implementation sketch**:
+  - [ ] Record full vehicle transforms (position, rotation) during race at 30Hz
+  - [ ] Define cinematic camera presets: chase cam (behind+above), helicopter (high orbit), bumper (low front), dramatic (ground-level side)
+  - [ ] After race, identify highlight moments from telemetry (overtakes, close calls, high speed, finish)
+  - [ ] Re-render highlights from cinematic cameras using CARLA spectator placement
+  - [ ] Add slow-mo for key moments (re-tick CARLA at 0.5x speed)
+  - [ ] Stream replay frames to client as a "cinematic replay" mode
+  - [ ] Add "Watch Replay" button on RaceResults screen
+
+##### C. Voice-Controlled Racing (Whisper + Commands)
+- **The pitch**: Talk to your AI copilot. "Go faster!" "Brake now!" "Take the inside line!" Speech-to-text via Whisper in the browser, parsed into game commands.
+- **How**: Use Transformers.js with Whisper-tiny or Whisper-base in the browser (no server cost). Parse transcribed text into intent: speed commands, lane commands, trash talk back to the AI. Could also use Web Speech API for zero-download fallback.
+- **Why it's viral**: "I'm yelling at my browser racing game and it listens" is inherently funny and shareable content.
+- **Implementation sketch**:
+  - [ ] Add microphone permission request on race start
+  - [ ] Use Web Speech API (SpeechRecognition) for real-time transcription (zero download, works in Chrome)
+  - [ ] Parse voice commands: "faster"/"go" -> boost throttle, "brake"/"stop" -> apply brake, "left"/"right" -> steer
+  - [ ] Display recognized commands as floating text on HUD
+  - [ ] Stretch: AI responds to trash talk via the commentary system ("You think telling me to brake will work?")
+
+##### D. Depth-Aware Parallax (Pseudo-3D from 2D Stream)
+- **The pitch**: Add a subtle 3D parallax effect to the flat JPEG stream using AI depth estimation. The scene gains perceived depth as you turn your head or steer.
+- **How**: Run Depth Anything V2 (25M param version) on the server GPU on every Nth frame (~10Hz). Send a low-res depth map alongside the JPEG. Frontend uses the depth map + device orientation (DeviceOrientationEvent) or mouse position to shift pixels by depth, creating a parallax effect.
+- **VRAM**: 25M param model ~100MB. Trivially fits.
+- **Why it's viral**: "This 2D stream has 3D depth" is a subtle but impressive technical flex.
+- **Implementation sketch**:
+  - [ ] Load Depth Anything V2 small model on server (pip install depth-anything-v2)
+  - [ ] Run depth estimation on every 3rd frame (10Hz), resize to 160x90
+  - [ ] Send depth map as binary WebSocket message (uint8 grayscale, ~14KB)
+  - [ ] Frontend: use depth map to create displacement map shader on WebGL canvas
+  - [ ] Apply parallax shift based on mouse position or device orientation
+  - [ ] Subtle effect: max ±5px displacement for close/far objects
+
+#### TIER 2: Build Next (Viral Potential: MEDIUM-HIGH, Effort: MEDIUM)
+
+##### E. "Teach the AI" Live Training Visualization
+- **The pitch**: Watch a neural network learn to drive your track in real-time. Start: the AI crashes into everything. After 2 minutes: it can navigate turns. After 5 minutes: it's racing. All visualized with a neural network graph showing activations lighting up.
+- **How**: Pre-record a training progression (easy approach) or run accelerated imitation learning (hard approach). Display the neural network architecture as a visual graph (inspired by Radu Mariescu-Istodor's viral self-driving car visualization that got millions of YouTube views). Show attention heatmaps on the camera feed.
+- **Why it's viral**: "Watch AI learn to drive" videos consistently go viral. Making it interactive and in a browser amplifies this.
+- **Implementation**: Combine with the Ghost Car AI Clone feature (already in TODO). Add a split-screen "Training Mode" view.
+
+##### F. AI vs AI Tournament Mode
+- **The pitch**: Submit your trained AI clone to compete in automated AI-vs-AI races. A leaderboard ranks the best player-trained AIs. Think "Robocode" meets "Gran Turismo."
+- **How**: Players train clones via imitation learning (feature C above). Clones are stored as ~1MB weight files. Server runs automated races between submitted clones on a schedule. Results posted to a leaderboard.
+- **Why it's viral**: The meta-game of optimizing your driving to produce the best AI creates a deeper engagement layer. "My AI clone beat your AI clone" is a social hook.
+
+##### G. Cosmos Transfer -- Sim-to-Photoreal
+- **The pitch**: NVIDIA Cosmos Transfer transforms simulator output into photorealistic video. Apply it to CARLA frames for hyper-realistic visuals.
+- **How**: Cosmos Transfer models are open-source. Run on the server GPU to transform CARLA's already-decent graphics into near-photorealistic output.
+- **Challenge**: VRAM and latency. Cosmos models are large. May not fit alongside CARLA on 24GB, or may add too much latency for real-time streaming.
+- **Research needed**: Benchmark smallest Cosmos Transfer variant on RTX 3090.
+
+#### TIER 3: Moonshots (Viral Potential: EXTREME, Effort: HIGH)
+
+##### H. GameNGen-Style World Prediction
+- **The pitch**: Run a small world model alongside CARLA that predicts what the next frame will look like. Show a split-screen: "What the AI predicted" vs "What actually happened." When they match, it's eerie.
+- **Why it's viral**: The "AI predicting the future" angle is deeply compelling. This is GameNGen/Oasis territory but applied to a real driving scenario.
+
+##### I. Multiplayer with AI Ghosts
+- **The pitch**: Multiple real players racing simultaneously, each seeing AI ghosts of the others (not real-time multiplayer, but ghost replays from recent races). Creates the feeling of a crowded track without any multiplayer infrastructure.
+
+##### J. AI Race Photographer
+- **The pitch**: AI identifies the most visually dramatic moments in a race and captures "photographs" -- high-res single frames rendered from cinematic angles with depth-of-field, like Gran Turismo's famous photo mode but fully automated.
+
+### Priority Ranking: Viral Potential vs Effort
+
+| # | Feature | Viral | Effort | Why |
+|---|---------|-------|--------|-----|
+| 1 | Comic Book Mode (StreamDiffusion) | 10/10 | Medium | "Toggle art styles in real-time in a BROWSER" -- instant clips |
+| 2 | AI Race Commentary (already in TODO) | 10/10 | Medium | First racing game with live AI announcer |
+| 3 | AI Trash Talk (already in TODO) | 7/10 | Low | Pre-generated, zero cost, funny clips |
+| 4 | Cinematic Replay Director | 8/10 | Medium | Auto-generated highlight reels are shareable |
+| 5 | Voice-Controlled Racing | 8/10 | Low | "Yelling at my browser game" is inherently funny |
+| 6 | Depth Parallax | 6/10 | Medium | Subtle but technically impressive |
+| 7 | AI Driving Coach (already in TODO) | 8/10 | Low | Retention loop, easy API call |
+| 8 | Ghost Car AI Clone (already in TODO) | 9/10 | High | "Race against yourself" -- unique |
+| 9 | Live Training Viz | 10/10 | High | Watching AI learn is mesmerizing |
+| 10 | AI vs AI Tournament | 8/10 | High | Meta-game creates deep engagement |
+| 11 | GameNGen World Prediction | 10/10 | Extreme | Research-grade, but incredible demo |
+| 12 | Cosmos Sim-to-Photoreal | 7/10 | High | May not fit in VRAM |
+
+### Key Takeaways
+
+1. **The world-model narrative is our hook.** GameNGen, Oasis, Genie 2, and Cosmos have made "AI as game engine" the hottest topic in AI gaming. Shadow Driver should lean into this: "A real driving simulator streamed from a GPU to your browser, enhanced by AI." We are doing what these research demos promise, but for real.
+
+2. **StreamDiffusion + style transfer is the single biggest new opportunity.** At ~50fps on RTX 3090, we can offer real-time art style switching. This is the kind of feature that produces shareable clips organically.
+
+3. **AI commentary + Orpheus TTS is now more feasible than before.** Orpheus TTS (Apache 2.0, 200ms latency, Llama-based) is a better option than Kokoro for the commentator voice. It supports emotion tags and zero-shot cloning.
+
+4. **NVIDIA ACE games are shipping.** Total War Pharaoh, PUBG, inZOI, MIR5, and Dead Meat prove that on-device AI characters work in production. Our server-side approach (Claude API + Orpheus TTS) is architecturally simpler.
+
+5. **The browser is still the ultimate distribution channel.** None of these AAA AI features are accessible in a browser. That remains our key differentiator. "Wait, this runs in a BROWSER?!" is still the reaction we are optimizing for.

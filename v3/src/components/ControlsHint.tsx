@@ -50,6 +50,10 @@ export function ControlsHint({ visible }: ControlsHintProps) {
               <span className="bg-white/10 border border-white/20 rounded px-2 py-0.5 text-white/80 text-[11px]">C</span>
               <span className="text-white/50">Camera</span>
             </div>
+            <div className="flex items-center gap-2">
+              <span className="bg-white/10 border border-white/20 rounded px-2 py-0.5 text-white/80 text-[11px]">Bksp</span>
+              <span className="text-white/50">Restart Race</span>
+            </div>
           </div>
         </div>
       </div>

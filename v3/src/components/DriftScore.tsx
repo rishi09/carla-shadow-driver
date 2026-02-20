@@ -226,7 +226,7 @@ export function DriftScore({ drift, totalDriftScore = 0, driftEndEvent }: DriftS
 
       {/* Total drift score: top-right area */}
       {totalDriftScore > 0 && (
-        <div className="absolute top-4 right-4 z-10 pointer-events-none">
+        <div className="absolute top-16 right-4 z-10 pointer-events-none">
           <div className="bg-black/60 backdrop-blur-sm rounded-lg px-3 py-2 border border-amber-500/30">
             <div className="text-amber-400/70 text-[10px] font-mono uppercase tracking-wider">Drift Score</div>
             <div

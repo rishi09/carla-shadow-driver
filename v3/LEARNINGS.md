@@ -708,3 +708,61 @@ Format: `## [timestamp] Category: Short description`
 **Rule**: When setting CARLA camera attributes, always use histogram exposure mode (`exposure_mode: "histogram"`) for scenes with varying lighting. Manual exposure breaks badly in night/dawn transitions. Also set shutter_speed and ISO explicitly — CARLA's defaults produce noisy images in low light.
 
 ---
+
+## [2026-02-19] AI Gaming Innovations Research (Feb 2026)
+
+Deep research into the state of AI in gaming as of late 2025 / early 2026. Key findings relevant to Shadow Driver v3:
+
+### Neural Game Engines / World Models
+
+**GameNGen (Google, Aug 2024) proved diffusion models can be real-time game engines.** A fine-tuned Stable Diffusion 1.4 runs DOOM at 20fps on a single TPU. Human raters cannot distinguish real DOOM from generated output. The architecture uses two phases: (1) an RL agent plays DOOM to generate training data, (2) the diffusion model learns to predict next frames given previous frames + player actions. Critical innovation: corrupting context frames with Gaussian noise during training prevents visual drift during long play sessions. This spawned the "neural game engine" wave.
+
+**Oasis (Decart + Etched, Oct 2024) made it interactive and Minecraft-like.** Uses ViT spatial autoencoder + DiT (Diffusion Transformer) backbone. Runs at 20fps, 100x faster than comparable text-to-video models. 500M param version is public. Key limitations: fuzzy distant visuals, limited long-context memory, temporal inconsistencies.
+
+**Genie 2 (DeepMind, Dec 2024) generates 3D worlds from a single image.** Foundation world model with physics (gravity, water, smoke), NPC behavior, and counterfactual generation. Maintains coherent worlds for up to 60 seconds. Still research-stage; playable distilled version runs in real-time at reduced quality.
+
+**NVIDIA Cosmos (Jan 2025) provides open-source world foundation models.** Three models: Predict (30s video from prompts), Transfer (sim-to-photoreal style transfer), Reason (multimodal physical reasoning). Open source under NVIDIA Open Model License. The Transfer model is directly relevant -- it transforms simulator output into photorealistic video.
+
+**World Labs / Marble (Fei-Fei Li, Jan 2026) generates explorable 3D worlds.** Public API launched January 2026. Creates spatially consistent worlds from text/image/video. Supports interactive editing and combining worlds.
+
+**Rule**: The "AI as game engine" narrative is the hottest topic in AI gaming. Shadow Driver should lean into this framing since we ARE streaming a real simulator from a GPU -- we are doing what these research demos promise, but for a real game.
+
+### AI NPCs in Shipped Games
+
+**NVIDIA ACE is now in production games, not just demos.** As of early 2025, five games ship with ACE integration: Total War: PHARAOH (AI advisor), PUBG (co-player characters), inZOI (Smart Zois with sLM), MIR5 (adaptive AI bosses), Dead Meat (freeform NPC questioning). ACE includes Riva ASR/TTS, multiple LLMs (Nemotron, Qwen3, Mistral, Llama), and Audio2Face-3D for lip sync. The NVIGI SDK runs models in-process via CUDA.
+
+**inZOI (KRAFTON) is the clearest example of AI features people actually use.** On-device generative AI for text-to-texture, 2D-to-3D objects, video-to-motion, and sLM-driven character behavior. This shows players want AI-generated content customization.
+
+**Rule**: For racing game AI personality, we do not need the full NPC dialogue stack. Pre-generated trash talk lines (zero runtime cost) combined with event-triggered TTS gives 80% of the impact at 5% of the complexity. Ship the pre-generated version first, upgrade to live LLM generation later.
+
+### Real-Time Style Transfer is Now Practical
+
+**StreamDiffusion achieves 93fps image-to-image on RTX 4090 with SD-turbo (1 step).** Key optimizations: Stream Batch processing, Residual Classifier-Free Guidance, Stochastic Similarity Filter (skips processing when frames have not changed much). On our RTX 3090, estimated 50-60fps -- enough for our 30fps target. This makes "Comic Book Mode" or "Anime Mode" genuinely feasible as a real-time feature.
+
+**Rule**: For real-time style transfer on game feeds, use StreamDiffusion with SD-turbo at 1 denoising step. The Stochastic Similarity Filter is critical for game frames -- it skips processing when the scene is mostly static (camera not moving), saving GPU cycles. VRAM: SD-turbo requires ~4GB, totaling ~14GB with CARLA. Fits on 24GB.
+
+### DLSS 4 and Neural Frame Generation
+
+**DLSS 4 generates up to 3 AI frames per rendered frame on RTX 50 series.** Uses 5th-gen Tensor Cores. Includes transformer-based Super Resolution, Ray Reconstruction, and DLAA. DLSS 4.5 introduces Dynamic Multi-Frame Generation that adapts to scene complexity.
+
+**Rule**: Our client-side frame interpolation idea mirrors DLSS Frame Generation in concept. The simplest approach (alpha-blend between consecutive frames) gets us "perceived 60fps" at near-zero cost. The compelling narrative: "We built browser-DLSS."
+
+### Racing-Specific AI
+
+**Gran Turismo Sophy (Sony AI, Nature 2022) remains the gold standard.** Deep RL trained via multi-agent league. Key insight: the reward function shapes for clean racing (speed + etiquette), not just winning. This prevents the AI from learning dirty tactics that feel unfair. Integrated into GT7 as time-limited racing events.
+
+**Rule**: When training racing AI (RL or imitation learning), always include a penalty for collisions and a reward for clean racing in the reward function. Pure speed optimization produces aggressive AI that feels unfair. The GT Sophy approach -- rewarding both speed and sportsmanship -- produces opponents players actually enjoy racing against.
+
+### Text-to-Speech for Game Integration
+
+**Orpheus TTS (Canopy Labs, Mar 2025) is the best open-source TTS for games.** Llama-based Speech-LLM with ~200ms streaming latency (100ms with input streaming). Apache 2.0 license. Supports emotion control via tags and zero-shot voice cloning. Based on Meta-Llama-3.2-3B-Instruct. Better option than Kokoro for our AI commentator -- higher quality, emotion support, Apache license.
+
+**Rule**: For real-time game voice, prioritize streaming latency over audio quality. Orpheus TTS at ~200ms streaming is acceptable for commentary (non-interactive). For interactive voice (voice commands), use Web Speech API (SpeechRecognition) on the client -- zero latency, zero download, works in Chrome.
+
+### Depth Estimation
+
+**Depth Anything V2 (NeurIPS 2024) provides cheap monocular depth.** 25M to 1.3B param versions available. 10x faster than diffusion-based alternatives. Can generate depth maps from our JPEG frames at ~10Hz with the smallest model (~100MB VRAM). Could be used for parallax effects, pseudo-3D, or occlusion-aware UI overlays.
+
+**Rule**: For adding pseudo-3D to a 2D video stream, run Depth Anything V2 small model server-side at 10Hz (every 3rd frame), send a low-res depth map (160x90, uint8, ~14KB) to the client, and use it as a WebGL displacement map. Max displacement should be subtle (5px) -- too much breaks the illusion.
+
+---

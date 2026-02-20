@@ -1,6 +1,9 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { LeaderboardPanel } from './LeaderboardPanel.tsx';
 import { usePersonalBests } from '../hooks/usePersonalBests.ts';
+import { getDailyChallenge, getDailyBest } from '../hooks/useDailyChallenge.ts';
+import { usePlayerName } from '../hooks/usePlayerName.ts';
+import { useStreak } from '../hooks/useStreak.ts';
 
 const MEDAL_ICONS: Record<string, string> = {
   gold: '\uD83E\uDD47',
@@ -15,10 +18,10 @@ interface TrackOption {
 }
 
 const TRACKS: TrackOption[] = [
-  { id: 'Town03', name: 'Town03', description: 'Mixed town - suburban streets and highway (Recommended)' },
+  { id: 'Town05', name: 'Town05', description: 'Urban grid - wide multilane roads, many intersections' },
+  { id: 'Town03', name: 'Town03', description: 'Mixed town - suburban streets and highway' },
   { id: 'Town04', name: 'Town04', description: 'Highway circuit - long straights with a small town section' },
   { id: 'Town01', name: 'Town01', description: 'Small town - river crossings, bridges, moderate intersections' },
-  { id: 'Town05', name: 'Town05', description: 'Urban grid - wide multilane roads, many intersections' },
   { id: 'Town02', name: 'Town02', description: 'Residential - narrow winding streets, tight corners (Hard)' },
   { id: 'Town10HD', name: 'Town10HD', description: 'Downtown city - dense skyscraper blocks, tight turns (Hard)' },
   { id: 'Town07', name: 'Town07', description: 'Rural highway loop - requires additional CARLA maps package' },
@@ -39,7 +42,7 @@ const WEATHER_OPTIONS: WeatherOption[] = [
   { id: 'night', label: 'Night', icon: '\uD83C\uDF19' },
 ];
 
-const LAP_OPTIONS = [1, 3, 5];
+const LAP_OPTIONS = [1, 2, 3, 5];
 
 interface ModelOption {
   id: string;
@@ -84,23 +87,86 @@ const TIME_OF_DAY_OPTIONS: TimeOfDayOption[] = [
   { id: 'storm', label: 'Storm', color: 'text-gray-400', borderColor: 'border-gray-500/50' },
 ];
 
+// Sensible defaults for the best first impression
+const DEFAULT_TRACK = 'Town05';
+const DEFAULT_LAPS = 2;
+const DEFAULT_WEATHER = 'clear';
+const DEFAULT_MODEL = 'carla_pilotnet';
+const DEFAULT_CAR = 'vehicle.tesla.model3';
+const DEFAULT_TIME_OF_DAY = 'noon';
+
 interface RaceSetupProps {
   onStartRace: (track: string, laps: number, weather: string, model?: string, playerCar?: string, timeOfDay?: string) => void;
   onBack: () => void;
+  onStartDailyChallenge?: () => void;
+  quickstart?: boolean;
+  isConnected?: boolean;
 }
 
-export function RaceSetup({ onStartRace, onBack }: RaceSetupProps) {
-  const [selectedTrack, setSelectedTrack] = useState('Town03');
-  const [selectedWeather, setSelectedWeather] = useState('clear');
-  const [selectedLaps, setSelectedLaps] = useState(3);
-  const [selectedModel, setSelectedModel] = useState('carla_pilotnet');
-  const [selectedCar, setSelectedCar] = useState('vehicle.tesla.model3');
-  const [selectedTimeOfDay, setSelectedTimeOfDay] = useState('noon');
+export function RaceSetup({ onStartRace, onBack, onStartDailyChallenge, quickstart, isConnected }: RaceSetupProps) {
+  const [selectedTrack, setSelectedTrack] = useState(DEFAULT_TRACK);
+  const [selectedWeather, setSelectedWeather] = useState(DEFAULT_WEATHER);
+  const [selectedLaps, setSelectedLaps] = useState(DEFAULT_LAPS);
+  const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL);
+  const [selectedCar, setSelectedCar] = useState(DEFAULT_CAR);
+  const [selectedTimeOfDay, setSelectedTimeOfDay] = useState(DEFAULT_TIME_OF_DAY);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
+  // Quickstart auto-start: when quickstart is true and connected, start after a brief delay
+  const quickstartFiredRef = useRef(false);
+  useEffect(() => {
+    if (quickstart && isConnected && !quickstartFiredRef.current) {
+      quickstartFiredRef.current = true;
+      const timer = setTimeout(() => {
+        onStartRace(DEFAULT_TRACK, DEFAULT_LAPS, DEFAULT_WEATHER, DEFAULT_MODEL, DEFAULT_CAR, DEFAULT_TIME_OF_DAY);
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [quickstart, isConnected, onStartRace]);
+
+  const playerName = usePlayerName();
+  const streak = useStreak();
 
   const personalBests = usePersonalBests();
   const currentTrack = TRACKS.find(t => t.id === selectedTrack);
   const currentBest = personalBests.getBest(selectedTrack, selectedLaps);
   const currentMedal = currentBest ? personalBests.getMedal(selectedTrack, selectedLaps, currentBest.time) : null;
+
+  // Daily Challenge
+  const dailyChallenge = getDailyChallenge();
+  const dailyBest = getDailyBest(dailyChallenge.daySeed);
+  const dailyTrackName = TRACKS.find(t => t.id === dailyChallenge.track)?.name ?? dailyChallenge.track;
+  const dailyWeatherIcon = WEATHER_OPTIONS.find(w => w.id === dailyChallenge.weather)?.icon ?? '';
+
+  const handleDailyChallenge = () => {
+    if (onStartDailyChallenge) {
+      onStartDailyChallenge();
+    } else {
+      // Fallback: apply daily settings and start
+      onStartRace(
+        dailyChallenge.track,
+        dailyChallenge.laps,
+        dailyChallenge.weather,
+        dailyChallenge.model,
+        selectedCar,
+        dailyChallenge.timeOfDay,
+      );
+    }
+  };
+
+  // If quickstart mode and connected, show a minimal "launching" UI
+  if (quickstart && isConnected) {
+    return (
+      <div className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center z-50">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-12 h-12 rounded-full border-2 border-white/20 border-t-green-400" style={{ animation: 'spin 0.8s linear infinite' }} />
+          <span className="text-white text-xl font-bold">Starting race...</span>
+          <span className="text-white/40 text-sm">Loading Town05 with defaults</span>
+          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -116,7 +182,77 @@ export function RaceSetup({ onStartRace, onBack }: RaceSetupProps) {
           </button>
         </div>
 
-        {/* Track Selector */}
+        {/* Player Name + Streak Row */}
+        <div className="flex items-center gap-3 mb-5">
+          <div className="flex-1">
+            <input
+              type="text"
+              value={playerName.name}
+              onChange={(e) => playerName.setName(e.target.value)}
+              placeholder="Enter your name"
+              maxLength={20}
+              className="w-full bg-black/60 backdrop-blur-sm border border-white/10 rounded-lg px-4 py-2.5 text-white text-sm placeholder-white/30 focus:outline-none focus:border-white/30 transition-colors"
+            />
+          </div>
+          {streak.streak > 0 && (
+            <div className="flex flex-col items-center gap-0.5 shrink-0">
+              <div
+                className="flex items-center gap-1.5 rounded-full px-3 py-1.5 border border-orange-500/30 bg-orange-500/10"
+                style={{ animation: 'streak-glow 2s ease-in-out infinite' }}
+              >
+                <span className="text-orange-400 text-sm">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                    <path d="M12 23c-3.6 0-7-2.4-7-7 0-3.1 2.1-5.7 4-7.6l.7-.8c.4-.4 1-.4 1.3.1L13 11l2.5-6.5c.2-.4.6-.6 1-.5.4.1.7.5.7.9V9c2.3 2 4 4.7 4 7.5 0 4.3-3.4 6.5-7 6.5h-2.2z"/>
+                  </svg>
+                </span>
+                <span className="text-orange-400 text-xs font-bold">{streak.streak}-day streak!</span>
+              </div>
+              {streak.bestStreak > streak.streak && (
+                <span className="text-white/30 text-[10px] font-mono">Best: {streak.bestStreak} days</span>
+              )}
+            </div>
+          )}
+        </div>
+        <style>{`
+          @keyframes streak-glow {
+            0%, 100% { box-shadow: 0 0 8px rgba(249, 115, 22, 0.15); }
+            50% { box-shadow: 0 0 16px rgba(249, 115, 22, 0.3); }
+          }
+        `}</style>
+
+        {/* Daily Challenge Card */}
+        <button
+          onClick={handleDailyChallenge}
+          className="w-full mb-6 p-4 rounded-xl border border-amber-500/30 bg-gradient-to-r from-amber-500/10 to-orange-500/10 hover:from-amber-500/20 hover:to-orange-500/20 transition-all text-left group"
+        >
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <span className="text-amber-400 font-bold text-sm uppercase tracking-wider">Daily Challenge</span>
+              <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded border border-amber-500/40 bg-amber-500/20 text-amber-400">
+                {dailyChallenge.dateLabel}
+              </span>
+            </div>
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-amber-400/60 group-hover:text-amber-400 group-hover:translate-x-0.5 transition-all">
+              <polyline points="9 18 15 12 9 6" />
+            </svg>
+          </div>
+          <div className="flex items-center gap-3 text-xs text-white/50">
+            <span>{dailyTrackName}</span>
+            <span className="text-white/20">|</span>
+            <span>{dailyWeatherIcon} {dailyChallenge.weather}</span>
+            <span className="text-white/20">|</span>
+            <span>{dailyChallenge.laps} Laps</span>
+            <span className="text-white/20">|</span>
+            <span className="text-amber-400/70">{dailyChallenge.difficulty}</span>
+          </div>
+          {dailyBest && (
+            <div className="mt-2 text-xs font-mono text-amber-400/60">
+              Today's best: {formatSetupTime(dailyBest.time)}
+            </div>
+          )}
+        </button>
+
+        {/* Track Selector - front and center */}
         <div className="mb-5">
           <label className="block text-white/60 text-sm font-medium mb-2">Track</label>
           <select
@@ -143,89 +279,8 @@ export function RaceSetup({ onStartRace, onBack }: RaceSetupProps) {
           )}
         </div>
 
-        {/* Weather Selector */}
+        {/* AI Opponent - front and center */}
         <div className="mb-5">
-          <label className="block text-white/60 text-sm font-medium mb-2">Weather</label>
-          <div className="grid grid-cols-3 gap-2">
-            {WEATHER_OPTIONS.map((weather) => (
-              <button
-                key={weather.id}
-                onClick={() => setSelectedWeather(weather.id)}
-                className={`flex flex-col items-center gap-1 py-3 px-2 rounded-lg border text-sm transition-all ${
-                  selectedWeather === weather.id
-                    ? 'bg-white/10 border-white/30 text-white'
-                    : 'bg-black/60 border-white/10 text-white/50 hover:border-white/20 hover:text-white/70'
-                }`}
-              >
-                <span className="text-lg">{weather.icon}</span>
-                <span>{weather.label}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Time of Day Selector */}
-        <div className="mb-5">
-          <label className="block text-white/60 text-sm font-medium mb-2">Time of Day</label>
-          <div className="grid grid-cols-5 gap-2">
-            {TIME_OF_DAY_OPTIONS.map((tod) => (
-              <button
-                key={tod.id}
-                onClick={() => setSelectedTimeOfDay(tod.id)}
-                className={`flex flex-col items-center gap-1 py-2.5 px-1 rounded-lg border text-xs transition-all ${
-                  selectedTimeOfDay === tod.id
-                    ? `bg-white/10 ${tod.borderColor} ${tod.color}`
-                    : 'bg-black/60 border-white/10 text-white/50 hover:border-white/20 hover:text-white/70'
-                }`}
-              >
-                <span className="font-medium">{tod.label}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Lap Count Selector */}
-        <div className="mb-6">
-          <label className="block text-white/60 text-sm font-medium mb-2">Laps</label>
-          <div className="flex gap-2">
-            {LAP_OPTIONS.map((laps) => (
-              <button
-                key={laps}
-                onClick={() => setSelectedLaps(laps)}
-                className={`flex-1 py-3 rounded-lg border text-sm font-medium transition-all ${
-                  selectedLaps === laps
-                    ? 'bg-white/10 border-white/30 text-white'
-                    : 'bg-black/60 border-white/10 text-white/50 hover:border-white/20 hover:text-white/70'
-                }`}
-              >
-                {laps} {laps === 1 ? 'Lap' : 'Laps'}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Car Selector */}
-        <div className="mb-5">
-          <label className="block text-white/60 text-sm font-medium mb-2">Your Car</label>
-          <div className="grid grid-cols-3 gap-2">
-            {CAR_OPTIONS.map((car) => (
-              <button
-                key={car.id}
-                onClick={() => setSelectedCar(car.id)}
-                className={`flex flex-col items-center gap-1 py-3 px-2 rounded-lg border text-sm transition-all ${
-                  selectedCar === car.id
-                    ? 'bg-white/10 border-player/50 text-white'
-                    : 'bg-black/60 border-white/10 text-white/50 hover:border-white/20 hover:text-white/70'
-                }`}
-              >
-                <span className="text-xs text-center font-medium leading-tight">{car.name}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* AI Opponent */}
-        <div className="mb-6">
           <label className="block text-white/60 text-sm font-medium mb-2">AI Opponent</label>
           <div className="space-y-2">
             {AI_MODELS.map((model) => (
@@ -255,15 +310,139 @@ export function RaceSetup({ onStartRace, onBack }: RaceSetupProps) {
           </div>
         </div>
 
+        {/* Lap Count Selector */}
+        <div className="mb-6">
+          <label className="block text-white/60 text-sm font-medium mb-2">Laps</label>
+          <div className="flex gap-2">
+            {LAP_OPTIONS.map((laps) => (
+              <button
+                key={laps}
+                onClick={() => setSelectedLaps(laps)}
+                className={`flex-1 py-3 rounded-lg border text-sm font-medium transition-all ${
+                  selectedLaps === laps
+                    ? 'bg-white/10 border-white/30 text-white'
+                    : 'bg-black/60 border-white/10 text-white/50 hover:border-white/20 hover:text-white/70'
+                }`}
+              >
+                {laps} {laps === 1 ? 'Lap' : 'Laps'}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Advanced Settings - collapsible */}
+        <div className="mb-6">
+          <button
+            onClick={() => setShowAdvanced(!showAdvanced)}
+            className="flex items-center gap-2 text-white/40 hover:text-white/60 text-sm font-medium transition-colors w-full"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className={`transition-transform duration-200 ${showAdvanced ? 'rotate-90' : ''}`}
+            >
+              <polyline points="9 18 15 12 9 6" />
+            </svg>
+            <span>Advanced Settings</span>
+            <span className="flex-1 h-px bg-white/10 ml-2" />
+          </button>
+
+          {showAdvanced && (
+            <div className="mt-4 space-y-5 pl-1 animate-in">
+              <style>{`
+                .animate-in {
+                  animation: slideDown 0.2s ease-out;
+                }
+                @keyframes slideDown {
+                  from { opacity: 0; transform: translateY(-8px); }
+                  to { opacity: 1; transform: translateY(0); }
+                }
+              `}</style>
+
+              {/* Weather Selector */}
+              <div>
+                <label className="block text-white/60 text-sm font-medium mb-2">Weather</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {WEATHER_OPTIONS.map((weather) => (
+                    <button
+                      key={weather.id}
+                      onClick={() => setSelectedWeather(weather.id)}
+                      className={`flex flex-col items-center gap-1 py-3 px-2 rounded-lg border text-sm transition-all ${
+                        selectedWeather === weather.id
+                          ? 'bg-white/10 border-white/30 text-white'
+                          : 'bg-black/60 border-white/10 text-white/50 hover:border-white/20 hover:text-white/70'
+                      }`}
+                    >
+                      <span className="text-lg">{weather.icon}</span>
+                      <span>{weather.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Time of Day Selector */}
+              <div>
+                <label className="block text-white/60 text-sm font-medium mb-2">Time of Day</label>
+                <div className="grid grid-cols-5 gap-2">
+                  {TIME_OF_DAY_OPTIONS.map((tod) => (
+                    <button
+                      key={tod.id}
+                      onClick={() => setSelectedTimeOfDay(tod.id)}
+                      className={`flex flex-col items-center gap-1 py-2.5 px-1 rounded-lg border text-xs transition-all ${
+                        selectedTimeOfDay === tod.id
+                          ? `bg-white/10 ${tod.borderColor} ${tod.color}`
+                          : 'bg-black/60 border-white/10 text-white/50 hover:border-white/20 hover:text-white/70'
+                      }`}
+                    >
+                      <span className="font-medium">{tod.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Car Selector */}
+              <div>
+                <label className="block text-white/60 text-sm font-medium mb-2">Your Car</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {CAR_OPTIONS.map((car) => (
+                    <button
+                      key={car.id}
+                      onClick={() => setSelectedCar(car.id)}
+                      className={`flex flex-col items-center gap-1 py-3 px-2 rounded-lg border text-sm transition-all ${
+                        selectedCar === car.id
+                          ? 'bg-white/10 border-player/50 text-white'
+                          : 'bg-black/60 border-white/10 text-white/50 hover:border-white/20 hover:text-white/70'
+                      }`}
+                    >
+                      <span className="text-xs text-center font-medium leading-tight">{car.name}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
         {/* Personal Records / Leaderboard */}
         <div className="mb-6">
           <LeaderboardPanel selectedTrack={selectedTrack} selectedLaps={selectedLaps} />
         </div>
 
-        {/* Start Race Button */}
+        {/* Start Race Button - big and prominent */}
         <button
           onClick={() => onStartRace(selectedTrack, selectedLaps, selectedWeather, selectedModel, selectedCar, selectedTimeOfDay)}
-          className="w-full py-3 px-6 bg-gradient-to-r from-player to-ai rounded-lg text-white font-bold text-lg hover:opacity-90 transition-opacity animate-glow"
+          className="w-full py-5 px-6 rounded-xl text-white font-black text-xl tracking-wide transition-all duration-300 hover:scale-[1.02] active:scale-[0.98]"
+          style={{
+            background: 'linear-gradient(135deg, #22C55E 0%, #16A34A 100%)',
+            boxShadow: '0 0 25px rgba(34,197,94,0.3), 0 0 60px rgba(34,197,94,0.08)',
+          }}
         >
           Start Race
         </button>

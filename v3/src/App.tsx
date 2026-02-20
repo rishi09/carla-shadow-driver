@@ -1,3 +1,4 @@
+import { About } from './pages/About.tsx';
 import { Landing } from './pages/Landing.tsx';
 import { Race } from './pages/Race.tsx';
 
@@ -7,6 +8,10 @@ function App() {
 
   if (path === '/race') {
     return <Race />;
+  }
+
+  if (path === '/about') {
+    return <About />;
   }
 
   return <Landing />;

@@ -50,17 +50,17 @@ export function WebRTCVideo({ remoteStream, className = '' }: WebRTCVideoProps) 
   }, []);
 
   return (
-    <div className={`relative ${className}`} style={{ width: '100%', maxHeight: '80vh' }}>
+    <div className={`relative ${className}`}>
       <video
         ref={videoRef}
         autoPlay
         playsInline
         muted
-        className="bg-dark-500 rounded-lg"
-        style={{ width: '100%', height: 'auto', maxHeight: '80vh', objectFit: 'contain' }}
+        className="bg-dark-500 w-full h-full"
+        style={{ objectFit: 'cover' }}
       />
       {!isPlaying && (
-        <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-dark-500">
+        <div className="absolute inset-0 flex items-center justify-center bg-dark-500">
           <span className="text-white/40 text-lg font-mono animate-pulse">
             Waiting for video feed...
           </span>

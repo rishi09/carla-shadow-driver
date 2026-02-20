@@ -755,10 +755,17 @@ class RaceServer:
                             self.carla.adjust_ai_speed(speed_adj)
 
                     # AI Mistakes: periodically slow the AI to create overtaking opportunities
+                    # Personality emotion affects mistake frequency via interval multiplier
                     if self.mistake_generator and self.carla._ai_autopilot:
                         gap = self.race_state.get_gap_seconds()
                         was_active = self.mistake_generator._active_mistake is not None
+                        # Scale mistake penalty by personality aggression (aggressive = bigger mistakes)
                         mistake = self.mistake_generator.update(time.time(), gap)
+                        if mistake and self.ai_personality:
+                            params = self.ai_personality.get_driving_params()
+                            # Scale speed_penalty by aggression: high aggression = bigger mistakes from pushing too hard
+                            mistake = dict(mistake)  # copy to avoid mutating template
+                            mistake['speed_penalty'] = mistake.get('speed_penalty', 0) * (0.5 + params['aggression'] * 0.8)
                         if mistake:
                             self.carla.apply_ai_mistake(mistake)
                         elif was_active and self.mistake_generator._active_mistake is None:

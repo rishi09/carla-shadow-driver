@@ -302,7 +302,7 @@ export function Minimap({ raceState }: MinimapProps) {
       ref={canvasRef}
       width={MAP_SIZE}
       height={MAP_SIZE}
-      className="absolute bottom-24 right-4 z-20 pointer-events-none"
+      className="absolute bottom-28 right-4 z-20 pointer-events-none"
       style={{ width: MAP_SIZE, height: MAP_SIZE }}
     />
   );

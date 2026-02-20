@@ -6,8 +6,12 @@ import { useSteeringPrediction } from '../hooks/useSteeringPrediction.ts';
 import { useFrameExtrapolation } from '../hooks/useFrameExtrapolation.ts';
 import { useLeaderboard } from '../hooks/useLeaderboard.ts';
 import { usePersonalBests } from '../hooks/usePersonalBests.ts';
+import { useGamepad } from '../hooks/useGamepad.ts';
+import { useStreak } from '../hooks/useStreak.ts';
+import { getDailyChallenge, saveDailyChallengeResult } from '../hooks/useDailyChallenge.ts';
 import type { PersonalBestResult } from '../hooks/usePersonalBests.ts';
 import { VideoCanvas } from '../components/VideoCanvas.tsx';
+import { WebGLCanvas, supportsWebGL2 } from '../components/WebGLCanvas.tsx';
 import { WebRTCVideo } from '../components/WebRTCVideo.tsx';
 import { RaceHUD } from '../components/RaceHUD.tsx';
 import { SpeedEffects } from '../components/SpeedEffects.tsx';
@@ -15,11 +19,17 @@ import { SpeedLines } from '../components/SpeedLines.tsx';
 import { ParticleOverlay } from '../components/ParticleOverlay.tsx';
 import { DriftScore } from '../components/DriftScore.tsx';
 import { CommentaryOverlay } from '../components/CommentaryOverlay.tsx';
+import { AIChatBubble } from '../components/AIChatBubble.tsx';
 import { GPUConnectionModal } from '../components/GPUConnectionModal.tsx';
 import { RaceResults } from '../components/RaceResults.tsx';
 import { RaceSetup } from '../components/RaceSetup.tsx';
 import { Minimap } from '../components/Minimap.tsx';
 import { ControlsHint } from '../components/ControlsHint.tsx';
+import { WeatherOverlay } from '../components/WeatherOverlay.tsx';
+import { FirstTimeOverlay } from '../components/FirstTimeOverlay.tsx';
+import { PhotoMode } from '../components/PhotoMode.tsx';
+import { ClipPreview } from '../components/ClipPreview.tsx';
+import { useReplayRecorder } from '../hooks/useReplayRecorder.ts';
 import type { KeyState } from '../types/index.ts';
 import { useEffect, useRef } from 'react';
 
@@ -31,7 +41,8 @@ export function Race() {
   const params = new URLSearchParams(window.location.search);
   const isDemo = params.get('demo') === 'true';
   const directWsUrl = params.get('ws');
-  const [view, setView] = useState<RaceView>(isDemo || directWsUrl ? 'pre_race' : 'setup');
+  const isQuickstart = params.get('quickstart') === 'true';
+  const [view, setView] = useState<RaceView>(isDemo || directWsUrl || isQuickstart ? 'pre_race' : 'setup');
   const [showRespawning, setShowRespawning] = useState(false);
   const [raceWeather, setRaceWeather] = useState('clear');
   const keysRef = useRef<KeyState>({ w: false, a: false, s: false, d: false, space: false });
@@ -39,6 +50,9 @@ export function Race() {
   const respawnTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cameraIndexRef = useRef(0);
   const CAMERA_MODES = ['chase', 'hood', 'bumper'] as const;
+
+  // Feature-detect WebGL2 once (stable across renders)
+  const [useWebGL2] = useState(() => supportsWebGL2());
 
   // Store last race settings for instant replay and share link
   const lastRaceSettingsRef = useRef<{ track: string; laps: number; weather: string; model?: string; playerCar?: string; timeOfDay?: string } | null>(null);
@@ -48,6 +62,8 @@ export function Race() {
   const bgMusic = useBackgroundMusic();
   const leaderboard = useLeaderboard();
   const personalBests = usePersonalBests();
+  const gamepad = useGamepad();
+  const streak = useStreak();
   const steeringPrediction = useSteeringPrediction(keysRef, view === 'racing', gpu.raceState?.player?.speed_kmh ?? 0);
   const frameExtrapolation = useFrameExtrapolation(
     gpu.raceState?.player?.speed_kmh ?? 0,
@@ -62,6 +78,19 @@ export function Race() {
   // Personal best result for the most recent finished race
   const [pbResult, setPbResult] = useState<PersonalBestResult | null>(null);
 
+  // Daily challenge state
+  const [isDailyChallenge, setIsDailyChallenge] = useState(false);
+  const [dailyChallengePosition, setDailyChallengePosition] = useState<{ position: number; total: number; isNewBest: boolean } | null>(null);
+
+  // First-time player detection
+  const [showFirstTimeOverlay, setShowFirstTimeOverlay] = useState(false);
+  const hasPlayedBeforeRef = useRef(() => {
+    try { return localStorage.getItem('shadow_driver_has_played') === 'true'; } catch { return false; }
+  });
+
+  // Streak result for the most recent finished race
+  const [streakResult, setStreakResult] = useState<{ newStreak: number; isNewRecord: boolean } | null>(null);
+
   // Track previous race_status for countdown detection
   const prevRaceStatusRef = useRef<string | null>(null);
 
@@ -71,6 +100,15 @@ export function Race() {
   // Controls hint: show when race transitions from countdown to racing
   const [showControlsHint, setShowControlsHint] = useState(false);
   const controlsHintTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // --- Photo Mode state ---
+  const [photoModeActive, setPhotoModeActive] = useState(false);
+  const photoCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  // --- Replay clip recording ---
+  const replayCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const replayRecorder = useReplayRecorder(replayCanvasRef, gpu.raceState);
+  const [showClipPreview, setShowClipPreview] = useState(false);
 
   // --- Screen shake state ---
   const [shakeX, setShakeX] = useState(0);
@@ -141,9 +179,14 @@ export function Race() {
     }
     // Show controls hint when transitioning from countdown to racing
     if (status === 'racing' && prevRaceStatusRef.current === 'countdown') {
-      setShowControlsHint(true);
-      if (controlsHintTimeoutRef.current) clearTimeout(controlsHintTimeoutRef.current);
-      controlsHintTimeoutRef.current = setTimeout(() => setShowControlsHint(false), 4000);
+      // First-time players get the full controls overlay; returning players get the brief hint
+      if (!hasPlayedBeforeRef.current()) {
+        setShowFirstTimeOverlay(true);
+      } else {
+        setShowControlsHint(true);
+        if (controlsHintTimeoutRef.current) clearTimeout(controlsHintTimeoutRef.current);
+        controlsHintTimeoutRef.current = setTimeout(() => setShowControlsHint(false), 4000);
+      }
     }
 
     // Trigger screen shake on GO (countdown === 0)
@@ -198,9 +241,12 @@ export function Race() {
     }
 
     // Use the strongest collision for shake intensity
+    // sqrt scaling so even moderate collisions (200-500) produce noticeable shake
     const maxIntensity = Math.max(...collisions.map(c => c.intensity));
-    const magnitude = Math.min(10, maxIntensity / 500);
-    triggerScreenShake(magnitude, 300);
+    const magnitude = Math.min(15, Math.sqrt(maxIntensity) * 0.5);
+    // Duration scales with magnitude: 200ms for light taps, up to 500ms for heavy impacts
+    const shakeDuration = 200 + Math.min(300, magnitude * 20);
+    triggerScreenShake(magnitude, shakeDuration);
 
     return () => {
       if (shakeRafRef.current !== null) {
@@ -210,15 +256,95 @@ export function Race() {
     };
   }, [gpu.raceState?.collisions, engineSound.playImpact, triggerScreenShake]);
 
+  // --- Adaptive music event triggers ---
+  // Track previous gap sign for overtake detection and previous lap for final lap
+  const prevGapSignRef = useRef<number>(0); // positive = player behind, negative = player ahead
+  const prevLapRef = useRef<number>(0);
+  const closeGapTriggeredRef = useRef(false);
+
+  useEffect(() => {
+    if (view !== 'racing') return;
+    const player = gpu.raceState?.player;
+    if (!player) return;
+
+    const gap = player.gap_seconds;
+
+    // Overtake detection: gap crosses from positive (behind) to negative (ahead)
+    if (gap != null) {
+      const currentSign = gap > 0 ? 1 : gap < 0 ? -1 : 0;
+      if (prevGapSignRef.current > 0 && currentSign < 0) {
+        // Player just overtook the AI
+        engineSound.triggerEvent('overtake');
+      }
+      prevGapSignRef.current = currentSign;
+
+      // Close gap tension: activate when |gap| < 1s, deactivate when |gap| >= 1s
+      if (Math.abs(gap) < 1.0) {
+        if (!closeGapTriggeredRef.current) {
+          closeGapTriggeredRef.current = true;
+          engineSound.triggerEvent('close_gap');
+        }
+      } else {
+        if (closeGapTriggeredRef.current) {
+          closeGapTriggeredRef.current = false;
+          engineSound.stopCloseGapTension();
+        }
+      }
+    }
+
+    // Final lap detection
+    if (player.total_laps > 1 && player.lap === player.total_laps && prevLapRef.current !== player.total_laps) {
+      engineSound.triggerEvent('final_lap');
+    }
+    prevLapRef.current = player.lap;
+  }, [view, gpu.raceState?.player?.gap_seconds, gpu.raceState?.player?.lap, gpu.raceState?.player?.total_laps, engineSound.triggerEvent, engineSound.stopCloseGapTension]);
+
+  // Collision hit sound (percussive white noise burst, layered on top of existing impact)
+  useEffect(() => {
+    const collisions = gpu.raceState?.collisions;
+    if (!collisions || collisions.length === 0) return;
+    engineSound.triggerEvent('collision_hit');
+  }, [gpu.raceState?.collisions, engineSound.triggerEvent]);
+
   // --- Background music lifecycle ---
   useEffect(() => {
     const status = gpu.raceState?.race_status;
-    if (view === 'racing' && (status === 'racing' || status === 'countdown')) {
+    if (view === 'racing' && (status === 'racing' || status === 'finishing' || status === 'countdown')) {
       bgMusic.start();
     } else {
       bgMusic.stop();
     }
   }, [view, gpu.raceState?.race_status, bgMusic.start, bgMusic.stop]);
+
+  // --- Wake Lock: prevent screen from sleeping during race ---
+  useEffect(() => {
+    if (view !== 'racing') return;
+
+    let wakeLock: WakeLockSentinel | null = null;
+
+    const requestWakeLock = async () => {
+      try {
+        wakeLock = await navigator.wakeLock?.request('screen');
+      } catch {
+        // Wake Lock API not supported or permission denied -- ignore
+      }
+    };
+
+    requestWakeLock();
+
+    // Re-acquire wake lock when tab becomes visible again (released on visibility change)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        requestWakeLock();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      wakeLock?.release().catch(() => {});
+    };
+  }, [view]);
 
   // --- Keyboard controls (racing view) ---
   useEffect(() => {
@@ -236,16 +362,52 @@ export function Race() {
         return; // Don't process other keys during countdown
       }
 
-      if (key === 'r') {
+      // Photo mode toggle: P key (only during racing, not during countdown)
+      if (key === 'p') {
+        if (!photoModeActive) {
+          setPhotoModeActive(true);
+          gpu.sendPause();
+          // Release all keys so car stops
+          keysRef.current = { w: false, a: false, s: false, d: false, space: false };
+          gpu.sendControls({ w: false, a: false, s: false, d: false, space: false });
+        }
+        return;
+      }
+
+      // Don't process driving keys while in photo mode
+      if (photoModeActive) return;
+
+      if (key === 'r') {        // Respawn: teleport player back to last checkpoint
         gpu.sendRespawn();
         setShowRespawning(true);
         if (respawnTimeoutRef.current) clearTimeout(respawnTimeoutRef.current);
         respawnTimeoutRef.current = setTimeout(() => setShowRespawning(false), 1500);
         return;
       }
+      if (key === 'backspace') {
+        // Full race restart (like Trackmania)
+        gpu.sendRestartRace();
+        return;
+      }
+      if (key === 'f') {
+        // Toggle fullscreen
+        if (document.fullscreenElement) {
+          document.exitFullscreen().catch(() => {});
+        } else {
+          document.documentElement.requestFullscreen().catch(() => {});
+        }
+        return;
+      }
       if (key === 'c') {
         cameraIndexRef.current = (cameraIndexRef.current + 1) % CAMERA_MODES.length;
         gpu.sendCameraMode(CAMERA_MODES[cameraIndexRef.current]);
+        return;
+      }
+      if (key === 'v') {
+        // Save replay clip (last 15 seconds)
+        replayRecorder.saveClip().then(url => {
+          if (url) setShowClipPreview(true);
+        });
         return;
       }
       if (key === ' ') {
@@ -268,17 +430,65 @@ export function Race() {
       }
     };
 
+    // Reset all keys when window loses focus (prevents stuck keys on alt-tab)
+    const resetAllKeys = () => {
+      keysRef.current = { w: false, a: false, s: false, d: false, space: false };
+      countdownRevRef.current = false;
+      // Send a "release all" control message to the server so the car stops moving
+      gpu.sendControls({ w: false, a: false, s: false, d: false, space: false });
+    };
+
+    const handleBlur = () => {
+      resetAllKeys();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        resetAllKeys();
+      }
+    };
+
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('blur', handleBlur);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
-    // Send controls at 30Hz
+    // Send controls at 30Hz, merging keyboard + gamepad
     keyIntervalRef.current = setInterval(() => {
-      gpu.sendControls(keysRef.current);
+      if (gamepad.connected) {
+        // Gamepad connected: send analog controls
+        // Also set keyboard keys based on gamepad for server compatibility
+        const gpKeys: KeyState = {
+          w: gamepad.throttle > 0.05,
+          a: gamepad.steering < -0.05,
+          s: gamepad.brake > 0.05,
+          d: gamepad.steering > 0.05,
+          space: gamepad.handbrake,
+        };
+        // Merge: gamepad takes priority, but also keep keyboard keys active
+        const mergedKeys: KeyState = {
+          w: keysRef.current.w || gpKeys.w,
+          a: keysRef.current.a || gpKeys.a,
+          s: keysRef.current.s || gpKeys.s,
+          d: keysRef.current.d || gpKeys.d,
+          space: keysRef.current.space || gpKeys.space,
+        };
+        gpu.sendControls(mergedKeys, {
+          steer: gamepad.steering,
+          throttle: gamepad.throttle,
+          brake: gamepad.brake,
+          handbrake: gamepad.handbrake,
+        });
+      } else {
+        gpu.sendControls(keysRef.current);
+      }
     }, 33);
 
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('blur', handleBlur);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       if (keyIntervalRef.current) {
         clearInterval(keyIntervalRef.current);
         keyIntervalRef.current = null;
@@ -295,12 +505,42 @@ export function Race() {
       keysRef.current = { w: false, a: false, s: false, d: false, space: false };
       countdownRevRef.current = false;
     };
-  }, [view, gpu.sendControls, gpu.sendRespawn, gpu.sendCameraMode, gpu.raceState?.race_status]);
+  }, [view, gpu.sendControls, gpu.sendRespawn, gpu.sendRestartRace, gpu.sendCameraMode, gpu.raceState?.race_status, gamepad.connected, gamepad.steering, gamepad.throttle, gamepad.brake, gamepad.handbrake]);
+
+  // --- Gamepad button actions (rising-edge: respawn, camera toggle, countdown rev) ---
+  useEffect(() => {
+    if (view !== 'racing' || !gamepad.connected) return;
+    const raceStatus = gpu.raceState?.race_status;
+
+    // During countdown, use right trigger for engine rev
+    if (raceStatus === 'countdown') {
+      countdownRevRef.current = gamepad.throttle > 0.1;
+      return;
+    }
+
+    if (gamepad.respawn) {
+      gpu.sendRespawn();
+      setShowRespawning(true);
+      if (respawnTimeoutRef.current) clearTimeout(respawnTimeoutRef.current);
+      respawnTimeoutRef.current = setTimeout(() => setShowRespawning(false), 1500);
+    }
+    if (gamepad.cameraToggle) {
+      cameraIndexRef.current = (cameraIndexRef.current + 1) % CAMERA_MODES.length;
+      gpu.sendCameraMode(CAMERA_MODES[cameraIndexRef.current]);
+    }
+  }, [view, gamepad.connected, gamepad.respawn, gamepad.cameraToggle, gamepad.throttle, gpu.raceState?.race_status, gpu.sendRespawn, gpu.sendCameraMode]);
 
   // --- Watch for race finished ---
   useEffect(() => {
     if (gpu.raceFinished) {
       setView('results');
+
+      // Record streak (consecutive days played)
+      const streakRes = streak.recordRace();
+      setStreakResult(streakRes);
+
+      // Mark player as having played before (for first-time overlay)
+      try { localStorage.setItem('shadow_driver_has_played', 'true'); } catch { /* ignore */ }
 
       // Save to leaderboard
       if (raceConfigRef.current && gpu.raceFinished.player_time != null) {
@@ -335,11 +575,25 @@ export function Race() {
           topSpeed: gpu.raceFinished.player_max_speed ?? 0,
           driftScore: gpu.raceFinished.total_drift_score,
         });
+
+        // Save daily challenge result if applicable
+        if (isDailyChallenge) {
+          const daily = getDailyChallenge();
+          const dcResult = saveDailyChallengeResult(gpu.raceFinished.player_time, daily.daySeed);
+          setDailyChallengePosition(dcResult);
+        }
       } else {
         setPbResult(null);
       }
     }
   }, [gpu.raceFinished]);
+
+  // --- Show clip preview when auto-highlight saves a clip ---
+  useEffect(() => {
+    if (replayRecorder.lastClipUrl) {
+      setShowClipPreview(true);
+    }
+  }, [replayRecorder.lastClipUrl]);
 
   // --- Enter key for instant race again on results screen ---
   useEffect(() => {
@@ -354,7 +608,7 @@ export function Race() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [view]);
+  }, [view, handleInstantReplay]);
 
   const handleProceedToRace = useCallback(() => {
     setView('pre_race');
@@ -409,7 +663,17 @@ export function Race() {
     }
   }, [gpu, isDemo, directWsUrl]);
 
+  // --- Daily Challenge handler ---
+  const handleStartDailyChallenge = useCallback(() => {
+    const daily = getDailyChallenge();
+    setIsDailyChallenge(true);
+    setDailyChallengePosition(null);
+    handleStartRace(daily.track, daily.laps, daily.weather, daily.model, undefined, daily.timeOfDay);
+  }, [handleStartRace]);
+
   const handlePlayAgain = useCallback(() => {
+    setIsDailyChallenge(false);
+    setDailyChallengePosition(null);
     setView('pre_race');
   }, []);
 
@@ -466,7 +730,10 @@ export function Race() {
       {view === 'pre_race' && (
         <RaceSetup
           onStartRace={handleStartRace}
-          onBack={() => isDemo ? (window.location.href = '/') : setView('setup')}
+          onBack={() => (isDemo || isQuickstart) ? (window.location.href = '/') : setView('setup')}
+          onStartDailyChallenge={handleStartDailyChallenge}
+          quickstart={isQuickstart}
+          isConnected={gpu.isConnected}
         />
       )}
 
@@ -497,10 +764,18 @@ export function Race() {
               remoteStream={gpu.remoteStream}
               className="absolute inset-0 w-full h-full object-cover"
             />
+          ) : useWebGL2 ? (
+            <WebGLCanvas
+              onBinaryFrame={gpu.onBinaryFrame}
+              className="absolute inset-0 w-full h-full object-cover"
+              speedKmh={gpu.raceState?.player?.speed_kmh ?? 0}
+              externalCanvasRef={replayCanvasRef}
+            />
           ) : (
             <VideoCanvas
               onBinaryFrame={gpu.onBinaryFrame}
               className="absolute inset-0 w-full h-full object-cover"
+              externalCanvasRef={replayCanvasRef}
             />
           )}
           </div>
@@ -524,7 +799,7 @@ export function Race() {
           />
 
           {/* HUD overlay */}
-          <RaceHUD raceState={gpu.raceState} latencyMs={gpu.latencyMs} />
+          <RaceHUD raceState={gpu.raceState} latencyMs={gpu.latencyMs} gamepadConnected={gamepad.connected} />
 
           {/* Drift score overlay (active drift display + score popups + total score) */}
           <DriftScore
@@ -535,6 +810,9 @@ export function Race() {
 
           {/* AI race commentary */}
           <CommentaryOverlay messages={gpu.commentary} />
+
+          {/* AI opponent trash talk bubble */}
+          <AIChatBubble message={gpu.aiChat} />
 
           {/* Exit button */}
           <button
@@ -570,7 +848,7 @@ export function Race() {
               engineSound.setMuted(newMuted);
               bgMusic.setMuted(newMuted);
             }}
-            className="absolute bottom-4 left-4 z-10 pointer-events-auto bg-black/60 backdrop-blur-sm rounded-lg px-3 py-2 text-white/60 hover:text-white text-sm border border-white/10 transition-colors"
+            className="absolute top-[88px] left-4 z-10 pointer-events-auto bg-black/60 backdrop-blur-sm rounded-lg px-3 py-2 text-white/60 hover:text-white text-sm border border-white/10 transition-colors"
             title={engineSound.isMuted ? 'Unmute' : 'Mute'}
           >
             {engineSound.isMuted ? (
@@ -603,17 +881,88 @@ export function Race() {
 
           {/* Connecting overlay: shown when WS is not yet connected */}
           {!gpu.isConnected && (
-            <div className="absolute inset-0 flex items-center justify-center z-40 pointer-events-none">
-              <div className="bg-black/70 backdrop-blur-md rounded-xl px-10 py-6 border border-white/20 flex flex-col items-center gap-3">
-                <div className="w-8 h-8 border-3 border-white/30 border-t-accent rounded-full animate-spin" />
-                <span className="text-white text-xl font-bold font-mono">Connecting to GPU...</span>
-                <span className="text-white/50 text-sm font-mono">Setting up CARLA race</span>
+            <div className="absolute inset-0 flex items-center justify-center z-40 pointer-events-none bg-black/60">
+              <div className="flex flex-col items-center gap-5">
+                {/* Pulsing dot animation */}
+                <div className="relative w-16 h-16 flex items-center justify-center">
+                  <div
+                    className="absolute w-16 h-16 rounded-full"
+                    style={{
+                      background: 'radial-gradient(circle, rgba(34,197,94,0.3) 0%, transparent 70%)',
+                      animation: 'connectPulse 2s ease-in-out infinite',
+                    }}
+                  />
+                  <div
+                    className="absolute w-10 h-10 rounded-full"
+                    style={{
+                      background: 'radial-gradient(circle, rgba(34,197,94,0.5) 0%, transparent 70%)',
+                      animation: 'connectPulse 2s ease-in-out 0.3s infinite',
+                    }}
+                  />
+                  <div className="w-3 h-3 rounded-full bg-green-400" />
+                </div>
+                <span className="text-white text-xl font-bold">Connecting...</span>
+                <span className="text-white/40 text-sm">Setting up your race on the GPU</span>
+                <style>{`
+                  @keyframes connectPulse {
+                    0%, 100% { transform: scale(1); opacity: 0.6; }
+                    50% { transform: scale(1.8); opacity: 0; }
+                  }
+                `}</style>
               </div>
             </div>
           )}
 
           {/* Controls hint: appears briefly when race starts after countdown */}
           <ControlsHint visible={showControlsHint} />
+
+          {/* Save clip button (camera icon) */}
+          {replayRecorder.isRecording && (
+            <button
+              onClick={() => {
+                replayRecorder.saveClip().then(url => {
+                  if (url) setShowClipPreview(true);
+                });
+              }}
+              className="absolute bottom-20 left-4 z-10 pointer-events-auto bg-black/60 backdrop-blur-sm rounded-lg px-3 py-2 text-white/60 hover:text-white text-sm border border-white/10 transition-colors"
+              title="Save Clip (V)"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                <circle cx="12" cy="13" r="4" />
+              </svg>
+            </button>
+          )}
+
+          {/* Recording indicator dot */}
+          {replayRecorder.isRecording && (
+            <div className="absolute bottom-[132px] left-5 z-10 flex items-center gap-1.5">
+              <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse shadow-[0_0_6px_rgba(239,68,68,0.8)]" />
+              <span className="text-white/30 text-[10px] font-mono">REC</span>
+            </div>
+          )}
+
+          {/* Clip preview overlay */}
+          <ClipPreview
+            clipUrl={showClipPreview ? replayRecorder.lastClipUrl : null}
+            onDismiss={() => setShowClipPreview(false)}
+            onDownload={() => {
+              if (replayRecorder.lastClipUrl) {
+                const a = document.createElement('a');
+                a.href = replayRecorder.lastClipUrl;
+                a.download = `shadow-driver-clip-${Date.now()}.webm`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+              }
+            }}
+          />
+
+          {/* First-time player overlay: full controls guide, dismiss with any key */}
+          <FirstTimeOverlay
+            visible={showFirstTimeOverlay}
+            onDismiss={() => setShowFirstTimeOverlay(false)}
+          />
         </div>
       )}
 
@@ -626,6 +975,9 @@ export function Race() {
           raceSettings={raceSettingsForResults}
           onInstantReplay={handleInstantReplay}
           personalBestResult={pbResult}
+          isDailyChallenge={isDailyChallenge}
+          dailyChallengePosition={dailyChallengePosition}
+          streakResult={streakResult}
         />
       )}
     </div>

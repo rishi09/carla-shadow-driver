@@ -48,8 +48,40 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   if (req.method === 'POST') {
-    const { instance_id, tunnel_url, status, message } = req.body || {};
+    const { instance_id, tunnel_url, status, message, type: eventType, connection_id } = req.body || {};
     if (!instance_id) return res.status(400).json({ error: 'instance_id required' });
+
+    // Handle session tracking events (for live player count)
+    if (eventType === 'session_start') {
+      const sessionKey = `session:${instance_id}:${connection_id || 'default'}`;
+      try {
+        await kv.set(sessionKey, { instance_id, connected_at: Date.now() }, { ex: 300 }); // 5 min TTL
+      } catch (e) {
+        console.error('Session start KV error:', e);
+      }
+      return res.status(200).json({ status: 'ok', event: 'session_start' });
+    }
+
+    if (eventType === 'session_end') {
+      const sessionKey = `session:${instance_id}:${connection_id || 'default'}`;
+      try {
+        await kv.del(sessionKey);
+      } catch (e) {
+        console.error('Session end KV error:', e);
+      }
+      return res.status(200).json({ status: 'ok', event: 'session_end' });
+    }
+
+    // Handle session heartbeat (refresh TTL so sessions don't expire during active play)
+    if (eventType === 'session_heartbeat') {
+      const sessionKey = `session:${instance_id}:${connection_id || 'default'}`;
+      try {
+        await kv.expire(sessionKey, 300); // Refresh 5-min TTL
+      } catch (e) {
+        console.error('Session heartbeat KV error:', e);
+      }
+      return res.status(200).json({ status: 'ok', event: 'session_heartbeat' });
+    }
 
     let data: CallbackData = (await getData(instance_id)) || {};
     if (tunnel_url) { data.tunnel_url = tunnel_url; data.ready = true; }

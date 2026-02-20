@@ -1,0 +1,372 @@
+import { useRef, useEffect, useCallback, useState, type RefObject } from 'react';
+
+interface WebGLCanvasProps {
+  onBinaryFrame: (handler: ((data: Blob) => void) | null) => void;
+  className?: string;
+  speedKmh?: number;
+  /** Optional external ref to access the underlying canvas element (e.g. for replay recording) */
+  externalCanvasRef?: RefObject<HTMLCanvasElement | null>;
+}
+
+// ---------- GLSL shaders ----------
+
+const VERTEX_SRC = `#version 300 es
+in vec2 a_pos;
+in vec2 a_uv;
+out vec2 v_uv;
+void main() {
+  v_uv = a_uv;
+  gl_Position = vec4(a_pos, 0.0, 1.0);
+}`;
+
+const FRAGMENT_SRC = `#version 300 es
+precision highp float;
+
+in vec2 v_uv;
+out vec4 fragColor;
+
+uniform sampler2D u_frame;
+uniform float u_time;       // seconds since start
+uniform float u_intensity;  // 0..1 speed-based effect intensity
+
+// ---------- helpers ----------
+
+// Hash for film grain
+float hash(vec2 p) {
+  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+}
+
+void main() {
+  vec2 uv = v_uv;
+  float t = u_intensity; // 0 = slow, 1 = fast
+
+  // --- 1. Barrel distortion ---
+  // Shift UV so center = (0,0)
+  vec2 centered = uv - 0.5;
+  float r2 = dot(centered, centered);
+  float distortStrength = mix(0.05, 0.20, t);
+  vec2 distorted = centered * (1.0 + distortStrength * r2);
+  uv = distorted + 0.5;
+
+  // Clamp to valid texture range
+  uv = clamp(uv, vec2(0.0), vec2(1.0));
+
+  // --- 2. Chromatic aberration ---
+  float edgeDist = length(uv - 0.5) * 2.0; // 0 at center, ~1.4 at corners
+  float caAmount = mix(0.001, 0.004, t) * edgeDist;
+  vec2 caDir = normalize(uv - 0.5 + 0.0001); // direction from center
+  float r = texture(u_frame, clamp(uv + caDir * caAmount, 0.0, 1.0)).r;
+  float g = texture(u_frame, uv).g;
+  float b = texture(u_frame, clamp(uv - caDir * caAmount, 0.0, 1.0)).b;
+  vec3 color = vec3(r, g, b);
+
+  // --- 3. Color grading (cinematic warm) ---
+  // Lift (shadows): warm push
+  vec3 lift = vec3(0.02, 0.01, -0.01) * mix(0.5, 1.0, t);
+  // Gain (highlights): cool tint
+  vec3 gain = vec3(0.98, 1.0, 1.04);
+  // Gamma (midtones): slight warm
+  vec3 gamma = vec3(0.98, 1.0, 1.02);
+
+  color = pow(max(color, 0.0), gamma) * gain + lift;
+
+  // Contrast boost (centered around 0.5)
+  float contrast = mix(1.05, 1.15, t);
+  color = (color - 0.5) * contrast + 0.5;
+
+  // Saturation boost
+  float luma = dot(color, vec3(0.2126, 0.7152, 0.0722));
+  float saturation = mix(1.05, 1.15, t);
+  color = mix(vec3(luma), color, saturation);
+
+  // --- 4. Vignette ---
+  float vignetteRadius = mix(0.85, 0.55, t);
+  float vignetteSoft = 0.45;
+  float vignette = smoothstep(vignetteRadius, vignetteRadius + vignetteSoft, edgeDist);
+  color *= 1.0 - vignette * mix(0.3, 0.7, t);
+
+  // --- 5. Film grain ---
+  float grainStrength = mix(0.02, 0.06, t);
+  float grain = hash(uv * 1000.0 + u_time * 60.0) - 0.5;
+  color += grain * grainStrength;
+
+  // Final clamp
+  color = clamp(color, 0.0, 1.0);
+
+  fragColor = vec4(color, 1.0);
+}`;
+
+// ---------- WebGL helpers ----------
+
+function createShader(gl: WebGL2RenderingContext, type: number, src: string): WebGLShader | null {
+  const s = gl.createShader(type);
+  if (!s) return null;
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+    console.error('[WebGLCanvas] Shader compile error:', gl.getShaderInfoLog(s));
+    gl.deleteShader(s);
+    return null;
+  }
+  return s;
+}
+
+function createProgram(gl: WebGL2RenderingContext): WebGLProgram | null {
+  const vs = createShader(gl, gl.VERTEX_SHADER, VERTEX_SRC);
+  const fs = createShader(gl, gl.FRAGMENT_SHADER, FRAGMENT_SRC);
+  if (!vs || !fs) return null;
+  const prog = gl.createProgram();
+  if (!prog) return null;
+  gl.attachShader(prog, vs);
+  gl.attachShader(prog, fs);
+  gl.linkProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+    console.error('[WebGLCanvas] Program link error:', gl.getProgramInfoLog(prog));
+    gl.deleteProgram(prog);
+    return null;
+  }
+  // Shaders can be detached after linking
+  gl.detachShader(prog, vs);
+  gl.detachShader(prog, fs);
+  gl.deleteShader(vs);
+  gl.deleteShader(fs);
+  return prog;
+}
+
+// ---------- Component ----------
+
+export function WebGLCanvas({ onBinaryFrame, className = '', speedKmh = 0, externalCanvasRef }: WebGLCanvasProps) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  // Sync external canvas ref with internal ref
+  useEffect(() => {
+    if (externalCanvasRef && 'current' in externalCanvasRef) {
+      (externalCanvasRef as React.MutableRefObject<HTMLCanvasElement | null>).current = canvasRef.current;
+    }
+    return () => {
+      if (externalCanvasRef && 'current' in externalCanvasRef) {
+        (externalCanvasRef as React.MutableRefObject<HTMLCanvasElement | null>).current = null;
+      }
+    };
+  }, [externalCanvasRef]);
+
+  const glRef = useRef<WebGL2RenderingContext | null>(null);
+  const programRef = useRef<WebGLProgram | null>(null);
+  const textureRef = useRef<WebGLTexture | null>(null);
+  const uniformsRef = useRef<{ time: WebGLUniformLocation | null; intensity: WebGLUniformLocation | null }>({ time: null, intensity: null });
+  const pendingFrameRef = useRef<ImageBitmap | null>(null);
+  const rafIdRef = useRef<number>(0);
+  const frameCountRef = useRef<number>(0);
+  const fpsIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const startTimeRef = useRef<number>(performance.now());
+  const speedRef = useRef<number>(0);
+  const [hasFirstFrame, setHasFirstFrame] = useState(false);
+  const firstFrameReceivedRef = useRef(false);
+  const textureInitializedRef = useRef(false);
+
+  // Keep speed ref in sync without triggering effect re-runs
+  speedRef.current = speedKmh;
+
+  const initGL = useCallback((canvas: HTMLCanvasElement): boolean => {
+    const gl = canvas.getContext('webgl2', { alpha: false, antialias: false, premultipliedAlpha: false });
+    if (!gl) return false;
+
+    const prog = createProgram(gl);
+    if (!prog) return false;
+
+    glRef.current = gl;
+    programRef.current = prog;
+
+    // Full-screen quad: positions + UVs
+    // prettier-ignore
+    const verts = new Float32Array([
+      -1, -1,  0, 1,   // bottom-left  (flip Y: uv.y=1)
+       1, -1,  1, 1,   // bottom-right
+      -1,  1,  0, 0,   // top-left     (flip Y: uv.y=0)
+       1,  1,  1, 0,   // top-right
+    ]);
+    const vao = gl.createVertexArray();
+    gl.bindVertexArray(vao);
+    const vbo = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+    gl.bufferData(gl.ARRAY_BUFFER, verts, gl.STATIC_DRAW);
+
+    const aPos = gl.getAttribLocation(prog, 'a_pos');
+    const aUv = gl.getAttribLocation(prog, 'a_uv');
+    gl.enableVertexAttribArray(aPos);
+    gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 16, 0);
+    gl.enableVertexAttribArray(aUv);
+    gl.vertexAttribPointer(aUv, 2, gl.FLOAT, false, 16, 8);
+
+    gl.useProgram(prog);
+
+    // Uniforms
+    uniformsRef.current = {
+      time: gl.getUniformLocation(prog, 'u_time'),
+      intensity: gl.getUniformLocation(prog, 'u_intensity'),
+    };
+
+    // Texture
+    const tex = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    textureRef.current = tex;
+    textureInitializedRef.current = false;
+
+    gl.uniform1i(gl.getUniformLocation(prog, 'u_frame'), 0);
+
+    return true;
+  }, []);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    if (!initGL(canvas)) {
+      console.error('[WebGLCanvas] Failed to initialize WebGL2');
+      return;
+    }
+
+    startTimeRef.current = performance.now();
+
+    // FPS logging
+    frameCountRef.current = 0;
+    fpsIntervalRef.current = setInterval(() => {
+      if (frameCountRef.current > 0) {
+        console.log(`[WebGLCanvas] FPS: ${frameCountRef.current}`);
+      }
+      frameCountRef.current = 0;
+    }, 1000);
+
+    // Render loop
+    const renderLoop = () => {
+      const gl = glRef.current;
+      if (!gl) { rafIdRef.current = requestAnimationFrame(renderLoop); return; }
+
+      const pending = pendingFrameRef.current;
+      if (pending) {
+        pendingFrameRef.current = null;
+
+        // Resize canvas to match frame if needed
+        const canvas2 = canvasRef.current;
+        if (canvas2 && (canvas2.width !== pending.width || canvas2.height !== pending.height)) {
+          canvas2.width = pending.width;
+          canvas2.height = pending.height;
+          gl.viewport(0, 0, pending.width, pending.height);
+        }
+
+        // Upload frame as texture
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, textureRef.current);
+        if (!textureInitializedRef.current) {
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, pending);
+          textureInitializedRef.current = true;
+        } else {
+          // texSubImage2D is faster if dimensions match; fall back to texImage2D on size change
+          try {
+            gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, pending);
+          } catch {
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, pending);
+          }
+        }
+        pending.close();
+
+        // Update uniforms
+        const elapsed = (performance.now() - startTimeRef.current) / 1000;
+        gl.uniform1f(uniformsRef.current.time, elapsed);
+
+        // Speed-based intensity: ramp from 0 at <=50 to 1 at >=150
+        const speed = speedRef.current;
+        const intensity = Math.min(1.0, Math.max(0.0, (speed - 50) / 100));
+        gl.uniform1f(uniformsRef.current.intensity, intensity);
+
+        // Draw
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+        frameCountRef.current++;
+      }
+
+      rafIdRef.current = requestAnimationFrame(renderLoop);
+    };
+    rafIdRef.current = requestAnimationFrame(renderLoop);
+
+    // Frame handler
+    let decoding = false;
+
+    const handler = (blob: Blob) => {
+      if (decoding) return;
+      decoding = true;
+
+      createImageBitmap(blob)
+        .then((bitmap) => {
+          // Close previous pending if exists (drop frame)
+          const prev = pendingFrameRef.current;
+          if (prev) prev.close();
+          pendingFrameRef.current = bitmap;
+          decoding = false;
+
+          if (!firstFrameReceivedRef.current) {
+            firstFrameReceivedRef.current = true;
+            setHasFirstFrame(true);
+          }
+        })
+        .catch(() => {
+          decoding = false;
+        });
+    };
+
+    onBinaryFrame(handler);
+
+    return () => {
+      onBinaryFrame(null);
+      cancelAnimationFrame(rafIdRef.current);
+      if (fpsIntervalRef.current) {
+        clearInterval(fpsIntervalRef.current);
+        fpsIntervalRef.current = null;
+      }
+      // Clean up GL resources
+      const gl = glRef.current;
+      if (gl) {
+        if (textureRef.current) gl.deleteTexture(textureRef.current);
+        if (programRef.current) gl.deleteProgram(programRef.current);
+      }
+      glRef.current = null;
+      programRef.current = null;
+      textureRef.current = null;
+      textureInitializedRef.current = false;
+    };
+  }, [onBinaryFrame, initGL]);
+
+  return (
+    <div className={`relative ${className}`}>
+      <canvas
+        ref={canvasRef}
+        width={1280}
+        height={720}
+        className="bg-dark-500 w-full h-full"
+        style={{ objectFit: 'cover' }}
+      />
+      {!hasFirstFrame && (
+        <div className="absolute inset-0 flex items-center justify-center bg-dark-500">
+          <span className="text-white/40 text-lg font-mono animate-pulse">
+            Waiting for video feed...
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Feature-detect WebGL2 support */
+export function supportsWebGL2(): boolean {
+  try {
+    const c = document.createElement('canvas');
+    const gl = c.getContext('webgl2');
+    return gl !== null;
+  } catch {
+    return false;
+  }
+}

@@ -53,7 +53,7 @@ export function CommentaryOverlay({ messages }: CommentaryOverlayProps) {
   if (messages.length === 0) return null;
 
   return (
-    <div className="absolute top-28 left-1/2 -translate-x-1/2 z-20 pointer-events-none flex flex-col items-center gap-2 w-[500px] max-w-[90vw]">
+    <div className="absolute top-28 right-4 z-20 pointer-events-none flex flex-col items-end gap-2 w-[360px] max-w-[40vw]">
       {messages.map((msg) => {
         const style = CATEGORY_STYLES[msg.category] || CATEGORY_STYLES.info;
         return (

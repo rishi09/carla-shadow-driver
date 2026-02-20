@@ -151,11 +151,6 @@ export function ArcSpeedometer({ speedKmh, maxSpeed = 220, size = 120 }: ArcSpee
               fill="rgba(255,255,255,0.4)"
               fontSize="5.5"
               fontFamily="monospace"
-              style={{
-                // Rotate labels to be upright
-                transform: `rotate(${angle > 270 ? angle - 360 : angle}deg)`,
-                transformOrigin: `${label.x}px ${label.y}px`,
-              }}
             >
               {val}
             </text>
