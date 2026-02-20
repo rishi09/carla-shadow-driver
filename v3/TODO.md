@@ -43,11 +43,11 @@ The perceived lag stack when turning:
 ## Graphics & Visual Quality
 
 ### CARLA rendering improvements (server-side)
-- [ ] **Higher render resolution**: Render at 1920x1080 on server, downscale to 1280x720 for streaming (supersampling anti-aliasing). CARLA supports arbitrary camera resolution.
+- [x] **Higher render resolution**: Render at 1920x1080 on server, downscale to 1280x720 for streaming (supersampling anti-aliasing). CARLA supports arbitrary camera resolution.
 - [ ] **Post-processing effects**: Enable CARLA's built-in post-processing — motion blur, bloom, lens flare via `carla.ColorConverter` or UE4 post-process settings.
 - [x] **Better camera settings**: Cinematic camera: FOV 90, motion_blur_intensity 0.3, histogram exposure, shutter_speed 60, ISO 100. Applied on camera attach + mode switch.
 - [x] **Time of day**: Dynamic sun path transitions during race via WeatherTransitionManager. Sun moves from dawn to sunset over the course of a race.
-- [ ] **Rain/wet roads**: CARLA has wet road reflections when precipitation > 0. Looks dramatically better than dry roads. (Partial: storm event triggers at 70% race progress for 3+ lap races)
+- [x] **Rain/wet roads**: CARLA has wet road reflections when precipitation > 0. Looks dramatically better than dry roads. (Partial: storm event triggers at 70% race progress for 3+ lap races)
 
 ### Frontend visual polish
 - [x] **Motion blur shader**: CSS `filter: blur()` on video canvas, driven by speed (0-1.5px). Hides JPEG artifacts at high speed.
@@ -279,7 +279,7 @@ The most HackerNews-viral concept: let players train their own AI driver, then p
 - [ ] **Neural network explainability HUD**: Real-time display showing: what the AI "sees" (attention heatmap on camera image), what the AI "thinks" (steering/throttle prediction bar), and confidence level (how certain the model is). Toggle with a hotkey. This makes the AI transparent and educational, not a black box.
 
 ### AI-Generated Content
-- [ ] **AI race commentary**: Use an LLM (Claude API or local small model) to generate live race commentary based on telemetry events. "And the player takes the inside line through turn 3! The AI is closing the gap -- only 1.2 seconds behind now!" Displayed as subtitles or spoken via Web Speech API (`window.speechSynthesis`). This is both entertaining and highly shareable (imagine a clip with AI commentary).
+- [x] **AI race commentary**: Use an LLM (Claude API or local small model) to generate live race commentary based on telemetry events. "And the player takes the inside line through turn 3! The AI is closing the gap -- only 1.2 seconds behind now!" Displayed as subtitles or spoken via Web Speech API (`window.speechSynthesis`). This is both entertaining and highly shareable (imagine a clip with AI commentary).
 
 - [ ] **AI-suggested racing line**: Before the race starts, show a visualization of the optimal racing line (computed by the AI from its learned behavior). Player can try to follow it. Post-race, overlay the player's actual line vs the AI's suggested line for comparison.
 
@@ -446,10 +446,10 @@ Comprehensive research into AI in games beyond self-driving, with concrete imple
 - States: CONFIDENT (leading comfortably, clean driving), AGGRESSIVE (just overtaken, pushing hard, risky), NERVOUS (close racing, more braking, occasional mistakes), DESPERATE (far behind on last lap, all-out speed, high crash risk).
 - NVIDIA ACE provides Audio2Emotion for NPC emotional modeling, but nobody has applied this to racing AI.
 - **Feasibility**: 7/10. Parameterize existing autopilot with emotional state modifiers. Show emotion in HUD (icon or text). Feed emotion state to the commentary LLM for richer narration.
-- [ ] Define emotion state machine with event-triggered transitions
-- [ ] Map emotional states to autopilot parameter overrides
-- [ ] Add emotion indicator to race_state telemetry + HUD display
-- [ ] Feed AI emotion to commentary LLM for context-aware narration
+- [x] Define emotion state machine with event-triggered transitions
+- [x] Map emotional states to autopilot parameter overrides
+- [x] Add emotion indicator to race_state telemetry + HUD display
+- [x] Feed AI emotion to commentary LLM for context-aware narration
 
 #### AI-Generated Content
 
@@ -458,10 +458,10 @@ Comprehensive research into AI in games beyond self-driving, with concrete imple
 - Map race state to weather moods: CALM (clear, big lead), TENSE (overcast + wind, gap closing), DRAMATIC (rain + fog, final lap), EPIC (storm + sunset, close finish).
 - Smooth parameter interpolation over 10-30 seconds prevents jarring transitions.
 - **Feasibility**: 8/10. Trivial to implement -- just add weather transitions to race_logic.py.
-- [ ] Define weather mood presets with CARLA parameter values
-- [ ] Map race events to weather transitions (close gap -> TENSE, final lap -> DRAMATIC)
-- [ ] Interpolate weather parameters smoothly (lerp over 10-30 seconds)
-- [ ] Add weather state to telemetry for frontend rain/fog overlay effects
+- [x] Define weather mood presets with CARLA parameter values
+- [x] Map race events to weather transitions (close gap -> TENSE, final lap -> DRAMATIC)
+- [x] Interpolate weather parameters smoothly (lerp over 10-30 seconds)
+- [x] Add weather state to telemetry for frontend rain/fog overlay effects
 
 **AI-Generated Music Stems (Reactive Soundtrack)**
 - Pre-generate stems using Meta's MusicGen (text-to-music with melodic conditioning, MIT code / CC-BY-NC weights) or Stability AI's Stable Audio (text-to-audio, audio-to-audio, inpainting, leading inference speed, enterprise licensing required).
@@ -513,10 +513,10 @@ Comprehensive research into AI in games beyond self-driving, with concrete imple
 - Ring-buffer last 5 seconds of frames in server memory (~7.5MB per highlight at 30fps * 50KB).
 - After race, send highlight clips to frontend, play sequentially with commentary overlay.
 - **Feasibility**: 5/10. Memory pressure from frame buffering. Medium complexity.
-- [ ] Define highlight criteria from telemetry patterns
+- [x] Define highlight criteria from telemetry patterns
 - [ ] Implement ring-buffer for recent frames in server memory
 - [ ] Snapshot buffer on highlight event
-- [ ] Frontend playback with transition effects
+- [x] Frontend playback with transition effects
 
 #### Wild / Experimental Ideas
 
@@ -842,7 +842,7 @@ See `LEARNINGS.md` section "What Makes Racing Games Fun" for full rationale behi
 - [x] **Emphasize hood cam for speed**: When player switches to first-person/hood cam (C key), increase speed line intensity by 50% and lower the FOV curve threshold. Hood cam should feel MUCH faster than chase cam because road is closer (Wipeout lesson).
 - [x] **Victory/defeat results enhancements**: Show gap to 3 decimal places when < 1.0s. Show improvement vs previous attempt. Add "Best Improvement" stat (e.g., "1.3s faster than your first race on this track!"). Show time progression chart of last 5 attempts.
 - [x] **Slipstream/drafting visual**: When player is within 10m behind AI car, show faint blue-white speed streaks converging toward center (drafting visual). Even if no actual speed boost, the visual cue makes close following feel intentional and skill-based. If combining with actual draft speed boost, becomes a visible mechanic.
-- [ ] **AI blocking behavior on Hard**: On Hard difficulty, when player is within 5m behind AI, have AI take a defensive line (move toward the inside of the next turn). Creates "I need to outbrake them!" moments. Server-side in AI autopilot parameters.
+- [x] **AI blocking behavior on Hard**: On Hard difficulty, when player is within 5m behind AI, have AI take a defensive line (move toward the inside of the next turn). Creates "I need to outbrake them!" moments. Server-side in AI autopilot parameters.
 - [x] **Comeback mechanic ("drafting boost")**: When player is >3 seconds behind, grant a subtle 3% speed boost with a faint blue-white screen-edge glow labeled "SLIPSTREAM". Frame rubber-banding as a physics mechanic (drafting) so it feels earned, not gifted. Mario Kart lesson: invisible help feels patronizing; visible help feels like a feature.
 - [x] **Post-race sharing text (Wordle-style)**: Generate copy-pasteable text block: "Shadow Driver v3 - Town05 | 1:23.456 | Beat AI by 2.3s | Top Speed: 187 km/h | Hard | shadow-driver-v3.vercel.app". One "Copy" button. Plain text travels everywhere.
 
