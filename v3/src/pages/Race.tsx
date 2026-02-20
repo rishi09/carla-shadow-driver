@@ -141,6 +141,8 @@ export function Race() {
   const [checkpointFlash, setCheckpointFlash] = useState(false);
   const prevCheckpointRef = useRef(0);
   const [lastLapOvertake, setLastLapOvertake] = useState(false);
+  const [niceSave, setNiceSave] = useState(false);
+  const speedHistoryRef = useRef<number[]>([]);
 
   // --- GO screen shake trigger ---
   const goShakeTriggeredRef = useRef(false);
@@ -422,6 +424,32 @@ export function Race() {
       setTimeout(() => setLastLapOvertake(false), 3000);
     }
   }, [view, gpu.raceState?.player?.gap_seconds, gpu.raceState?.player?.lap, gpu.raceState?.player?.checkpoint]);
+
+  // --- "NICE SAVE!" detection: speed drops >50% then recovers within 2s ---
+  useEffect(() => {
+    if (view !== 'racing') return;
+    const speed = gpu.raceState?.player?.speed_kmh ?? 0;
+    const history = speedHistoryRef.current;
+    history.push(speed);
+    // Keep last ~60 frames (2 seconds at 30fps)
+    if (history.length > 60) history.shift();
+
+    if (history.length >= 30) {
+      const recentMax = Math.max(...history.slice(-30));
+      const recentMin = Math.min(...history.slice(-30));
+      // Speed dropped >50% then recovered to >70% of peak
+      if (recentMin < recentMax * 0.5 && speed > recentMax * 0.7 && recentMax > 60) {
+        // Only trigger once per recovery
+        const midIdx = history.length - 15;
+        const midSpeed = history[midIdx] ?? speed;
+        if (midSpeed < recentMax * 0.5) {
+          setNiceSave(true);
+          speedHistoryRef.current = [speed]; // Reset to prevent re-trigger
+          setTimeout(() => setNiceSave(false), 2000);
+        }
+      }
+    }
+  }, [view, gpu.raceState?.player?.speed_kmh]);
 
   // --- Background music + crowd ambiance lifecycle ---
   useEffect(() => {
@@ -985,6 +1013,17 @@ export function Race() {
             />
           )}
 
+          {/* Nice save cyan edge flash */}
+          {niceSave && (
+            <div
+              className="absolute inset-0 pointer-events-none z-20"
+              style={{
+                boxShadow: 'inset 0 0 60px 15px rgba(34,211,238,0.25)',
+                animation: 'checkpointFlash 300ms ease-out',
+              }}
+            />
+          )}
+
           {/* LAST LAP OVERTAKE! dramatic text overlay */}
           {lastLapOvertake && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-30">
@@ -994,6 +1033,20 @@ export function Race() {
               >
                 <div className="text-4xl sm:text-6xl font-black text-yellow-400 tracking-wider" style={{ textShadow: '0 0 30px rgba(250,204,21,0.5), 0 2px 8px rgba(0,0,0,0.8)' }}>
                   LAST LAP OVERTAKE!
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* NICE SAVE! popup when recovering from a near-crash */}
+          {niceSave && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-30">
+              <div
+                className="text-center"
+                style={{ animation: 'niceSave 2s ease-out forwards' }}
+              >
+                <div className="text-3xl sm:text-5xl font-black text-cyan-400 tracking-wider" style={{ textShadow: '0 0 30px rgba(34,211,238,0.5), 0 2px 8px rgba(0,0,0,0.8)' }}>
+                  NICE SAVE!
                 </div>
               </div>
             </div>
@@ -1010,6 +1063,13 @@ export function Race() {
               20% { transform: scale(1.0); }
               70% { opacity: 1; }
               100% { opacity: 0; transform: scale(1.0) translateY(-20px); }
+            }
+            @keyframes niceSave {
+              0% { opacity: 0; transform: scale(0.3) rotate(-5deg); }
+              15% { opacity: 1; transform: scale(1.1) rotate(1deg); }
+              25% { transform: scale(1.0) rotate(0deg); }
+              65% { opacity: 1; }
+              100% { opacity: 0; transform: scale(1.0) translateY(-15px); }
             }
           `}</style>
 

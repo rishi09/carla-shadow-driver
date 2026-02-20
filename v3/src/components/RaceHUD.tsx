@@ -138,7 +138,7 @@ export function RaceHUD({ raceState, latencyMs, gamepadConnected = false, classN
         style={{ transitionDelay: hudVisible ? '200ms' : '0ms' }}
       >
         <div className="bg-black/60 backdrop-blur-sm rounded-lg px-3 py-3 border border-white/10 flex flex-col items-center">
-          <ArcSpeedometer speedKmh={player.speed_kmh} />
+          <ArcSpeedometer speedKmh={player.speed_kmh} gear={player.gear} />
           {player.gear !== undefined && (
             <div className="text-white/40 text-xs font-mono -mt-1">
               Gear {player.gear}

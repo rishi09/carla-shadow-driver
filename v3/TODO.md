@@ -826,13 +826,13 @@ See `LEARNINGS.md` section "What Makes Racing Games Fun" for full rationale behi
 - [ ] **Auto-brake assist for Easy mode**: On Easy difficulty, when approaching a sharp turn (next checkpoint bearing > 60 degrees from heading) at speed > 100 km/h, auto-apply 30% brake. Server-side in `carla_manager.py`. Makes Easy mode genuinely playable for beginners (Forza Horizon lesson).
 
 #### Dramatic Moments Detection
-- [ ] **"NICE SAVE!" detection and popup**: Track speed history. If speed drops >50% then recovers within 2 seconds, OR car goes >5m off racing line then returns, show "NICE SAVE!" text popup with a brief cyan flash. These moments feel heroic and are clip-worthy.
+- [x] **"NICE SAVE!" detection and popup**: Track speed history. If speed drops >50% then recovers within 2 seconds, OR car goes >5m off racing line then returns, show "NICE SAVE!" text popup with a brief cyan flash. These moments feel heroic and are clip-worthy.
 - [x] **"LAST LAP OVERTAKE!" celebration**: If player position changes from P2 to P1 in the final 20% of the last lap, show dramatic "LAST LAP OVERTAKE!" overlay with screen glow and audio sting. The most shareable moment in racing.
 - [ ] **Race drama music adaptation**: In `useEngineSound.ts` or `useBackgroundMusic.ts`, when gap < 1.0s in the final lap, add a tension layer: low pulsing bass at 2 Hz (mimicking heartbeat), increasing in volume as gap decreases. Drop all music to just bass drone on final checkpoint approach (Mario Kart "clutch moment" audio design).
 
 #### HUD Improvements
 - [ ] **Split-time delta at every checkpoint**: Show "+0.2s" or "-0.1s" vs PB at each checkpoint as a color-coded floating number (green = ahead, red = behind). Appears at checkpoint position on screen, floats up and fades over 1.5s. Requires storing per-checkpoint PB times. This is the micro-drama that makes Trackmania's time-trial mode so engaging.
-- [ ] **Speedometer needle bounce on gear shift**: In `ArcSpeedometer.tsx`, on gear change event, briefly overshoot the needle position by 5% then spring back (CSS transition with bounce easing). Syncs with the gear shift flash and audio pop for triple-feedback gear changes.
+- [x] **Speedometer needle bounce on gear shift**: In `ArcSpeedometer.tsx`, on gear change event, briefly overshoot the needle position by 5% then spring back (CSS transition with bounce easing). Syncs with the gear shift flash and audio pop for triple-feedback gear changes.
 - [x] **Close-gap warning pulse**: When gap decreases to < 2.0s (AI catching up), add a subtle pulsing border glow on the gap timer HUD element. Orange at 2.0s, red at 1.0s. Creates urgency. Disappears when gap widens. Visual equivalent of the audio tension layer.
 
 ### TIER 3: Medium Impact, Low Effort (polish items)

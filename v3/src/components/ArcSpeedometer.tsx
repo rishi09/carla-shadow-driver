@@ -1,10 +1,11 @@
-import { useMemo } from 'react';
+import { useMemo, useRef, useState, useEffect } from 'react';
 import { useInterpolatedState } from '../hooks/useInterpolatedState.ts';
 
 interface ArcSpeedometerProps {
   speedKmh: number;
   maxSpeed?: number;
   size?: number;
+  gear?: number;
 }
 
 const TICK_VALUES = [0, 50, 100, 150, 200];
@@ -40,9 +41,23 @@ function describeArc(cx: number, cy: number, r: number, startDeg: number, endDeg
  * SVG-based arc speedometer with animated needle and gradient color.
  * Styled to match the existing HUD aesthetic (dark glass, translucent).
  */
-export function ArcSpeedometer({ speedKmh, maxSpeed = 220, size = 120 }: ArcSpeedometerProps) {
+export function ArcSpeedometer({ speedKmh, maxSpeed = 220, size = 120, gear }: ArcSpeedometerProps) {
   const smoothSpeed = useInterpolatedState(speedKmh);
   const displaySpeed = Math.round(Math.max(0, smoothSpeed));
+
+  // Gear shift needle bounce: brief overshoot on gear change
+  const prevGearRef = useRef(gear);
+  const [needleBounce, setNeedleBounce] = useState(0);
+  useEffect(() => {
+    if (gear != null && prevGearRef.current != null && gear !== prevGearRef.current) {
+      // Overshoot by 5% of max speed
+      setNeedleBounce(gear > prevGearRef.current ? 0.05 : -0.05);
+      const timer = setTimeout(() => setNeedleBounce(0), 200);
+      prevGearRef.current = gear;
+      return () => clearTimeout(timer);
+    }
+    prevGearRef.current = gear;
+  }, [gear]);
 
   // SVG viewBox dimensions
   const viewSize = 100;
@@ -54,9 +69,9 @@ export function ArcSpeedometer({ speedKmh, maxSpeed = 220, size = 120 }: ArcSpee
   const tickLabelR = 32;
   const needleR = 39;
 
-  // Calculate needle angle
-  const speedFraction = Math.min(1, Math.max(0, smoothSpeed / maxSpeed));
-  const needleAngle = ARC_START_DEG + speedFraction * ARC_SWEEP_DEG;
+  // Calculate needle angle (with gear shift bounce)
+  const speedFraction = Math.min(1, Math.max(0, smoothSpeed / maxSpeed)) + needleBounce;
+  const needleAngle = ARC_START_DEG + Math.min(1, Math.max(0, speedFraction)) * ARC_SWEEP_DEG;
 
   // Background arc path (full arc)
   const bgArcPath = useMemo(
