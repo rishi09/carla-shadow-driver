@@ -206,66 +206,11 @@ export function useGPUConnection(): UseGPUConnectionReturn {
             const ack = data as { models: string[] };
             setAvailableModels(ack.models || []);
 
-            // Initiate WebRTC for video streaming
-            try {
-              if (pcRef.current) { pcRef.current.close(); pcRef.current = null; }
-              const pc = new RTCPeerConnection({ iceServers: [] });
-              pcRef.current = pc;
-              pc.addTransceiver('video', { direction: 'recvonly' });
-              // Hold stream until connection is confirmed
-              let pendingStream: MediaStream | null = null;
-              pc.ontrack = (e) => {
-                console.log('[v3] WebRTC track received');
-                pendingStream = e.streams[0];
-                // Minimize jitter buffer delay for lowest latency (~20ms instead of default ~100ms+)
-                try {
-                  (e.receiver as any).playoutDelayHint = 0.02;
-                } catch { /* not supported in all browsers */ }
-                // If already connected, activate immediately
-                if (pc.connectionState === 'connected') {
-                  setRemoteStream(pendingStream);
-                }
-              };
-              pc.onconnectionstatechange = () => {
-                console.log(`[v3] WebRTC connection state: ${pc.connectionState}`);
-                if (pc.connectionState === 'connected' && pendingStream) {
-                  setRemoteStream(pendingStream);
-                } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
-                  console.warn('[v3] WebRTC connection failed, falling back to JPEG');
-                  setRemoteStream(null);
-                }
-              };
-              // Timeout: if not connected within 5s, clear stream to ensure JPEG fallback
-              setTimeout(() => {
-                if (pcRef.current && pcRef.current.connectionState !== 'connected') {
-                  console.warn('[v3] WebRTC timeout, falling back to JPEG');
-                  setRemoteStream(null);
-                }
-              }, 5000);
-              const offer = await pc.createOffer();
-              await pc.setLocalDescription(offer);
-              // Wait for ICE gathering to complete
-              await new Promise<void>((resolve) => {
-                if (pc.iceGatheringState === 'complete') { resolve(); return; }
-                const check = () => {
-                  if (pc.iceGatheringState === 'complete') {
-                    pc.removeEventListener('icegatheringstatechange', check);
-                    resolve();
-                  }
-                };
-                pc.addEventListener('icegatheringstatechange', check);
-              });
-              if (ws.readyState === WebSocket.OPEN && pc.localDescription) {
-                ws.send(JSON.stringify({
-                  type: 'webrtc_offer',
-                  sdp: pc.localDescription.sdp,
-                  sdpType: pc.localDescription.type,
-                }));
-                console.log('[v3] WebRTC offer sent');
-              }
-            } catch (err) {
-              console.warn('[v3] WebRTC setup failed, falling back to JPEG:', err);
-            }
+            // WebRTC disabled: Cloudflare quick tunnels don't support UDP,
+            // so WebRTC video can never connect through them. Use JPEG-over-WebSocket
+            // which works reliably through any HTTP tunnel.
+            // TODO: Re-enable WebRTC when using direct IP connections (not tunnels)
+            console.log('[v3] Using JPEG-over-WebSocket for video (WebRTC disabled for tunnel compatibility)');
           } else if (data.type === 'webrtc_answer') {
             const answer = data as { sdp: string; sdpType: RTCSdpType };
             try {
