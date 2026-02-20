@@ -416,7 +416,14 @@ class RaceManager:
         print(f"Camera mode switched to: {mode}")
 
     def apply_player_control(self, keys: Dict[str, bool]):
-        """Convert WASD keys to vehicle control with progressive steering and ramping."""
+        """Convert WASD keys to vehicle control with driving assists.
+
+        Integrates:
+        1. Progressive steering with smooth speed-dependent limits (exponential curve)
+        2. Countersteer assist (auto-corrects when car is sliding)
+        3. Traction control (reduces throttle on wheel spin)
+        4. Handbrake drift mechanics (reduces rear tire friction)
+        """
         if not self.player_car:
             print("[CTRL] WARNING: player_car is None!")
             return
@@ -444,21 +451,19 @@ class RaceManager:
         else:
             self._current_brake = max(0.0, self._current_brake - dt * 10.0)
 
-        # --- Speed-sensitive steering with progressive ramping ---
-        # Lower limits prevent over-rotation/drifting at all speeds.
-        # Keyboard is binary (on/off), so limits act as max lock angle.
-        if speed_kmh < 30:
-            steer_limit = 0.5   # was 0.7 — less lock at low speed prevents spin-outs
-        elif speed_kmh < 80:
-            steer_limit = 0.3   # was 0.4
-        elif speed_kmh < 150:
-            steer_limit = 0.18  # was 0.25
-        else:
-            steer_limit = 0.10  # was 0.15 — barely any lock at top speed
+        # --- Feature 4: Smooth speed-dependent steering limits (exponential curve) ---
+        # Replaces step-function thresholds with a continuous curve.
+        # Exponential decay feels more natural than linear: rapid falloff in
+        # the 0-80 km/h range where most turning happens, gentle tail at high speed.
+        # steer_limit = 0.08 + (0.50 - 0.08) * exp(-speed / 70)
+        # At 0 km/h:  0.08 + 0.42 * 1.0    = 0.50
+        # At 30 km/h: 0.08 + 0.42 * 0.65   = 0.35
+        # At 70 km/h: 0.08 + 0.42 * 0.37   = 0.23
+        # At 120 km/h: 0.08 + 0.42 * 0.18  = 0.16
+        # At 200 km/h: 0.08 + 0.42 * 0.057 = 0.10
+        steer_limit = 0.08 + 0.42 * math.exp(-speed_kmh / 70.0)
 
         # Ramp toward target: fast attack (~80ms), fast release (~100ms)
-        # Balance between responsiveness (masking network lag) and not instantly
-        # hitting max lock (which causes constant drifting with binary keyboard input).
         steer_attack = dt * 10.0  # reaches 0.5 in ~1.5 frames at 30fps
         steer_release = dt * 10.0 # returns to 0 in ~1.5 frames
 
@@ -478,12 +483,39 @@ class RaceManager:
         # --- Handbrake ---
         hand_brake = keys.get('space', False)
 
+        # --- Feature 5: Handbrake drift mechanics ---
+        # Reduce rear tire friction when handbrake active, restore on release.
+        # Only apply physics_control on state transitions to avoid per-frame cost.
+        self._apply_handbrake_friction(hand_brake)
+
+        # --- Feature 1: Countersteer assist ---
+        # Compare heading (yaw) vs velocity direction to detect slides.
+        # Only active when player is NOT pressing handbrake (handbrake = intentional drift).
+        countersteer_correction = 0.0
+        if not hand_brake and speed_kmh > 10.0:
+            countersteer_correction = self._compute_countersteer(speed_kmh)
+
+        # --- Feature 2: Traction control ---
+        # Reduce throttle when wheels are spinning (low speed + high throttle + no acceleration)
+        effective_throttle = self._current_throttle
+        if self._current_throttle > 0.0:
+            effective_throttle = self._apply_traction_control(
+                self._current_throttle, speed_kmh, dt
+            )
+
+        # Update previous speed for next frame's traction control
+        self._prev_speed_kmh = speed_kmh
+
+        # --- Combine steer with countersteer assist ---
+        final_steer = self._current_steer + countersteer_correction
+        final_steer = max(-1.0, min(1.0, final_steer))
+
         # --- Reverse if braking while slow or stopped ---
         # Raise threshold so car commits to reverse once slowed down enough
         if keys.get('s', False) and speed_kmh < 15.0:
             control = carla.VehicleControl(
                 throttle=1.0,
-                steer=max(-1.0, min(1.0, self._current_steer)),
+                steer=final_steer,
                 brake=0.0,
                 hand_brake=hand_brake,
                 reverse=True
@@ -492,25 +524,194 @@ class RaceManager:
             # Log every 30th frame
             if self._ctrl_frame % 30 == 0:
                 active = [k for k, v in keys.items() if v]
-                print(f"[CTRL#{self._ctrl_frame}] REVERSE keys={active} spd={speed_kmh:.1f} thr=1.0 steer={control.steer:.2f} brk=0.0")
+                print(f"[CTRL#{self._ctrl_frame}] REVERSE keys={active} spd={speed_kmh:.1f} "
+                      f"thr=1.0 steer={control.steer:.2f} brk=0.0")
             return
 
         control = carla.VehicleControl(
-            throttle=self._current_throttle,
-            steer=max(-1.0, min(1.0, self._current_steer)),
+            throttle=effective_throttle,
+            steer=final_steer,
             brake=self._current_brake,
             hand_brake=hand_brake,
         )
         self.player_car.apply_control(control)
 
-        # Diagnostic: log every 30th frame with full control details
+        # Diagnostic: log every 30th frame with full control + assist details
         if self._ctrl_frame % 30 == 0:
             active = [k for k, v in keys.items() if v]
-            # Read back what CARLA actually has
             rb = self.player_car.get_control()
+            assists = []
+            if self._countersteer_active:
+                assists.append(f"CS={countersteer_correction:+.3f}(drift={self._drift_angle:.1f}°)")
+            if self._traction_control_active:
+                assists.append(f"TC={self._tc_throttle_cap:.2f}")
+            if self._handbrake_was_active:
+                assists.append("HB_DRIFT")
+            assist_str = " | assists: " + ", ".join(assists) if assists else ""
             print(f"[CTRL#{self._ctrl_frame}] keys={active} spd={speed_kmh:.1f} "
+                  f"steerLim={steer_limit:.2f} "
                   f"thr={control.throttle:.2f} steer={control.steer:.2f} brk={control.brake:.2f} | "
-                  f"readback: thr={rb.throttle:.2f} steer={rb.steer:.2f} brk={rb.brake:.2f}")
+                  f"readback: thr={rb.throttle:.2f} steer={rb.steer:.2f} brk={rb.brake:.2f}"
+                  f"{assist_str}")
+
+    def _compute_countersteer(self, speed_kmh: float) -> float:
+        """Compute countersteer correction based on drift angle.
+
+        Compares the vehicle's heading (yaw) with its velocity direction.
+        When these diverge (the car is sliding), returns a steering correction
+        that pushes toward the velocity direction.
+
+        Returns:
+            Steering correction value in [-0.3, 0.3]. Positive = steer right.
+        """
+        transform = self.player_car.get_transform()
+        velocity = self.player_car.get_velocity()
+
+        # Velocity direction in degrees (CARLA uses left-handed coords: yaw 0 = +X)
+        vel_mag = math.sqrt(velocity.x**2 + velocity.y**2)
+        if vel_mag < 0.5:  # Nearly stopped, no meaningful velocity direction
+            self._drift_angle = 0.0
+            self._countersteer_active = False
+            return 0.0
+
+        vel_yaw = math.degrees(math.atan2(velocity.y, velocity.x))
+        heading_yaw = transform.rotation.yaw
+
+        # Compute signed angle difference (heading - velocity), wrapped to [-180, 180]
+        drift_angle = heading_yaw - vel_yaw
+        # Normalize to [-180, 180]
+        while drift_angle > 180.0:
+            drift_angle -= 360.0
+        while drift_angle < -180.0:
+            drift_angle += 360.0
+
+        self._drift_angle = drift_angle
+        abs_drift = abs(drift_angle)
+
+        # Only activate above threshold (15 degrees)
+        if abs_drift < 15.0:
+            self._countersteer_active = False
+            return 0.0
+
+        self._countersteer_active = True
+
+        # Scale correction strength with drift angle:
+        # 15° -> 0.0 (just activated), 45°+ -> max correction (0.25)
+        # Using smoothstep-like ramp between 15° and 45°
+        t = min(1.0, (abs_drift - 15.0) / 30.0)  # 0 at 15°, 1 at 45°
+        # Smoothstep: 3t^2 - 2t^3 for natural feel
+        t = t * t * (3.0 - 2.0 * t)
+
+        max_correction = 0.25
+        correction_magnitude = max_correction * t
+
+        # Also scale down at very high speed so the assist doesn't overcorrect
+        if speed_kmh > 100:
+            speed_factor = max(0.3, 1.0 - (speed_kmh - 100) / 200.0)
+            correction_magnitude *= speed_factor
+
+        # Direction: if heading is to the RIGHT of velocity (positive drift_angle),
+        # we need to steer LEFT (negative correction) to bring heading back toward velocity
+        if drift_angle > 0:
+            return -correction_magnitude
+        else:
+            return correction_magnitude
+
+    def _apply_traction_control(self, throttle: float, speed_kmh: float, dt: float) -> float:
+        """Apply traction control to prevent wheel spin.
+
+        Detects wheel spin when:
+        - High throttle input but car isn't accelerating as expected
+        - Very low speed with high throttle (launch spin)
+
+        Returns:
+            Effective throttle value (may be reduced from input).
+        """
+        # Calculate expected vs actual acceleration
+        acceleration = (speed_kmh - self._prev_speed_kmh) / dt  # km/h per second
+
+        # Condition 1: Launch traction control
+        # At very low speed with high throttle, cap to prevent standing wheel spin
+        if speed_kmh < 10.0 and throttle > 0.5:
+            expected_accel = throttle * 60.0  # Very rough: full throttle ~60 km/h/s
+            if acceleration < expected_accel * 0.2:
+                # Wheels spinning: much less acceleration than expected
+                self._tc_throttle_cap = max(0.3, self._tc_throttle_cap - dt * 4.0)
+                self._traction_control_active = True
+                return min(throttle, self._tc_throttle_cap)
+
+        # Condition 2: Mid-speed traction loss (e.g., on wet/gravel)
+        # If accelerating should produce gain but speed is flat or dropping
+        if speed_kmh < 50.0 and throttle > 0.6 and acceleration < -5.0:
+            # Speed is DROPPING despite throttle - definite traction loss
+            self._tc_throttle_cap = max(0.4, self._tc_throttle_cap - dt * 3.0)
+            self._traction_control_active = True
+            return min(throttle, self._tc_throttle_cap)
+
+        # No traction issue: gradually release the cap back to 1.0
+        self._tc_throttle_cap = min(1.0, self._tc_throttle_cap + dt * 2.0)
+        if self._tc_throttle_cap >= 0.99:
+            self._traction_control_active = False
+
+        return min(throttle, self._tc_throttle_cap)
+
+    def _apply_handbrake_friction(self, handbrake_active: bool):
+        """Manage rear tire friction for handbrake drifting.
+
+        On handbrake press: reduce rear tire friction to 30% for slide-out.
+        On handbrake release: restore original rear tire friction.
+        Only applies physics_control on state transitions to avoid per-frame cost.
+        """
+        if not self.player_car:
+            return
+
+        # Detect state transition
+        if handbrake_active and not self._handbrake_was_active:
+            # Handbrake just pressed: reduce rear tire friction
+            try:
+                physics = self.player_car.get_physics_control()
+                wheels = physics.wheels
+                # Store original friction if we don't have it yet
+                if self._original_rear_friction is None:
+                    self._original_rear_friction = [
+                        wheels[i].tire_friction for i in range(len(wheels)) if i >= 2
+                    ]
+                # Reduce rear wheel friction to 30% of original
+                rear_idx = 0
+                for i in range(len(wheels)):
+                    if i >= 2:  # Rear wheels
+                        if rear_idx < len(self._original_rear_friction):
+                            wheels[i].tire_friction = self._original_rear_friction[rear_idx] * 0.3
+                        rear_idx += 1
+                physics.wheels = wheels
+                self.player_car.apply_physics_control(physics)
+                if self._ctrl_frame % 30 == 0:
+                    print(f"[DRIFT] Handbrake ON: rear friction reduced to "
+                          f"{wheels[2].tire_friction:.1f}")
+            except Exception as e:
+                print(f"[DRIFT] Failed to reduce rear friction: {e}")
+            self._handbrake_was_active = True
+
+        elif not handbrake_active and self._handbrake_was_active:
+            # Handbrake just released: restore rear tire friction
+            try:
+                physics = self.player_car.get_physics_control()
+                wheels = physics.wheels
+                if self._original_rear_friction:
+                    rear_idx = 0
+                    for i in range(len(wheels)):
+                        if i >= 2:  # Rear wheels
+                            if rear_idx < len(self._original_rear_friction):
+                                wheels[i].tire_friction = self._original_rear_friction[rear_idx]
+                            rear_idx += 1
+                    physics.wheels = wheels
+                    self.player_car.apply_physics_control(physics)
+                    if self._ctrl_frame % 30 == 0:
+                        print(f"[DRIFT] Handbrake OFF: rear friction restored to "
+                              f"{wheels[2].tire_friction:.1f}")
+            except Exception as e:
+                print(f"[DRIFT] Failed to restore rear friction: {e}")
+            self._handbrake_was_active = False
 
     def enable_ai_autopilot(self, difficulty: str = 'medium'):
         """Enable CARLA's built-in autopilot for the AI car.
@@ -723,12 +924,20 @@ class RaceManager:
             self._current_brake = 0.0
             self._current_steer = 0.0
 
+            # Reset driving assists state
+            self._drift_angle = 0.0
+            self._countersteer_active = False
+            self._prev_speed_kmh = 0.0
+            self._traction_control_active = False
+            self._tc_throttle_cap = 1.0
+            self._handbrake_was_active = False
+
             print("Player respawned at nearest waypoint")
         except Exception as e:
             print(f"Failed to respawn player: {e}")
 
     def get_telemetry(self, vehicle: carla.Vehicle) -> Dict:
-        """Get telemetry for a vehicle including control state."""
+        """Get telemetry for a vehicle including control state and velocity components."""
         transform = vehicle.get_transform()
         velocity = vehicle.get_velocity()
         control = vehicle.get_control()
@@ -745,7 +954,38 @@ class RaceManager:
             'brake': control.brake,
             'steer': control.steer,
             'rpm': speed * 40,  # Approximate RPM from speed
+            'velocity_x': velocity.x,
+            'velocity_y': velocity.y,
         }
+
+    def set_weather_params(self, sun_altitude: float, sun_azimuth: float,
+                           cloudiness: float = 0.0, precipitation: float = 0.0,
+                           fog_density: float = 0.0, wind_intensity: float = 0.0):
+        """Set granular weather parameters for dynamic weather transitions.
+
+        Args:
+            sun_altitude: Sun elevation angle (-90 to 90 degrees)
+            sun_azimuth: Sun compass direction (0-360 degrees)
+            cloudiness: Cloud coverage percentage (0-100)
+            precipitation: Rain intensity (0-100)
+            fog_density: Fog density percentage (0-100)
+            wind_intensity: Wind strength (0-100)
+        """
+        if not self.world:
+            return
+        try:
+            weather = self.world.get_weather()
+            weather.sun_altitude_angle = sun_altitude
+            weather.sun_azimuth_angle = sun_azimuth
+            weather.cloudiness = cloudiness
+            weather.precipitation = precipitation
+            weather.precipitation_deposits = precipitation * 0.5  # Wet roads
+            weather.fog_density = fog_density
+            weather.wind_intensity = wind_intensity
+            weather.wetness = min(100, precipitation * 0.8)
+            self.world.set_weather(weather)
+        except Exception as e:
+            print(f"Failed to set weather params: {e}")
 
     def tick(self):
         """Advance simulation by one frame."""
@@ -842,6 +1082,15 @@ class RaceManager:
         self._current_throttle = 0.0
         self._current_brake = 0.0
         self._current_steer = 0.0
+
+        # Reset driving assists state
+        self._drift_angle = 0.0
+        self._countersteer_active = False
+        self._prev_speed_kmh = 0.0
+        self._traction_control_active = False
+        self._tc_throttle_cap = 1.0
+        self._handbrake_was_active = False
+        self._original_rear_friction = None
 
         print("Cleanup complete")
 

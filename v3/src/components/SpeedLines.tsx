@@ -37,10 +37,14 @@ export function SpeedLines({ speedKmh, className = '' }: SpeedLinesProps) {
   speedRef.current = speedKmh;
 
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    const cvs = canvasRef.current;
+    if (!cvs) return;
+    const c = cvs.getContext('2d');
+    if (!c) return;
+
+    // Capture non-null references for inner functions
+    const canvas: HTMLCanvasElement = cvs;
+    const ctx: CanvasRenderingContext2D = c;
 
     let running = true;
 

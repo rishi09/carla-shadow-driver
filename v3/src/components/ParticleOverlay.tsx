@@ -64,33 +64,34 @@ export function ParticleOverlay({
   const prevCollisionCountRef = useRef(0);
 
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    const cvs = canvasRef.current;
+    if (!cvs) return;
+    const c = cvs.getContext('2d');
+    if (!c) return;
+
+    // Capture non-null references for use in inner functions
+    const canvas: HTMLCanvasElement = cvs;
+    const ctx: CanvasRenderingContext2D = c;
 
     let running = true;
 
     function spawnCollisionSparks(w: number, h: number, intensity: number) {
       const particles = particlesRef.current;
-      // Spawn 15-40 sparks based on intensity
       const count = Math.min(40, Math.floor(15 + (intensity / 500) * 25));
-      // Sparks originate from a random point in the lower-center area (where car is)
       const originX = w * (0.35 + Math.random() * 0.3);
       const originY = h * (0.5 + Math.random() * 0.3);
 
       for (let i = 0; i < count && particles.length < MAX_PARTICLES; i++) {
         const angle = Math.random() * Math.PI * 2;
-        const speed = 150 + Math.random() * 350;
-        // Orange-yellow color palette
+        const spd = 150 + Math.random() * 350;
         const r = 255;
-        const g = Math.floor(120 + Math.random() * 135); // 120-255 (orange to yellow)
-        const b = Math.floor(Math.random() * 50); // 0-50 (warm)
+        const g = Math.floor(120 + Math.random() * 135);
+        const b = Math.floor(Math.random() * 50);
         particles.push({
           x: originX,
           y: originY,
-          vx: Math.cos(angle) * speed,
-          vy: Math.sin(angle) * speed - 100, // bias upward
+          vx: Math.cos(angle) * spd,
+          vy: Math.sin(angle) * spd - 100,
           life: 1,
           maxLife: 0.3 + Math.random() * 0.4,
           size: 1.5 + Math.random() * 2.5,
@@ -102,7 +103,6 @@ export function ParticleOverlay({
 
     function spawnTireSmoke(w: number, h: number) {
       const particles = particlesRef.current;
-      // Spawn 2-3 smoke puffs per frame near bottom
       for (let i = 0; i < 3 && particles.length < MAX_PARTICLES; i++) {
         particles.push({
           x: w * (0.3 + Math.random() * 0.4),
@@ -118,7 +118,7 @@ export function ParticleOverlay({
       }
     }
 
-    function spawnRainDrops(w: number, h: number, isStorm: boolean) {
+    function spawnRainDrops(w: number, isStorm: boolean) {
       const particles = particlesRef.current;
       const count = isStorm ? 6 : 3;
       for (let i = 0; i < count && particles.length < MAX_PARTICLES; i++) {
@@ -147,14 +147,14 @@ export function ParticleOverlay({
       ctx.clearRect(0, 0, w, h);
 
       const particles = particlesRef.current;
-      const collisions = collisionsRef.current;
+      const cols = collisionsRef.current;
       const speed = speedRef.current;
-      const weather = weatherRef.current;
+      const wthr = weatherRef.current;
 
       // Detect new collisions
-      const currentCollisionCount = collisions?.length ?? 0;
+      const currentCollisionCount = cols?.length ?? 0;
       if (currentCollisionCount > 0 && currentCollisionCount !== prevCollisionCountRef.current) {
-        const maxIntensity = Math.max(...(collisions ?? []).map(c => c.intensity));
+        const maxIntensity = Math.max(...(cols ?? []).map(cc => cc.intensity));
         spawnCollisionSparks(w, h, maxIntensity);
       }
       prevCollisionCountRef.current = currentCollisionCount;
@@ -165,8 +165,8 @@ export function ParticleOverlay({
       }
 
       // Rain particles
-      if (weather === 'rain' || weather === 'storm') {
-        spawnRainDrops(w, h, weather === 'storm');
+      if (wthr === 'rain' || wthr === 'storm') {
+        spawnRainDrops(w, wthr === 'storm');
       }
 
       // Update and draw particles
@@ -174,23 +174,18 @@ export function ParticleOverlay({
       for (let i = particles.length - 1; i >= 0; i--) {
         const p = particles[i];
 
-        // Decrease life
         p.life -= dt / p.maxLife;
         if (p.life <= 0) {
           particles.splice(i, 1);
           continue;
         }
 
-        // Physics update
         p.x += p.vx * dt;
         p.y += p.vy * dt;
 
         if (p.type === 'spark') {
-          // Gravity pulls sparks down
           p.vy += 800 * dt;
-          // Sparks slow down due to air resistance
           p.vx *= 1 - 3 * dt;
-          // Sparks shrink as they die
           const alpha = p.life * 0.9;
           const currentSize = p.size * (0.3 + p.life * 0.7);
 
@@ -202,7 +197,6 @@ export function ParticleOverlay({
           ctx.fill();
           ctx.shadowBlur = 0;
         } else if (p.type === 'smoke') {
-          // Smoke rises and expands
           p.vx *= 1 - 2 * dt;
           const alpha = p.life * 0.25;
           const currentSize = p.size * (1 + (1 - p.life) * 2);
@@ -212,7 +206,6 @@ export function ParticleOverlay({
           ctx.arc(p.x, p.y, currentSize, 0, Math.PI * 2);
           ctx.fill();
         } else if (p.type === 'rain') {
-          // Rain: draw as a short diagonal line
           const alpha = p.life * 0.4;
           const len = 10 + p.size * 5;
           const angle = Math.atan2(p.vy, p.vx);

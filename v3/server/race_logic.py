@@ -671,6 +671,16 @@ class RaceState:
                 "yaw": round(ghost_pos['yaw'], 1),
             }
 
+        # Include drift state if actively drifting
+        if self.drift_detector.is_drifting:
+            result["drift"] = {
+                "active": True,
+                "score": round(self.drift_detector.current_drift_score),
+                "angle": round(self.drift_detector.current_drift_angle, 1),
+                "chain": self.drift_detector.chain_multiplier,
+            }
+        result["total_drift_score"] = round(self.drift_detector.total_drift_score)
+
         return result
 
 

@@ -21,9 +21,15 @@ ENV PATH="/opt/conda/bin:$PATH"
 # avoiding the Ubuntu 18.04 FFmpeg 3.4 incompatibility with modern PyAV
 RUN conda install -y -c conda-forge av && conda clean -a -y
 
-# Install cloudflared
+# Install cloudflared (fallback tunnel)
 RUN curl -sL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 \
     -o /usr/local/bin/cloudflared && chmod +x /usr/local/bin/cloudflared
+
+# Install ngrok (primary tunnel — lower latency than Cloudflare quick tunnels)
+# Free tier: 1 agent, 1 domain, valid TLS certs, WebSocket support, ~10-20ms overhead
+# Requires NGROK_AUTHTOKEN env var at runtime (free signup at https://ngrok.com)
+RUN curl -sL https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz \
+    | tar xz -C /usr/local/bin
 
 # Install PyTorch with CUDA support (separate step for cache efficiency)
 RUN pip install --no-cache-dir \

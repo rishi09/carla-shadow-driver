@@ -61,9 +61,7 @@ class RaceServer:
         self._last_sent_yaw: Optional[float] = None
         self._last_sent_time: float = 0.0
         self._frame_skip_count: int = 0  # Frames skipped since last perf log
-
-        # --- Performance tracking ---
-        self._encode_times: list = []  # Recent encode times in ms (for perf log)
+        self._delta_skip_count: int = 0  # Frames skipped via frame delta detection
 
     async def handle_client(self, websocket):
         """Handle a single WebSocket client connection."""
@@ -155,6 +153,8 @@ class RaceServer:
                 elif msg_type == 'camera_mode':
                     mode = data.get('mode', 'chase')
                     self.carla.set_camera_mode(mode)
+                    # Reset frame delta hash since camera view changed completely
+                    self.encoder.reset_frame_hash()
                     await websocket.send(json.dumps({
                         'type': 'camera_mode_changed',
                         'mode': self.carla._camera_mode,
@@ -265,7 +265,10 @@ class RaceServer:
         self._last_sent_yaw = None
         self._last_sent_time = 0.0
         self._frame_skip_count = 0
-        self._encode_times = []
+        self._delta_skip_count = 0
+
+        # Reset encoder frame hash for delta detection
+        self.encoder.reset_frame_hash()
 
         # Close WebRTC peer connection
         if self.pc is not None:
@@ -442,6 +445,9 @@ class RaceServer:
                     self.race_state.update_ai(
                         ai_telem['x'], ai_telem['y'], ai_telem['speed_kmh']
                     )
+
+                    # 4b. Speed-based resolution scaling
+                    self.encoder.update_speed_resolution(player_telem['speed_kmh'])
 
                     # Race Director: dynamically adjust AI speed (distance-based rubber banding)
                     if self.race_director and self.carla._ai_autopilot:

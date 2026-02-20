@@ -77,29 +77,70 @@ if ! kill -0 $SERVER_PID 2>/dev/null; then
 fi
 echo "Race server is running (PID: $SERVER_PID)"
 
-# Step 3: Start Cloudflare tunnel
+# Step 3: Start tunnel (ngrok preferred for lower latency, Cloudflare as fallback)
 report_status "tunneling" "Establishing secure tunnel"
-echo "Starting Cloudflare tunnel..."
 
-TUNNEL_LOG=/tmp/cloudflared.log
-cloudflared tunnel --url http://localhost:$WS_PORT --protocol http2 > $TUNNEL_LOG 2>&1 &
-CF_PID=$!
-
-# Wait for tunnel URL
 TUNNEL_URL=""
-for i in $(seq 1 60); do
-    if [ -f $TUNNEL_LOG ]; then
-        TUNNEL_URL=$(grep -oE 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' $TUNNEL_LOG | head -1)
-    fi
-    if [ -n "$TUNNEL_URL" ]; then
-        echo "Tunnel ready: $TUNNEL_URL"
-        break
-    fi
-    sleep 1
-done
 
+# --- Option A: ngrok (lower latency, ~10-20ms overhead vs Cloudflare's ~40-80ms) ---
+# Requires NGROK_AUTHTOKEN env var. Get a free token at https://dashboard.ngrok.com/signup
+if [ -n "$NGROK_AUTHTOKEN" ]; then
+    echo "Starting ngrok tunnel (auth token present)..."
+    ngrok config add-authtoken "$NGROK_AUTHTOKEN" 2>/dev/null || true
+
+    NGROK_LOG=/tmp/ngrok.log
+    ngrok http $WS_PORT --log=stdout --log-format=json > $NGROK_LOG 2>&1 &
+    NGROK_PID=$!
+
+    # Wait for ngrok to expose the public URL (via its local API on port 4040)
+    for i in $(seq 1 30); do
+        sleep 1
+        # ngrok exposes a local API at localhost:4040 with tunnel info
+        TUNNEL_URL=$(curl -s http://localhost:4040/api/tunnels 2>/dev/null \
+            | python3 -c "import sys,json; tunnels=json.load(sys.stdin).get('tunnels',[]); print(tunnels[0]['public_url'] if tunnels else '')" 2>/dev/null) || true
+        if [ -n "$TUNNEL_URL" ]; then
+            echo "ngrok tunnel ready: $TUNNEL_URL (took ${i}s)"
+            break
+        fi
+    done
+
+    if [ -z "$TUNNEL_URL" ]; then
+        echo "ngrok failed to start, check log:"
+        tail -20 $NGROK_LOG 2>/dev/null
+        kill $NGROK_PID 2>/dev/null
+        echo "Falling back to Cloudflare tunnel..."
+    fi
+fi
+
+# --- Option B: Cloudflare quick tunnel (fallback, higher latency ~40-80ms overhead) ---
+if [ -z "$TUNNEL_URL" ]; then
+    echo "Starting Cloudflare tunnel..."
+    TUNNEL_LOG=/tmp/cloudflared.log
+    cloudflared tunnel --url http://localhost:$WS_PORT --protocol http2 > $TUNNEL_LOG 2>&1 &
+    CF_PID=$!
+
+    for i in $(seq 1 60); do
+        if [ -f $TUNNEL_LOG ]; then
+            TUNNEL_URL=$(grep -oE 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' $TUNNEL_LOG | head -1)
+        fi
+        if [ -n "$TUNNEL_URL" ]; then
+            echo "Cloudflare tunnel ready: $TUNNEL_URL (took ${i}s)"
+            break
+        fi
+        sleep 1
+    done
+
+    if [ -z "$TUNNEL_URL" ]; then
+        ERROR=$(grep -i 'error\|fail' $TUNNEL_LOG 2>/dev/null | tail -1 | head -c 100 | tr -d '"\\')
+        report_status "error" "Tunnel failed: ${ERROR:-timeout}"
+        echo "Tunnel failed to start"
+        kill $CF_PID 2>/dev/null
+        exit 1
+    fi
+fi
+
+# Report tunnel URL
 if [ -n "$TUNNEL_URL" ]; then
-    # Report tunnel URL to callback
     echo "Reporting tunnel URL to callback..."
     curl -v -X POST "$CALLBACK_URL" \
         -H "Content-Type: application/json" \
@@ -108,12 +149,6 @@ if [ -n "$TUNNEL_URL" ]; then
     echo "=== Shadow Driver v3 is LIVE ==="
     echo "Tunnel: $TUNNEL_URL"
     echo "Instance: $INST_ID"
-else
-    ERROR=$(grep -i 'error\|fail' $TUNNEL_LOG 2>/dev/null | tail -1 | head -c 100 | tr -d '"\\')
-    report_status "error" "Tunnel failed: ${ERROR:-timeout}"
-    echo "Tunnel failed to start"
-    kill $CF_PID 2>/dev/null
-    exit 1
 fi
 
 # Wait for server process (keep container alive)
