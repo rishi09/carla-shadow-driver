@@ -30,6 +30,7 @@ from skill_matcher import SkillMatcher
 from highlight_buffer import HighlightBuffer
 from cost_tracker import CostTracker, DEFAULT_HOURLY_RATE, DEFAULT_DAILY_ALERT_THRESHOLD
 from training_recorder import TrainingRecorder
+from nvfbc_capture import NvFBCCapture
 
 
 # ---------------------------------------------------------------------------
@@ -229,6 +230,11 @@ class RaceServer:
         self.pc: Optional[RTCPeerConnection] = None
         self.video_track: Optional[CarlaVideoTrack] = None
 
+        # --- WebRTC data channel for low-latency controls (UDP) ---
+        self._dc_pc: Optional[RTCPeerConnection] = None  # Peer connection for data channel
+        self._controls_dc = None  # RTCDataChannel for receiving controls
+        self._dc_controls_active: bool = False  # True when data channel is open and receiving
+
         # Auto-shutdown manager (shared across all client connections)
         self.shutdown_manager = AutoShutdownManager()
 
@@ -282,6 +288,18 @@ class RaceServer:
         self._nvenc_encoder: Optional[NVENCEncoder] = None
         self._h264_enabled: bool = False  # True if client negotiated h264
         self._client_supports_h264: bool = False
+
+        # --- NvFBC GPU framebuffer capture (zero-copy alternative to CARLA sensor) ---
+        # Initialized lazily when a race starts. Falls back to CARLA camera sensor
+        # if NvFBC is unavailable (no Xvfb, no pynvfbc, consumer GPU, etc.)
+        self._nvfbc_capture: Optional[NvFBCCapture] = None
+        self._nvfbc_enabled: bool = False  # True if NvFBC is active for frame capture
+
+        # --- Adaptive bitrate state ---
+        self._current_bitrate_mbps: float = 8.0  # Current bitrate in Mbps
+        self._last_bitrate_adjust_time: float = 0.0  # Rate-limit adaptation
+        self._bitrate_min_mbps: float = 2.0
+        self._bitrate_max_mbps: float = 12.0
 
     def _ping_activity(self):
         """Fire-and-forget HTTP POST to the activity ping endpoint.
@@ -456,10 +474,11 @@ class RaceServer:
                     model = data.get('model', 'carla_pilotnet')
                     player_car = data.get('player_car')
                     time_of_day = data.get('time_of_day')
+                    postprocess = data.get('postprocess', 'balanced')
                     # Capture player name for race completion reporting
                     self._player_name = data.get('player_name', 'Anonymous') or 'Anonymous'
                     self.current_model_name = model
-                    await self._start_race(track, laps, weather, model, player_car=player_car, time_of_day=time_of_day)
+                    await self._start_race(track, laps, weather, model, player_car=player_car, time_of_day=time_of_day, postprocess=postprocess)
 
                 elif msg_type == 'ping':
                     await websocket.send(json.dumps({
@@ -499,6 +518,12 @@ class RaceServer:
                 elif msg_type == 'webrtc_offer':
                     await self._handle_webrtc_offer(websocket, data)
 
+                elif msg_type == 'dc_offer':
+                    await self._handle_dc_offer(websocket, data)
+
+                elif msg_type == 'dc_ice_candidate':
+                    await self._handle_dc_ice_candidate(data)
+
                 elif msg_type == 'ambient_weather':
                     # Ambient Light Racing: client sends weather override based on room brightness
                     sun_alt = data.get('sun_altitude', 45)
@@ -512,6 +537,10 @@ class RaceServer:
                     # Client sends supported codecs; if h264, enable NVENC path
                     client_codecs = data.get('codecs', [])
                     await self._handle_codec_negotiate(websocket, client_codecs)
+
+                elif msg_type == 'network_quality':
+                    # Client sends network quality metrics for adaptive bitrate
+                    self._handle_network_quality(data)
 
         except websockets.exceptions.ConnectionClosed:
             print("Client disconnected")
@@ -568,6 +597,122 @@ class RaceServer:
         }))
         print("WebRTC answer sent — video track active")
 
+    async def _handle_dc_offer(self, websocket, data):
+        """Handle a WebRTC data channel offer from the client.
+        Creates a peer connection that accepts a 'controls' data channel
+        for low-latency UDP-like game input."""
+        # Close any existing data channel peer connection
+        if self._dc_pc is not None:
+            await self._dc_pc.close()
+            self._dc_pc = None
+            self._controls_dc = None
+            self._dc_controls_active = False
+
+        try:
+            from aiortc import RTCConfiguration, RTCIceServer
+            # Use STUN servers for ICE connectivity
+            config = RTCConfiguration(iceServers=[
+                RTCIceServer(urls=["stun:stun.l.google.com:19302"]),
+                RTCIceServer(urls=["stun:stun1.l.google.com:19302"]),
+            ])
+            self._dc_pc = RTCPeerConnection(configuration=config)
+        except (ImportError, TypeError):
+            # Fallback: older aiortc versions may not have RTCConfiguration/RTCIceServer
+            self._dc_pc = RTCPeerConnection()
+
+        @self._dc_pc.on("connectionstatechange")
+        async def on_dc_connectionstatechange():
+            state = self._dc_pc.connectionState
+            print(f"[DC] Connection state: {state}")
+            if state in ("failed", "closed"):
+                self._dc_controls_active = False
+                self._controls_dc = None
+
+        @self._dc_pc.on("datachannel")
+        def on_datachannel(channel):
+            print(f"[DC] Data channel received: '{channel.label}' (ordered={channel.ordered})")
+            if channel.label == "controls":
+                self._controls_dc = channel
+
+                @channel.on("open")
+                def on_open():
+                    self._dc_controls_active = True
+                    print("[DC] Controls data channel OPEN — using UDP path for input")
+
+                @channel.on("close")
+                def on_close():
+                    self._dc_controls_active = False
+                    print("[DC] Controls data channel closed — falling back to WebSocket")
+
+                @channel.on("message")
+                def on_message(message):
+                    self._handle_dc_control_message(message)
+
+        # Set remote offer and create answer
+        offer = RTCSessionDescription(sdp=data["sdp"], type=data["sdpType"])
+        await self._dc_pc.setRemoteDescription(offer)
+        answer = await self._dc_pc.createAnswer()
+        await self._dc_pc.setLocalDescription(answer)
+
+        # Gather ICE candidates before sending answer
+        # aiortc gathers candidates as part of setLocalDescription
+        await websocket.send(json.dumps({
+            "type": "dc_answer",
+            "sdp": self._dc_pc.localDescription.sdp,
+            "sdpType": self._dc_pc.localDescription.type,
+        }))
+        print("[DC] Data channel answer sent")
+
+    async def _handle_dc_ice_candidate(self, data):
+        """Handle an ICE candidate from the client for the data channel peer connection.
+        Note: aiortc gathers all ICE candidates internally during setLocalDescription
+        and embeds them in the SDP answer. Trickle ICE from the browser is not needed
+        by aiortc, so we log and ignore these candidates."""
+        if self._dc_pc is None:
+            return
+        candidate_str = data.get("candidate", "")
+        if candidate_str:
+            # aiortc does not support trickle ICE (addIceCandidate).
+            # All candidates are gathered during setLocalDescription.
+            # Browser-side candidates arrive here but can be safely ignored.
+            pass
+
+    def _handle_dc_control_message(self, message):
+        """Process a control message received via the WebRTC data channel.
+        Same format as WebSocket control messages but arrives with lower latency."""
+        try:
+            if isinstance(message, bytes):
+                data = json.loads(message.decode('utf-8'))
+            else:
+                data = json.loads(message)
+
+            msg_type = data.get('type')
+            if msg_type == 'control':
+                keys = data.get('keys', {})
+                self.player_keys = {
+                    'w': keys.get('w', False),
+                    'a': keys.get('a', False),
+                    's': keys.get('s', False),
+                    'd': keys.get('d', False),
+                    'space': keys.get('space', False),
+                }
+                # Debug logging (same cadence as WS path)
+                self._control_msg_count = getattr(self, '_control_msg_count', 0) + 1
+                if not self._controls_received:
+                    self._controls_received = True
+                    active = [k for k, v in self.player_keys.items() if v]
+                    race_status = self.race_state.status if self.race_state else "no_race"
+                    print(f"First control received via DC (race_status={race_status}, keys={active or 'none'})")
+                elif self._control_msg_count % 30 == 0:
+                    active = [k for k, v in self.player_keys.items() if v]
+                    print(f"Controls #{self._control_msg_count} (DC): {active or 'none'}")
+                # Adaptive JPEG quality
+                latency = data.get('latency')
+                if latency is not None:
+                    self.encoder.adapt_quality(float(latency))
+        except Exception as e:
+            print(f"[DC] Error parsing control message: {e}")
+
     async def _handle_codec_negotiate(self, websocket, client_codecs: list):
         """Handle codec negotiation: if client supports h264, send codec config."""
         self._client_supports_h264 = 'h264' in client_codecs
@@ -595,6 +740,59 @@ class RaceServer:
             elif not self._nvenc_encoder or not self._nvenc_encoder.is_running:
                 print("[NVENC] Encoder not running, using JPEG fallback")
 
+    def _handle_network_quality(self, data: dict):
+        """Handle client network quality report and adapt NVENC bitrate.
+
+        Adjusts the H.264 encoder bitrate based on observed network conditions:
+        - Poor network (high jitter or drops): decrease bitrate by 20%
+        - Good network (low jitter, low drops, low RTT): increase bitrate by 10%
+        - Otherwise: maintain current bitrate
+
+        Only applies when H.264 NVENC encoding is active; ignored for JPEG fallback.
+        """
+        # Skip if NVENC is not active
+        if not self._h264_enabled or not self._nvenc_encoder or not self._nvenc_encoder.is_running:
+            return
+
+        jitter_ms = data.get('jitter_ms', 0)
+        drop_rate = data.get('frame_drop_rate', 0)
+        rtt_ms = data.get('rtt_ms', 0)
+
+        # Rate-limit: don't adjust more than once every 5 seconds
+        now = time.time()
+        if now - self._last_bitrate_adjust_time < 5.0:
+            return
+
+        old_bitrate = self._current_bitrate_mbps
+
+        if jitter_ms > 50 or drop_rate > 0.1:
+            # Poor network: decrease by 20%
+            new_bitrate = self._current_bitrate_mbps * 0.8
+            direction = 'decrease'
+        elif jitter_ms < 20 and drop_rate < 0.02 and rtt_ms < 100:
+            # Good network: increase by 10%
+            new_bitrate = self._current_bitrate_mbps * 1.1
+            direction = 'increase'
+        else:
+            # Stable: no change
+            return
+
+        # Clamp to valid range
+        new_bitrate = max(self._bitrate_min_mbps, min(self._bitrate_max_mbps, new_bitrate))
+
+        # Skip if change is negligible (< 0.1 Mbps difference)
+        if abs(new_bitrate - old_bitrate) < 0.1:
+            return
+
+        # Format as FFmpeg bitrate string (e.g. '6.4M')
+        bitrate_str = f'{new_bitrate:.1f}M'
+
+        if self._nvenc_encoder.set_bitrate(bitrate_str):
+            self._current_bitrate_mbps = new_bitrate
+            self._last_bitrate_adjust_time = now
+            print(f"[ABR] Bitrate {direction}: {old_bitrate:.1f}M -> {new_bitrate:.1f}M "
+                  f"(jitter={jitter_ms:.0f}ms, drops={drop_rate:.2f}, rtt={rtt_ms:.0f}ms)")
+
     def _start_nvenc_encoder(self):
         """Try to start the NVENC encoder. Falls back silently to JPEG on failure."""
         if self._nvenc_encoder and self._nvenc_encoder.is_running:
@@ -620,6 +818,46 @@ class RaceServer:
         else:
             self._nvenc_encoder = None
             print("[NVENC] NVENC unavailable, using JPEG encoding")
+
+    def _start_nvfbc_capture(self):
+        """Try to initialize NvFBC GPU framebuffer capture.
+
+        NvFBC captures directly from the GPU framebuffer, bypassing CARLA's
+        camera sensor and eliminating CPU memory copies. This reduces capture
+        latency from ~5-10ms (CARLA sensor + bytes() copy) to <1ms.
+
+        Falls back silently to CARLA camera sensor if unavailable.
+        """
+        if self._nvfbc_capture and self._nvfbc_capture.available:
+            self._nvfbc_enabled = True
+            return
+
+        width = self.config.get('streaming', {}).get('width', 1280)
+        height = self.config.get('streaming', {}).get('height', 720)
+
+        try:
+            capture = NvFBCCapture(width=width, height=height)
+            if capture.available:
+                self._nvfbc_capture = capture
+                self._nvfbc_enabled = True
+                print(f"[NvFBC] GPU framebuffer capture active (method={capture.method})")
+                print(f"[NvFBC] Frame capture will bypass CARLA camera sensor")
+            else:
+                self._nvfbc_capture = None
+                self._nvfbc_enabled = False
+                print("[NvFBC] Not available -- using CARLA camera sensor (default)")
+        except Exception as e:
+            self._nvfbc_capture = None
+            self._nvfbc_enabled = False
+            print(f"[NvFBC] Initialization error: {e}")
+            print("[NvFBC] Falling back to CARLA camera sensor")
+
+    def _stop_nvfbc_capture(self):
+        """Stop and clean up NvFBC capture resources."""
+        if self._nvfbc_capture:
+            self._nvfbc_capture.destroy()
+            self._nvfbc_capture = None
+        self._nvfbc_enabled = False
 
     async def _switch_model(self, model_name: str):
         """Switch the AI driving model."""
@@ -696,6 +934,13 @@ class RaceServer:
         self._h264_enabled = False
         self._client_supports_h264 = False
 
+        # Stop NvFBC capture if active
+        self._stop_nvfbc_capture()
+
+        # Reset adaptive bitrate state
+        self._current_bitrate_mbps = 8.0
+        self._last_bitrate_adjust_time = 0.0
+
         # Stop training recorder if active
         if self.training_recorder.recording:
             self.training_recorder.stop_recording()
@@ -707,6 +952,14 @@ class RaceServer:
             self.pc = None
             self.video_track = None
             print("WebRTC peer connection closed")
+
+        # Close data channel peer connection
+        if self._dc_pc is not None:
+            await self._dc_pc.close()
+            self._dc_pc = None
+            self._controls_dc = None
+            self._dc_controls_active = False
+            print("[DC] Data channel peer connection closed")
 
         # Log session cost and reset highlight buffer
         self.cost_tracker.log_session_cost("race reset")
@@ -864,17 +1117,20 @@ class RaceServer:
         'alpamayo': 'hard',
     }
 
-    async def _start_race(self, track: str, laps: int, weather: str = 'clear', model: str = 'carla_pilotnet', player_car: str = None, time_of_day: str = None):
+    async def _start_race(self, track: str, laps: int, weather: str = 'clear', model: str = 'carla_pilotnet', player_car: str = None, time_of_day: str = None, postprocess: str = 'balanced'):
         """Initialize and start a race."""
         self._current_track = track  # Store for race completion reporting
         difficulty = self.MODEL_DIFFICULTY_MAP.get(model, 'medium')
         self.difficulty = difficulty
-        print(f"Starting race: track={track}, laps={laps}, weather={weather}, model={model}, difficulty={difficulty}, player_car={player_car}, time_of_day={time_of_day}")
+        print(f"Starting race: track={track}, laps={laps}, weather={weather}, model={model}, difficulty={difficulty}, player_car={player_car}, time_of_day={time_of_day}, postprocess={postprocess}")
 
         # Stop any existing race loop first
         await self._reset_race()
         # Restore difficulty after reset
         self.difficulty = difficulty
+
+        # Apply post-processing preset BEFORE setup_race (which creates cameras)
+        self.carla.set_postprocess_preset(postprocess)
 
         # Always clean up CARLA actors before setting up fresh
         print("Cleaning up previous race actors...")
@@ -976,6 +1232,12 @@ class RaceServer:
 
         # Try to start NVENC encoder for H.264 video (falls back to JPEG)
         self._start_nvenc_encoder()
+
+        # Try to initialize NvFBC GPU framebuffer capture
+        # NvFBC bypasses CARLA's camera sensor, capturing directly from the GPU
+        # framebuffer. This eliminates CPU memory copies in the capture pipeline.
+        # Falls back silently to CARLA camera sensor if unavailable.
+        self._start_nvfbc_capture()
 
         # Run the frame loop (30fps) and telemetry loop (30Hz) concurrently
         self._race_task = asyncio.create_task(self._race_loop())
@@ -1514,7 +1776,16 @@ class RaceServer:
 
         # --- H.264 NVENC path ---
         if self._h264_enabled and self._nvenc_encoder and self._nvenc_encoder.is_running:
-            raw_frame = self.carla.get_chase_frame_raw()
+            # Try NvFBC capture first (zero-copy from GPU framebuffer)
+            # Falls back to CARLA camera sensor if NvFBC unavailable
+            raw_frame = None
+            if self._nvfbc_enabled and self._nvfbc_capture:
+                raw_frame = self._nvfbc_capture.capture_frame()
+
+            # Fallback: CARLA camera sensor (bytes(image.raw_data) -> CPU copy)
+            if raw_frame is None:
+                raw_frame = self.carla.get_chase_frame_raw()
+
             if raw_frame is None:
                 return
 
@@ -1551,11 +1822,17 @@ class RaceServer:
             # Perf logging
             if self.frame_count % 90 == 0:
                 stats = self._nvenc_encoder.get_stats()
+                capture_info = ""
+                if self._nvfbc_enabled and self._nvfbc_capture:
+                    cap_stats = self._nvfbc_capture.get_stats()
+                    capture_info = (f", capture={cap_stats['method']}, "
+                                    f"cap_avg={cap_stats['avg_capture_ms']:.2f}ms")
                 print(f"[perf] frame #{self.frame_count}: "
                       f"nvenc_encoded={stats['frames_encoded']}, "
                       f"queue={stats['queue_size']}, "
                       f"errors={stats['errors']}, "
-                      f"fps={self.fps:.1f}")
+                      f"fps={self.fps:.1f}"
+                      f"{capture_info}")
                 self._frame_skip_count = 0
                 self._delta_skip_count = 0
 
@@ -1568,7 +1845,27 @@ class RaceServer:
 
         # --- JPEG fallback path (original) ---
 
-        frame = self.carla.get_chase_frame()
+        # Try NvFBC capture for JPEG path too (convert BGRA bytes -> RGB numpy)
+        # NvFBC is most beneficial with NVENC (raw bytes -> GPU encode), but
+        # can also feed the JPEG encoder after a BGRA->RGB conversion.
+        frame = None
+        if self._nvfbc_enabled and self._nvfbc_capture:
+            raw_frame = self._nvfbc_capture.capture_frame()
+            if raw_frame is not None:
+                try:
+                    width = self.config.get('streaming', {}).get('width', 1280)
+                    height = self.config.get('streaming', {}).get('height', 720)
+                    array = np.frombuffer(raw_frame, dtype=np.uint8)
+                    array = array.reshape((height, width, 4))
+                    # BGRA -> RGB
+                    frame = array[:, :, :3][:, :, ::-1].copy()
+                except Exception:
+                    frame = None
+
+        # Fallback: CARLA camera sensor (default path)
+        if frame is None:
+            frame = self.carla.get_chase_frame()
+
         if frame is None:
             return
 

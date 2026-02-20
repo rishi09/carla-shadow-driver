@@ -3,11 +3,12 @@ FROM carlasim/carla:0.9.15
 # Switch to root for installing packages
 USER root
 
-# Install system dependencies (libopus/libvpx for aiortc)
+# Install system dependencies (libopus/libvpx for aiortc, xvfb for NvFBC capture)
 RUN apt-get update -qq && \
     apt-get install -y -qq --no-install-recommends \
     curl wget pkg-config \
-    libopus-dev libvpx-dev && \
+    libopus-dev libvpx-dev \
+    xvfb x11-utils mesa-utils && \
     rm -rf /var/lib/apt/lists/*
 
 # Install Miniconda (provides Python 3.10, since CARLA base has Python 3.6 which is too old for PyTorch)
@@ -45,6 +46,13 @@ RUN pip install --no-cache-dir \
 # Install remaining Python dependencies from requirements.txt
 COPY docker/requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.txt
+
+# Try to install pynvfbc for NvFBC zero-copy GPU capture.
+# This is optional -- the server falls back to CARLA camera sensor if unavailable.
+# pynvfbc requires NVIDIA driver headers and may fail on some build environments.
+# On Vast.ai RTX 3090 instances, the NVIDIA driver includes NvFBC support.
+RUN pip install --no-cache-dir pynvfbc 2>/dev/null || \
+    echo "pynvfbc not available -- NvFBC capture will be disabled (using CARLA sensor fallback)"
 
 # Copy server code
 COPY server/ /opt/shadow-driver/server/

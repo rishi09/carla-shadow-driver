@@ -48,6 +48,7 @@ export function Race() {
       model: params.get('model') || undefined,
       playerCar: params.get('playerCar') || undefined,
       timeOfDay: params.get('timeOfDay') || undefined,
+      postprocess: params.get('postprocess') || undefined,
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -66,7 +67,7 @@ export function Race() {
   const [useWebGL2] = useState(() => supportsWebGL2());
 
   // Store last race settings for instant replay and share link
-  const lastRaceSettingsRef = useRef<{ track: string; laps: number; weather: string; model?: string; playerCar?: string; timeOfDay?: string } | null>(null);
+  const lastRaceSettingsRef = useRef<{ track: string; laps: number; weather: string; model?: string; playerCar?: string; timeOfDay?: string; postprocess?: string } | null>(null);
 
   const gpu = useGPUConnection();
   const engineSound = useEngineSound();
@@ -1097,20 +1098,20 @@ export function Race() {
   }, [gpu.raceState?.player?.speed_kmh]);
 
   // Track pending demo race config to send once WebSocket connects
-  const pendingDemoRaceRef = useRef<{ track: string; laps: number; weather: string; model?: string; player_car?: string; time_of_day?: string } | null>(null);
+  const pendingDemoRaceRef = useRef<{ track: string; laps: number; weather: string; model?: string; player_car?: string; time_of_day?: string; postprocess?: string } | null>(null);
 
   // --- Send start_race once connected in demo mode ---
   useEffect(() => {
     if ((isDemo || directWsUrl) && gpu.isConnected && pendingDemoRaceRef.current) {
-      const { track, laps, weather, model, player_car, time_of_day } = pendingDemoRaceRef.current;
+      const { track, laps, weather, model, player_car, time_of_day, postprocess } = pendingDemoRaceRef.current;
       pendingDemoRaceRef.current = null;
-      gpu.sendStartRace(track, laps, weather, model, player_car, time_of_day);
+      gpu.sendStartRace(track, laps, weather, model, player_car, time_of_day, postprocess);
     }
   }, [isDemo, directWsUrl, gpu.isConnected, gpu.sendStartRace]);
 
-  const handleStartRace = useCallback((track: string, laps: number, weather: string, model?: string, playerCar?: string, timeOfDay?: string) => {
+  const handleStartRace = useCallback((track: string, laps: number, weather: string, model?: string, playerCar?: string, timeOfDay?: string, postprocess?: string) => {
     // Save settings for instant replay
-    lastRaceSettingsRef.current = { track, laps, weather, model, playerCar, timeOfDay };
+    lastRaceSettingsRef.current = { track, laps, weather, model, playerCar, timeOfDay, postprocess };
     // Save config for leaderboard
     raceConfigRef.current = {
       track,
@@ -1130,11 +1131,11 @@ export function Race() {
     racingLineRef.current = null;
     setRacingLine(null);
     if (isDemo || directWsUrl) {
-      pendingDemoRaceRef.current = { track, laps, weather, model, player_car: playerCar, time_of_day: timeOfDay };
+      pendingDemoRaceRef.current = { track, laps, weather, model, player_car: playerCar, time_of_day: timeOfDay, postprocess };
       const wsUrl = directWsUrl || DEMO_WS_URL;
       gpu.connectDirect(wsUrl.replace('https://', 'wss://').replace('http://', 'ws://'));
     } else {
-      gpu.sendStartRace(track, laps, weather, model, playerCar, timeOfDay);
+      gpu.sendStartRace(track, laps, weather, model, playerCar, timeOfDay, postprocess);
     }
   }, [gpu, isDemo, directWsUrl]);
 
@@ -1146,7 +1147,7 @@ export function Race() {
   const handleInstantReplay = useCallback(() => {
     const settings = lastRaceSettingsRef.current;
     if (settings) {
-      handleStartRace(settings.track, settings.laps, settings.weather, settings.model, settings.playerCar, settings.timeOfDay);
+      handleStartRace(settings.track, settings.laps, settings.weather, settings.model, settings.playerCar, settings.timeOfDay, settings.postprocess);
     } else {
       setView('pre_race');
     }
@@ -1183,6 +1184,7 @@ export function Race() {
       model: s.model,
       playerCar: s.playerCar,
       timeOfDay: s.timeOfDay,
+      postprocess: s.postprocess,
     };
   }, [view]); // Re-compute when view changes (entering results)
 

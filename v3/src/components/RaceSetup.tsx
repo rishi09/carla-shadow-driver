@@ -86,6 +86,18 @@ const TIME_OF_DAY_OPTIONS: TimeOfDayOption[] = [
   { id: 'storm', label: 'Storm', color: 'text-gray-400', borderColor: 'border-gray-500/50' },
 ];
 
+interface VisualStyleOption {
+  id: string;
+  name: string;
+  description: string;
+}
+
+const VISUAL_STYLE_OPTIONS: VisualStyleOption[] = [
+  { id: 'cinematic', name: 'Cinematic', description: 'Depth of field + motion blur + bloom. Best compression, most cinematic.' },
+  { id: 'balanced', name: 'Balanced', description: 'Light motion blur + bloom. Good compression, neutral look.' },
+  { id: 'raw', name: 'Raw', description: 'No post-processing. Maximum clarity, highest bandwidth.' },
+];
+
 // Sensible defaults for the best first impression
 const DEFAULT_TRACK = 'Town05';
 const DEFAULT_LAPS = 2;
@@ -93,9 +105,10 @@ const DEFAULT_WEATHER = 'clear';
 const DEFAULT_MODEL = 'carla_pilotnet';
 const DEFAULT_CAR = 'vehicle.tesla.model3';
 const DEFAULT_TIME_OF_DAY = 'noon';
+const DEFAULT_VISUAL_STYLE = 'balanced';
 
 interface RaceSetupProps {
-  onStartRace: (track: string, laps: number, weather: string, model?: string, playerCar?: string, timeOfDay?: string) => void;
+  onStartRace: (track: string, laps: number, weather: string, model?: string, playerCar?: string, timeOfDay?: string, postprocess?: string) => void;
   onBack: () => void;
   quickstart?: boolean;
   isConnected?: boolean;
@@ -106,6 +119,7 @@ interface RaceSetupProps {
     model?: string;
     playerCar?: string;
     timeOfDay?: string;
+    postprocess?: string;
   };
 }
 
@@ -116,8 +130,9 @@ export function RaceSetup({ onStartRace, onBack, quickstart, isConnected, urlSet
   const [selectedModel, setSelectedModel] = useState(urlSettings?.model || DEFAULT_MODEL);
   const [selectedCar, setSelectedCar] = useState(urlSettings?.playerCar || DEFAULT_CAR);
   const [selectedTimeOfDay, setSelectedTimeOfDay] = useState(urlSettings?.timeOfDay || DEFAULT_TIME_OF_DAY);
+  const [selectedVisualStyle, setSelectedVisualStyle] = useState(urlSettings?.postprocess || DEFAULT_VISUAL_STYLE);
   const [showAdvanced, setShowAdvanced] = useState(
-    !!(urlSettings?.playerCar || urlSettings?.timeOfDay || urlSettings?.model)
+    !!(urlSettings?.playerCar || urlSettings?.timeOfDay || urlSettings?.model || urlSettings?.postprocess)
   );
 
   // Quickstart auto-start: when quickstart is true and connected, start after a brief delay
@@ -133,6 +148,7 @@ export function RaceSetup({ onStartRace, onBack, quickstart, isConnected, urlSet
           urlSettings?.model || DEFAULT_MODEL,
           urlSettings?.playerCar || DEFAULT_CAR,
           urlSettings?.timeOfDay || DEFAULT_TIME_OF_DAY,
+          urlSettings?.postprocess || DEFAULT_VISUAL_STYLE,
         );
       }, 1000);
       return () => clearTimeout(timer);
@@ -387,6 +403,32 @@ export function RaceSetup({ onStartRace, onBack, quickstart, isConnected, urlSet
                   ))}
                 </div>
               </div>
+
+              {/* Visual Style Selector */}
+              <div>
+                <label className="block text-white/60 text-sm font-medium mb-2">Visual Style</label>
+                <div className="space-y-2">
+                  {VISUAL_STYLE_OPTIONS.map((style) => (
+                    <button
+                      key={style.id}
+                      onClick={() => setSelectedVisualStyle(style.id)}
+                      className={`w-full flex items-center gap-3 py-2.5 px-4 rounded-lg border text-left transition-all ${
+                        selectedVisualStyle === style.id
+                          ? 'bg-white/10 border-white/30'
+                          : 'bg-black/60 border-white/10 hover:border-white/20'
+                      }`}
+                    >
+                      <div className="flex-1">
+                        <span className="text-white text-sm font-medium">{style.name}</span>
+                        <p className="text-white/40 text-xs mt-0.5">{style.description}</p>
+                      </div>
+                      {selectedVisualStyle === style.id && (
+                        <div className="w-2 h-2 rounded-full bg-white shrink-0" />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
           )}
         </div>
@@ -398,7 +440,7 @@ export function RaceSetup({ onStartRace, onBack, quickstart, isConnected, urlSet
 
         {/* Start Race Button - big and prominent */}
         <button
-          onClick={() => onStartRace(selectedTrack, selectedLaps, selectedWeather, selectedModel, selectedCar, selectedTimeOfDay)}
+          onClick={() => onStartRace(selectedTrack, selectedLaps, selectedWeather, selectedModel, selectedCar, selectedTimeOfDay, selectedVisualStyle)}
           className="w-full py-5 px-6 rounded-xl text-white font-black text-xl tracking-wide transition-all duration-300 hover:scale-[1.02] active:scale-[0.98]"
           style={{
             background: 'linear-gradient(135deg, #22C55E 0%, #16A34A 100%)',

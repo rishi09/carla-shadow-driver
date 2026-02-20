@@ -116,14 +116,46 @@ class RaceManager:
             'bumper': {'x': 2.0, 'z': 0.8, 'pitch': -3},
         }
 
-        # Post-processing settings (applied to chase & rear cameras)
-        self._post_processing_enabled = True
-        self._post_processing = {
-            'motion_blur_intensity': '0.3',
-            'motion_blur_max_distortion': '0.35',
-            'motion_blur_min_object_screen_size': '0.1',
-            'lens_flare_intensity': '0.1',
-            'bloom_intensity': '0.3',
+        # Post-processing preset: "cinematic", "balanced", or "raw"
+        # Presets configure motion blur, bloom, lens flare, and depth of field.
+        # Depth of field blurs the background, which also dramatically improves
+        # H.264 compression efficiency (80%+ fewer bits for out-of-focus areas).
+        self._postprocess_preset = 'balanced'
+
+        # Per-preset camera attribute configurations
+        self._postprocess_presets = {
+            'cinematic': {
+                # Motion blur: subtle but visible at speed
+                'motion_blur_intensity': '0.25',
+                'motion_blur_max_distortion': '0.25',
+                'motion_blur_min_object_screen_size': '0.1',
+                # Bloom: warm cinematic glow
+                'bloom_intensity': '0.5',
+                # Lens flare: subtle
+                'lens_flare_intensity': '0.05',
+                # Depth of field: focus 10m ahead, shallow aperture
+                'focal_distance': '1000.0',   # cm (10 meters)
+                'fstop': '2.8',               # shallow DoF
+                'blade_count': '5',           # bokeh shape
+                # Exposure
+                'enable_postprocess_effects': 'true',
+            },
+            'balanced': {
+                # Motion blur: light
+                'motion_blur_intensity': '0.2',
+                'motion_blur_max_distortion': '0.2',
+                'motion_blur_min_object_screen_size': '0.1',
+                # Bloom: subtle
+                'bloom_intensity': '0.4',
+                # Lens flare: minimal
+                'lens_flare_intensity': '0.05',
+                # No depth of field (no focal_distance/fstop/blade_count)
+                # Exposure
+                'enable_postprocess_effects': 'true',
+            },
+            'raw': {
+                # No post-processing at all - maximum clarity
+            },
         }
 
     def connect(self) -> bool:
@@ -342,42 +374,59 @@ class RaceManager:
         self.world.set_weather(weather_params)
         print(f"Weather set to: {weather}")
 
-    def set_post_processing(self, enabled: bool):
-        """Toggle post-processing effects on/off.
+    def set_postprocess_preset(self, preset: str):
+        """Set the post-processing preset for cameras.
 
-        When toggled, existing cameras are NOT recreated. The change takes
-        effect the next time a camera is attached (e.g., on camera mode switch
-        or race restart).
+        Supported presets:
+            - "cinematic": depth of field + motion blur + bloom (best compression, most cinematic)
+            - "balanced": light motion blur + bloom, no DoF (good compression, neutral look)
+            - "raw": no post-processing (maximum clarity)
+
+        Changes take effect on next camera attach (mode switch or race restart).
+
+        Args:
+            preset: One of "cinematic", "balanced", "raw".
+        """
+        if preset not in self._postprocess_presets:
+            print(f"Unknown postprocess preset '{preset}', defaulting to 'balanced'")
+            preset = 'balanced'
+
+        old = self._postprocess_preset
+        self._postprocess_preset = preset
+        if old != preset:
+            print(f"Post-processing preset changed: {old} -> {preset} "
+                  "(takes effect on next camera attach)")
+
+    def set_post_processing(self, enabled: bool):
+        """Legacy toggle: sets preset to 'balanced' (enabled) or 'raw' (disabled).
 
         Args:
             enabled: True to enable post-processing, False to disable.
         """
-        old = self._post_processing_enabled
-        self._post_processing_enabled = enabled
-        if old != enabled:
-            print(f"Post-processing {'enabled' if enabled else 'disabled'} "
-                  "(takes effect on next camera attach)")
+        if enabled:
+            if self._postprocess_preset == 'raw':
+                self.set_postprocess_preset('balanced')
+        else:
+            self.set_postprocess_preset('raw')
 
     def configure_post_processing(self, settings: Dict[str, str]):
-        """Update post-processing parameters.
+        """Update post-processing parameters for the current preset.
 
         Accepts a dict of camera blueprint attribute names to string values.
-        Supported keys:
-            - motion_blur_intensity (default '0.3')
-            - motion_blur_max_distortion (default '0.35')
-            - motion_blur_min_object_screen_size (default '0.1')
-            - lens_flare_intensity (default '0.1')
-            - bloom_intensity (default '0.3')
-
         Changes take effect on next camera attach (mode switch or race restart).
 
         Args:
             settings: Dict mapping attribute names to string values.
         """
+        preset = self._postprocess_preset
+        if preset == 'raw':
+            print("Cannot configure post-processing while preset is 'raw'")
+            return
+        current = self._postprocess_presets.get(preset, {})
         for key, value in settings.items():
-            if key in self._post_processing:
-                self._post_processing[key] = str(value)
-        print(f"Post-processing configured: {self._post_processing}")
+            current[key] = str(value)
+        self._postprocess_presets[preset] = current
+        print(f"Post-processing ({preset}) configured: {current}")
 
     def set_time_of_day(self, preset: str):
         """Set time-of-day lighting preset in CARLA.
@@ -502,9 +551,9 @@ class RaceManager:
         """Attach RGB camera to vehicle.
 
         Args:
-            cinematic: If True, apply cinematic post-processing attributes
-                       (motion blur, bloom, lens flare, histogram exposure).
-                       Uses self._post_processing dict for values.
+            cinematic: If True, apply post-processing attributes based on
+                       self._postprocess_preset (motion blur, bloom, lens flare,
+                       depth of field, histogram exposure).
             yaw: Rotation yaw in degrees (0 = forward, 180 = backward).
         """
         bp_library = self.world.get_blueprint_library()
@@ -513,26 +562,35 @@ class RaceManager:
         camera_bp.set_attribute('image_size_y', str(height))
         camera_bp.set_attribute('fov', str(fov))
 
-        # Cinematic post-processing for chase camera
-        if cinematic and self._post_processing_enabled:
+        # Apply post-processing attributes based on the current preset
+        preset = self._postprocess_preset
+        if cinematic and preset != 'raw':
+            pp = self._postprocess_presets.get(preset, {})
+            applied = []
+            skipped = []
+
+            for attr_name, attr_value in pp.items():
+                try:
+                    # Verify the attribute exists on this blueprint before setting
+                    camera_bp.get_attribute(attr_name)
+                    camera_bp.set_attribute(attr_name, str(attr_value))
+                    applied.append(f"{attr_name}={attr_value}")
+                except Exception:
+                    skipped.append(attr_name)
+
+            # Histogram exposure for consistent brightness
             try:
-                pp = self._post_processing
-                # Motion blur
-                camera_bp.set_attribute('motion_blur_intensity', pp.get('motion_blur_intensity', '0.3'))
-                camera_bp.set_attribute('motion_blur_max_distortion', pp.get('motion_blur_max_distortion', '0.35'))
-                camera_bp.set_attribute('motion_blur_min_object_screen_size', pp.get('motion_blur_min_object_screen_size', '0.1'))
-                # Bloom
-                camera_bp.set_attribute('bloom_intensity', pp.get('bloom_intensity', '0.3'))
-                # Lens flare
-                camera_bp.set_attribute('lens_flare_intensity', pp.get('lens_flare_intensity', '0.1'))
-                # Exposure
                 camera_bp.set_attribute('exposure_mode', 'histogram')
                 camera_bp.set_attribute('shutter_speed', '60.0')
                 camera_bp.set_attribute('iso', '100.0')
-                print(f"Post-processing enabled: motion_blur={pp.get('motion_blur_intensity')}, "
-                      f"bloom={pp.get('bloom_intensity')}, lens_flare={pp.get('lens_flare_intensity')}")
-            except Exception as e:
-                print(f"Some cinematic camera attributes not supported: {e}")
+                applied.append('exposure=histogram')
+            except Exception:
+                skipped.append('exposure_mode')
+
+            print(f"Post-processing [{preset}]: applied=[{', '.join(applied)}]"
+                  + (f", skipped=[{', '.join(skipped)}]" if skipped else ""))
+        elif cinematic:
+            print(f"Post-processing [raw]: no effects applied")
 
         transform = carla.Transform(
             carla.Location(x=x, y=y, z=z),

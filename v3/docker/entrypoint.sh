@@ -26,12 +26,40 @@ echo "VASTAI_API_KEY: ${VASTAI_API_KEY:+set (${#VASTAI_API_KEY} chars)}"
 echo "Python: $(which python3) $(python3 --version 2>&1)"
 echo "Working dir: $(pwd)"
 
-# Step 1: Start CARLA headless
-report_status "starting" "Starting CARLA simulator"
-echo "Starting CARLA server (headless)..."
+# Step 1: Start Xvfb virtual display for NvFBC capture
+# NvFBC captures the GPU framebuffer directly, bypassing CPU memory copies.
+# This requires an X11 display even though we're headless. Xvfb provides a
+# virtual framebuffer that CARLA renders into, which NvFBC can then capture.
+echo "Starting Xvfb virtual display on :99..."
+Xvfb :99 -screen 0 1280x720x24 +extension GLX +render -noreset &
+XVFB_PID=$!
+sleep 1
 
-# CARLA (UE4) refuses to run as root — run as the 'carla' user from the base image
-su -s /bin/bash -c "/home/carla/CarlaUE4.sh -RenderOffScreen -nosound -carla-rpc-port=2000" carla &
+# Verify Xvfb is running
+if kill -0 $XVFB_PID 2>/dev/null; then
+    export DISPLAY=:99
+    echo "Xvfb running on :99 (PID: $XVFB_PID)"
+    # Log display info if x11-utils is available
+    xdpyinfo -display :99 2>/dev/null | head -5 || true
+else
+    echo "WARNING: Xvfb failed to start -- NvFBC capture will be unavailable"
+    echo "CARLA will use headless mode (camera sensor fallback)"
+fi
+
+# Step 2: Start CARLA
+report_status "starting" "Starting CARLA simulator"
+
+# If Xvfb is running, start CARLA with -RenderOffScreen on the virtual display.
+# -RenderOffScreen uses the GPU for rendering but doesn't open a window.
+# The DISPLAY env var tells UE4 which X display to use for the GL context.
+# If Xvfb is NOT running, fall back to fully headless mode.
+if [ -n "$DISPLAY" ]; then
+    echo "Starting CARLA server (GPU rendering on virtual display $DISPLAY)..."
+    DISPLAY=:99 su -s /bin/bash -c "DISPLAY=:99 /home/carla/CarlaUE4.sh -RenderOffScreen -nosound -carla-rpc-port=2000" carla &
+else
+    echo "Starting CARLA server (headless, no display)..."
+    su -s /bin/bash -c "/home/carla/CarlaUE4.sh -RenderOffScreen -nosound -carla-rpc-port=2000" carla &
+fi
 CARLA_PID=$!
 
 # Wait for CARLA to be ready (poll port 2000)
@@ -49,7 +77,7 @@ for i in $(seq 1 120); do
     sleep 1
 done
 
-# Step 2: Start the race server
+# Step 3: Start the race server
 report_status "starting" "Starting race server"
 echo "Starting race server on port $WS_PORT..."
 
@@ -78,7 +106,7 @@ if ! kill -0 $SERVER_PID 2>/dev/null; then
 fi
 echo "Race server is running (PID: $SERVER_PID)"
 
-# Step 3: Start tunnel (ngrok preferred for lower latency, Cloudflare as fallback)
+# Step 4: Start tunnel (ngrok preferred for lower latency, Cloudflare as fallback)
 report_status "tunneling" "Establishing secure tunnel"
 
 TUNNEL_URL=""

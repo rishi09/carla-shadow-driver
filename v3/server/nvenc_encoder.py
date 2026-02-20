@@ -5,11 +5,16 @@ Encodes raw BGRA frames from CARLA's camera sensor into H.264 access units
 using NVIDIA's NVENC hardware encoder via FFmpeg. This replaces the CPU-based
 JPEG encoding path with ~1-2ms GPU encoding at ~5-8 Mbps (vs ~15-25 Mbps JPEG).
 
+Supports adaptive bitrate: call set_bitrate() to dynamically change the encoder
+bitrate based on client network quality feedback. The encoder restarts the FFmpeg
+subprocess seamlessly between keyframes to apply the new bitrate.
+
 Usage:
     encoder = NVENCEncoder(width=1280, height=720)
     encoder.start()
     encoder.encode_frame(raw_bgra_bytes)
     frame = encoder.get_encoded_frame()  # returns (is_keyframe, data) or None
+    encoder.set_bitrate('6M')  # dynamically change bitrate
     encoder.stop()
 
 The encoder parses FFmpeg's stdout into individual H.264 NAL units, groups them
@@ -47,6 +52,12 @@ class NVENCEncoder:
         # Stats
         self._frames_encoded = 0
         self._encode_errors = 0
+
+        # Adaptive bitrate state
+        self._last_bitrate_change: float = 0.0  # time.time() of last change
+        self._bitrate_change_min_interval: float = 5.0  # seconds between changes
+        self._pending_bitrate: Optional[str] = None  # bitrate to apply on next keyframe
+        self._restart_lock = threading.Lock()  # serialize restart operations
 
     @property
     def codec_config(self) -> Optional[dict]:
@@ -88,6 +99,8 @@ class NVENCEncoder:
             '-tune', 'ull',          # Ultra-low latency tuning
             '-rc', 'cbr',            # Constant bitrate
             '-b:v', self.bitrate,
+            '-spatial-aq', '1',      # Adaptive quantization: more bits to edges/detail
+            '-aq-strength', '8',     # AQ strength (1-15, 8=default, higher=more redistribution)
             '-bf', '0',              # No B-frames (latency)
             '-rc-lookahead', '0',    # No lookahead (latency)
             '-zerolatency', '1',     # Zero-latency mode
@@ -164,6 +177,150 @@ class NVENCEncoder:
         self._codec_config_event.clear()
         print(f"[NVENC] Encoder stopped (encoded {self._frames_encoded} frames, "
               f"{self._encode_errors} errors)")
+
+    def set_bitrate(self, bitrate_str: str) -> bool:
+        """Request a dynamic bitrate change.
+
+        The actual restart is deferred until the next keyframe is flushed
+        from the encoder, so the transition is visually seamless.
+
+        Rate-limited: ignores requests within 5 seconds of the last change.
+
+        Args:
+            bitrate_str: Target bitrate (e.g. '6M', '2M', '12M').
+
+        Returns:
+            True if the change was accepted (will be applied at next keyframe),
+            False if rate-limited or encoder not running.
+        """
+        if not self._running:
+            return False
+
+        # Rate-limit: at most one change every 5 seconds
+        now = time.time()
+        if now - self._last_bitrate_change < self._bitrate_change_min_interval:
+            return False
+
+        # Skip if bitrate is already the same
+        if bitrate_str == self.bitrate:
+            return False
+
+        self._pending_bitrate = bitrate_str
+        print(f"[NVENC] Bitrate change queued: {self.bitrate} -> {bitrate_str} "
+              f"(will apply at next keyframe)")
+        return True
+
+    def _apply_pending_bitrate(self):
+        """Restart the FFmpeg subprocess with the pending bitrate.
+
+        Called from _flush_access_unit when a keyframe is emitted and a
+        bitrate change is pending.  This ensures the old encoder finishes
+        a clean GOP before we swap in the new one.
+        """
+        new_bitrate = self._pending_bitrate
+        if new_bitrate is None:
+            return
+
+        with self._restart_lock:
+            if self._pending_bitrate is None:
+                return  # Another thread already handled it
+            self._pending_bitrate = None
+
+            old_bitrate = self.bitrate
+            print(f"[NVENC] Restarting encoder: {old_bitrate} -> {new_bitrate}")
+
+            # Stop the old FFmpeg process
+            self._running = False
+
+            if self._process:
+                try:
+                    if self._process.stdin:
+                        self._process.stdin.close()
+                except Exception:
+                    pass
+                try:
+                    self._process.terminate()
+                    self._process.wait(timeout=3)
+                except Exception:
+                    try:
+                        self._process.kill()
+                    except Exception:
+                        pass
+                self._process = None
+
+            if self._reader_thread:
+                self._reader_thread.join(timeout=2)
+                self._reader_thread = None
+
+            # Update bitrate and restart
+            self.bitrate = new_bitrate
+            # Clear codec config so it gets re-extracted from the new stream
+            self._codec_config = None
+            self._codec_config_event.clear()
+
+            # Build new FFmpeg command with updated bitrate
+            cmd = [
+                'ffmpeg',
+                '-hide_banner', '-loglevel', 'error',
+                '-f', 'rawvideo',
+                '-pix_fmt', 'bgra',
+                '-s', f'{self.width}x{self.height}',
+                '-r', str(self.fps),
+                '-i', 'pipe:0',
+                '-c:v', 'h264_nvenc',
+                '-preset', 'p1',
+                '-tune', 'ull',
+                '-rc', 'cbr',
+                '-b:v', self.bitrate,
+                '-spatial-aq', '1',
+                '-aq-strength', '8',
+                '-bf', '0',
+                '-rc-lookahead', '0',
+                '-zerolatency', '1',
+                '-g', '60',
+                '-f', 'h264',
+                'pipe:1',
+            ]
+
+            try:
+                self._process = subprocess.Popen(
+                    cmd,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    bufsize=0,
+                )
+            except Exception as e:
+                print(f"[NVENC] Failed to restart FFmpeg with new bitrate: {e}")
+                self._running = False
+                return
+
+            time.sleep(0.1)
+            if self._process.poll() is not None:
+                stderr = self._process.stderr.read().decode('utf-8', errors='replace')
+                print(f"[NVENC] FFmpeg restart failed: {stderr[:500]}")
+                self._process = None
+                self._running = False
+                return
+
+            self._running = True
+            self._last_bitrate_change = time.time()
+            self._reader_thread = threading.Thread(
+                target=self._read_output, daemon=True, name='nvenc-reader'
+            )
+            self._reader_thread.start()
+
+            # Force a keyframe by feeding a blank frame to prime the new encoder
+            # This ensures the client receives SPS/PPS immediately
+            blank = b'\x00' * (self.width * self.height * 4)
+            try:
+                self._process.stdin.write(blank)
+                self._process.stdin.flush()
+            except Exception:
+                pass
+
+            print(f"[NVENC] Encoder restarted at {new_bitrate} "
+                  f"(was {old_bitrate})")
 
     def encode_frame(self, raw_bgra: bytes) -> bool:
         """Feed a raw BGRA frame to FFmpeg for encoding.
@@ -395,6 +552,15 @@ class NVENCEncoder:
             except queue.Full:
                 pass
 
+        # If a bitrate change is pending and we just flushed a keyframe,
+        # restart the encoder now (clean GOP boundary)
+        if is_keyframe and self._pending_bitrate is not None:
+            # Spawn in a separate thread to avoid blocking the reader thread
+            threading.Thread(
+                target=self._apply_pending_bitrate, daemon=True,
+                name='nvenc-bitrate-restart'
+            ).start()
+
     def _extract_codec_config(self, sps_data: bytes):
         """Extract codec configuration from SPS NAL unit.
 
@@ -432,4 +598,5 @@ class NVENCEncoder:
             'queue_size': self._frame_queue.qsize(),
             'running': self._running,
             'has_codec_config': self._codec_config is not None,
+            'bitrate': self.bitrate,
         }

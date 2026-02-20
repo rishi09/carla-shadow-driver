@@ -19,6 +19,11 @@ const WS_CONNECT_DELAY = 3000;
 const WS_MAX_RETRIES = 3;
 const WS_RETRY_DELAY = 2000;
 
+// --- Adaptive bitrate: network quality reporting ---
+const NETWORK_QUALITY_INTERVAL = 2000; // Send quality report every 2 seconds
+const EXPECTED_FRAME_INTERVAL_MS = 33.3; // 30fps target
+const MAX_FRAME_INTERVALS = 60; // Rolling window for jitter calculation
+
 // localStorage keys for persisting last successful WS URL (sub-3s cold start)
 const LAST_WS_URL_KEY = 'shadow_driver_last_ws_url';
 const LAST_WS_TIME_KEY = 'shadow_driver_last_ws_time';
@@ -86,7 +91,7 @@ export interface UseGPUConnectionReturn {
   startGPU: () => Promise<void>;
   stopGPU: () => Promise<void>;
   sendControls: (keys: KeyState, gamepad?: GamepadControls) => void;
-  sendStartRace: (track: string, laps: number, weather: string, model?: string, playerCar?: string, timeOfDay?: string) => void;
+  sendStartRace: (track: string, laps: number, weather: string, model?: string, playerCar?: string, timeOfDay?: string, postprocess?: string) => void;
   sendSwitchModel: (model: string) => void;
   sendRespawn: () => void;
   sendRestartRace: () => void;
@@ -110,6 +115,8 @@ export interface UseGPUConnectionReturn {
   remoteStream: MediaStream | null;
   // Timestamp (performance.now()) of the last received binary/video frame
   lastFrameTime: number;
+  // WebRTC data channel state for controls: 'closed' | 'connecting' | 'open' | 'failed'
+  dataChannelState: string;
 }
 
 export function useGPUConnection(): UseGPUConnectionReturn {
@@ -137,6 +144,12 @@ export function useGPUConnection(): UseGPUConnectionReturn {
   const wsRef = useRef<WebSocket | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
+
+  // --- WebRTC Data Channel for low-latency controls (UDP) ---
+  const dcPcRef = useRef<RTCPeerConnection | null>(null);   // Peer connection for data channel
+  const dcRef = useRef<RTCDataChannel | null>(null);          // The "controls" data channel
+  const [dataChannelState, setDataChannelState] = useState<string>('closed');
+
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollStartTimeRef = useRef<number | null>(null);
   const pingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -156,6 +169,15 @@ export function useGPUConnection(): UseGPUConnectionReturn {
   const startGPUInternalRef = useRef<(isRetry: boolean) => Promise<void>>(() => Promise.resolve());
   const latencyMsRef = useRef<number | null>(null);
 
+  // --- Network quality tracking for adaptive bitrate ---
+  const frameTimestampsRef = useRef<number[]>([]); // recent frame arrival timestamps (performance.now)
+  const frameIntervalsRef = useRef<number[]>([]); // intervals between consecutive frames (ms)
+  const networkQualityIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastPingTimestampRef = useRef<number | null>(null); // for dedicated ABR ping/pong RTT
+  const lastRttRef = useRef<number>(0); // most recent RTT measurement (ms)
+  const framesExpectedRef = useRef<number>(0); // frames expected since last report
+  const framesReceivedRef = useRef<number>(0); // frames received since last report
+
   // --- Cleanup helpers ---
   const clearPolling = useCallback(() => {
     if (pollIntervalRef.current) { clearInterval(pollIntervalRef.current); pollIntervalRef.current = null; }
@@ -169,13 +191,35 @@ export function useGPUConnection(): UseGPUConnectionReturn {
   // --- WebSocket ---
   const closeWebSocket = useCallback(() => {
     clearPingInterval();
-    // Close WebRTC peer connection
+    // Stop network quality reporting
+    if (networkQualityIntervalRef.current) {
+      clearInterval(networkQualityIntervalRef.current);
+      networkQualityIntervalRef.current = null;
+    }
+    // Reset network quality tracking state
+    frameTimestampsRef.current = [];
+    frameIntervalsRef.current = [];
+    framesExpectedRef.current = 0;
+    framesReceivedRef.current = 0;
+    lastRttRef.current = 0;
+    // Close WebRTC video peer connection
     if (pcRef.current) {
       pcRef.current.close();
       pcRef.current = null;
     }
     setRemoteStream(null);
+    // Close WebRTC data channel peer connection
+    if (dcRef.current) {
+      try { dcRef.current.close(); } catch { /* ignore */ }
+      dcRef.current = null;
+    }
+    if (dcPcRef.current) {
+      dcPcRef.current.close();
+      dcPcRef.current = null;
+    }
+    setDataChannelState('closed');
     if (wsRef.current) {
+
       wsRef.current.onopen = null; wsRef.current.onclose = null;
       wsRef.current.onerror = null; wsRef.current.onmessage = null;
       if (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING) {
@@ -185,6 +229,168 @@ export function useGPUConnection(): UseGPUConnectionReturn {
     }
     if (isMountedRef.current) setConnectionState('disconnected');
   }, [clearPingInterval]);
+
+  // --- WebRTC Data Channel setup for low-latency controls ---
+  const setupDataChannel = useCallback((ws: WebSocket) => {
+    // Don't attempt if RTCPeerConnection is not available
+    if (typeof RTCPeerConnection === 'undefined') {
+      console.log('[DC] RTCPeerConnection not available, skipping data channel setup');
+      return;
+    }
+
+    // Close any existing data channel connection
+    if (dcRef.current) {
+      try { dcRef.current.close(); } catch { /* ignore */ }
+      dcRef.current = null;
+    }
+    if (dcPcRef.current) {
+      dcPcRef.current.close();
+      dcPcRef.current = null;
+    }
+
+    try {
+      setDataChannelState('connecting');
+      console.log('[DC] Setting up WebRTC data channel for controls...');
+
+      const pc = new RTCPeerConnection({
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+        ],
+      });
+      dcPcRef.current = pc;
+
+      // Create the data channel with unreliable/unordered settings (UDP-like)
+      const dc = pc.createDataChannel('controls', {
+        ordered: false,
+        maxRetransmits: 0,
+      });
+      dcRef.current = dc;
+
+      dc.onopen = () => {
+        console.log('[DC] Data channel OPEN -- using low-latency UDP path for controls');
+        if (isMountedRef.current) setDataChannelState('open');
+      };
+
+      dc.onclose = () => {
+        console.log('[DC] Data channel closed -- falling back to WebSocket for controls');
+        if (isMountedRef.current) setDataChannelState('closed');
+      };
+
+      dc.onerror = (ev) => {
+        console.warn('[DC] Data channel error:', ev);
+        if (isMountedRef.current) setDataChannelState('failed');
+      };
+
+      // Send ICE candidates to server via WebSocket
+      pc.onicecandidate = (event) => {
+        if (event.candidate && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            type: 'dc_ice_candidate',
+            candidate: event.candidate.candidate,
+            sdpMid: event.candidate.sdpMid,
+            sdpMLineIndex: event.candidate.sdpMLineIndex,
+          }));
+        }
+      };
+
+      pc.onconnectionstatechange = () => {
+        const state = pc.connectionState;
+        console.log(`[DC] Peer connection state: ${state}`);
+        if (state === 'failed' || state === 'closed') {
+          if (isMountedRef.current) setDataChannelState('failed');
+        }
+      };
+
+      pc.oniceconnectionstatechange = () => {
+        console.log(`[DC] ICE connection state: ${pc.iceConnectionState}`);
+      };
+
+      // Create offer and send via WebSocket
+      pc.createOffer().then((offer) => {
+        return pc.setLocalDescription(offer);
+      }).then(() => {
+        if (ws.readyState === WebSocket.OPEN && pc.localDescription) {
+          ws.send(JSON.stringify({
+            type: 'dc_offer',
+            sdp: pc.localDescription.sdp,
+            sdpType: pc.localDescription.type,
+          }));
+          console.log('[DC] Data channel offer sent via WebSocket');
+        }
+      }).catch((err) => {
+        console.warn('[DC] Failed to create data channel offer:', err);
+        if (isMountedRef.current) setDataChannelState('failed');
+      });
+
+    } catch (e) {
+      console.warn('[DC] Failed to set up data channel:', e);
+      if (isMountedRef.current) setDataChannelState('failed');
+    }
+  }, []);
+
+  // --- Network quality tracking helpers ---
+  /** Record a main-camera frame arrival for jitter/drop-rate calculation */
+  const _recordFrameArrival = useCallback((now: number) => {
+    framesReceivedRef.current += 1;
+
+    const timestamps = frameTimestampsRef.current;
+    if (timestamps.length > 0) {
+      const interval = now - timestamps[timestamps.length - 1];
+      const intervals = frameIntervalsRef.current;
+      intervals.push(interval);
+      // Keep rolling window
+      if (intervals.length > MAX_FRAME_INTERVALS) {
+        intervals.shift();
+      }
+    }
+    timestamps.push(now);
+    // Keep only recent timestamps (same window size)
+    if (timestamps.length > MAX_FRAME_INTERVALS + 1) {
+      timestamps.shift();
+    }
+  }, []);
+
+  /** Compute and send network quality metrics to server */
+  const _sendNetworkQualityReport = useCallback((ws: WebSocket) => {
+    if (ws.readyState !== WebSocket.OPEN) return;
+
+    const intervals = frameIntervalsRef.current;
+    if (intervals.length < 5) return; // Need enough samples
+
+    // Average frame interval
+    const sum = intervals.reduce((a, b) => a + b, 0);
+    const avgInterval = sum / intervals.length;
+
+    // Jitter (standard deviation of intervals)
+    const sqDiffs = intervals.map(v => (v - avgInterval) ** 2);
+    const avgSqDiff = sqDiffs.reduce((a, b) => a + b, 0) / sqDiffs.length;
+    const jitter = Math.sqrt(avgSqDiff);
+
+    // Frame drop rate: estimate based on elapsed time vs frames received
+    // Over the reporting period, how many frames were expected vs received
+    const expectedFrames = (NETWORK_QUALITY_INTERVAL / EXPECTED_FRAME_INTERVAL_MS);
+    const received = framesReceivedRef.current;
+    const dropRate = received >= expectedFrames ? 0 : Math.max(0, 1 - (received / expectedFrames));
+
+    // Reset counters for next reporting period
+    framesReceivedRef.current = 0;
+
+    // RTT from the most recent ping/pong
+    const rtt = lastRttRef.current;
+
+    try {
+      ws.send(JSON.stringify({
+        type: 'network_quality',
+        avg_frame_interval_ms: Math.round(avgInterval * 10) / 10,
+        jitter_ms: Math.round(jitter * 10) / 10,
+        frame_drop_rate: Math.round(dropRate * 1000) / 1000,
+        rtt_ms: Math.round(rtt),
+      }));
+    } catch {
+      // WebSocket may have closed between check and send
+    }
+  }, []);
 
   const connectWebSocket = useCallback((tunnelUrl: string, isRetry = false) => {
     tunnelUrlRef.current = tunnelUrl;
@@ -216,6 +422,15 @@ export function useGPUConnection(): UseGPUConnectionReturn {
             ws.send(JSON.stringify({ type: 'ping', timestamp: Date.now() }));
           }
         }, PING_INTERVAL);
+
+        // Start network quality reporting for adaptive bitrate
+        // Reset counters before starting the interval
+        frameTimestampsRef.current = [];
+        frameIntervalsRef.current = [];
+        framesReceivedRef.current = 0;
+        networkQualityIntervalRef.current = setInterval(() => {
+          _sendNetworkQualityReport(ws);
+        }, NETWORK_QUALITY_INTERVAL);
       };
 
       ws.onmessage = async (event) => {
@@ -258,7 +473,9 @@ export function useGPUConnection(): UseGPUConnectionReturn {
           } else {
             // Main camera JPEG frame (0x00 or legacy untyped)
             const jpegBlob = new Blob([buffer.slice(1)], { type: 'image/jpeg' });
-            setLastFrameTime(performance.now());
+            const now = performance.now();
+            setLastFrameTime(now);
+            _recordFrameArrival(now);
             if (binaryFrameHandlerRef.current) {
               binaryFrameHandlerRef.current(jpegBlob);
             }
@@ -294,6 +511,26 @@ export function useGPUConnection(): UseGPUConnectionReturn {
             } else {
               console.log('[v3] WebCodecs VideoDecoder not available, using JPEG fallback');
             }
+
+            // Set up WebRTC data channel for low-latency controls (UDP)
+            // This works even through Cloudflare tunnels since STUN can find
+            // a direct path via ICE candidates, bypassing the tunnel for input.
+            // Falls back to WebSocket if data channel setup fails.
+            setupDataChannel(ws);
+          } else if (data.type === 'dc_answer') {
+            // Server's SDP answer for the data channel peer connection
+            const answer = data as { sdp: string; sdpType: RTCSdpType };
+            try {
+              if (dcPcRef.current) {
+                await dcPcRef.current.setRemoteDescription(
+                  new RTCSessionDescription({ sdp: answer.sdp, type: answer.sdpType })
+                );
+                console.log('[DC] Data channel answer applied');
+              }
+            } catch (err) {
+              console.warn('[DC] Failed to apply data channel answer:', err);
+              if (isMountedRef.current) setDataChannelState('failed');
+            }
           } else if (data.type === 'webrtc_answer') {
             const answer = data as { sdp: string; sdpType: RTCSdpType };
             try {
@@ -327,6 +564,7 @@ export function useGPUConnection(): UseGPUConnectionReturn {
             if (pong.timestamp) {
               const ms = Date.now() - pong.timestamp;
               latencyMsRef.current = ms;
+              lastRttRef.current = ms; // Also track for network quality reports
               setLatencyMs(ms);
             }
           } else if (data.type === 'model_switched') {
@@ -414,7 +652,7 @@ export function useGPUConnection(): UseGPUConnectionReturn {
         setConnectionState('disconnected');
       }
     }
-  }, [closeWebSocket, clearPingInterval]);
+  }, [closeWebSocket, clearPingInterval, _sendNetworkQualityReport, setupDataChannel]);
 
   // --- Status polling ---
   const pollGPUStatus = useCallback(async () => {
@@ -549,7 +787,6 @@ export function useGPUConnection(): UseGPUConnectionReturn {
 
   // --- Game communication ---
   const sendControls = useCallback((keys: KeyState, gamepad?: GamepadControls) => {
-    if (wsRef.current?.readyState !== WebSocket.OPEN) return;
     const msg: Record<string, unknown> = { type: 'control', keys };
     if (latencyMsRef.current !== null) {
       msg.latency = latencyMsRef.current;
@@ -563,10 +800,25 @@ export function useGPUConnection(): UseGPUConnectionReturn {
         handbrake: gamepad.handbrake,
       };
     }
-    wsRef.current.send(JSON.stringify(msg));
+    const json = JSON.stringify(msg);
+
+    // Prefer WebRTC data channel (UDP, lower latency) if available
+    if (dcRef.current && dcRef.current.readyState === 'open') {
+      try {
+        dcRef.current.send(json);
+        return;
+      } catch {
+        // Data channel send failed, fall through to WebSocket
+      }
+    }
+
+    // Fallback: send via WebSocket (TCP)
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(json);
+    }
   }, []);
 
-  const sendStartRace = useCallback((track: string, laps: number, weather: string, model?: string, playerCar?: string, timeOfDay?: string) => {
+  const sendStartRace = useCallback((track: string, laps: number, weather: string, model?: string, playerCar?: string, timeOfDay?: string, postprocess?: string) => {
     if (wsRef.current?.readyState !== WebSocket.OPEN) return;
     const msg: Record<string, unknown> = { type: 'start_race', track, laps, weather };
     if (model) {
@@ -577,6 +829,9 @@ export function useGPUConnection(): UseGPUConnectionReturn {
     }
     if (timeOfDay) {
       msg.time_of_day = timeOfDay;
+    }
+    if (postprocess) {
+      msg.postprocess = postprocess;
     }
     // Include player name for social presence reporting
     try {
@@ -668,6 +923,7 @@ export function useGPUConnection(): UseGPUConnectionReturn {
     connectDirect, clearError, onBinaryFrame, onRearFrame, onH264Frame, onCodecConfig, remoteStream,
     isConnected: connectionState === 'connected',
     isProvisioningActive: provisioningState === 'starting' || provisioningState === 'running',
+    dataChannelState,
   };
 }
 

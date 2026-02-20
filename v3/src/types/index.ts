@@ -214,6 +214,10 @@ export type ServerMessage = RaceState | RaceFinished | HandshakeAck | PerfStats 
   sdp: string;
   sdpType: RTCSdpType;
 } | {
+  type: 'dc_answer';
+  sdp: string;
+  sdpType: RTCSdpType;
+} | {
   type: 'restart_ack';
 } | {
   type: 'no_change';
@@ -238,6 +242,8 @@ export type ClientMessageType =
   | 'restart_race'
   | 'latency_report'
   | 'webrtc_offer'
+  | 'dc_offer'
+  | 'dc_ice_candidate'
   | 'pause'
   | 'resume'
   | 'codec_negotiate';
