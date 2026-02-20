@@ -21,8 +21,9 @@ from webrtc_track import CarlaVideoTrack, force_codec
 from carla_manager import RaceManager
 from model_manager import ModelManager
 from frame_encoder import FrameEncoder
-from race_logic import RaceState, generate_checkpoints_from_waypoints, RaceDirector, AIMistakeGenerator
+from race_logic import RaceState, generate_checkpoints_from_waypoints, RaceDirector, AIMistakeGenerator, TrashTalkManager, WeatherMoodManager
 from weather_transitions import WeatherTransitionManager
+from ai_personality import AIPersonality
 
 
 # ---------------------------------------------------------------------------
@@ -186,6 +187,12 @@ class RaceServer:
             max_width=self.config.get('streaming', {}).get('width', 1280),
             max_height=self.config.get('streaming', {}).get('height', 720),
         )
+        # Separate encoder for rear-view mirror: lower quality, smaller resolution
+        self.rear_encoder = FrameEncoder(
+            quality=30,
+            max_width=320,
+            max_height=120,
+        )
 
         self.race_state: Optional[RaceState] = None
         self.player_keys: Dict[str, bool] = {'w': False, 'a': False, 's': False, 'd': False, 'space': False}
@@ -203,6 +210,9 @@ class RaceServer:
         self.race_director: Optional[RaceDirector] = None
         self.mistake_generator: Optional[AIMistakeGenerator] = None
         self.weather_manager: Optional[WeatherTransitionManager] = None
+        self.weather_mood: Optional[WeatherMoodManager] = None
+        self.trash_talk: Optional[TrashTalkManager] = None
+        self.ai_personality: Optional[AIPersonality] = None
         self.pc: Optional[RTCPeerConnection] = None
         self.video_track: Optional[CarlaVideoTrack] = None
 
@@ -216,6 +226,9 @@ class RaceServer:
         self._last_sent_time: float = 0.0
         self._frame_skip_count: int = 0  # Frames skipped since last perf log
         self._delta_skip_count: int = 0  # Frames skipped via frame delta detection
+
+        # --- Rear mirror frame counter (send at 15fps = every 2nd frame of the 30fps loop) ---
+        self._rear_frame_counter: int = 0
 
     async def handle_client(self, websocket):
         """Handle a single WebSocket client connection."""
@@ -318,6 +331,11 @@ class RaceServer:
                         'mode': self.carla._camera_mode,
                     }))
 
+                elif msg_type == 'restart_race':
+                    # Instant restart: teleport cars back to start, reset timers
+                    # Reuses existing race setup without full cleanup
+                    await self._restart_race(websocket)
+
                 elif msg_type == 'webrtc_offer':
                     await self._handle_webrtc_offer(websocket, data)
 
@@ -414,6 +432,9 @@ class RaceServer:
         self.race_director = None
         self.mistake_generator = None
         self.weather_manager = None
+        self.weather_mood = None
+        self.trash_talk = None
+        self.ai_personality = None
         self.difficulty = 'easy'
         self.frame_count = 0
         self.fps = 0.0
@@ -427,9 +448,11 @@ class RaceServer:
         self._last_sent_time = 0.0
         self._frame_skip_count = 0
         self._delta_skip_count = 0
+        self._rear_frame_counter = 0
 
         # Reset encoder frame hash for delta detection
         self.encoder.reset_frame_hash()
+        self.rear_encoder.reset_frame_hash()
 
         # Close WebRTC peer connection
         if self.pc is not None:
@@ -439,6 +462,91 @@ class RaceServer:
             print("WebRTC peer connection closed")
 
         print("Race reset (actors preserved for reconnect)")
+
+    async def _restart_race(self, websocket):
+        """Instant restart: teleport cars back to start and reset race state.
+        Does NOT do full cleanup/respawn -- keeps existing actors, cameras, and AI settings.
+        Much faster than _start_race since we skip map loading, vehicle spawning, etc."""
+        print("Instant race restart requested")
+
+        # Stop current race/telemetry loops
+        self.running = False
+
+        if self._race_task and not self._race_task.done():
+            self._race_task.cancel()
+            try:
+                await self._race_task
+            except asyncio.CancelledError:
+                pass
+        self._race_task = None
+
+        if self._telemetry_task and not self._telemetry_task.done():
+            self._telemetry_task.cancel()
+            try:
+                await self._telemetry_task
+            except asyncio.CancelledError:
+                pass
+        self._telemetry_task = None
+
+        # Teleport both cars back to the starting line
+        self.carla.reset_to_start()
+
+        # Reset input state
+        self.player_keys = {'w': False, 'a': False, 's': False, 'd': False, 'space': False}
+        self._controls_received = False
+
+        # Reset frame skip state
+        self._last_sent_x = None
+        self._last_sent_y = None
+        self._last_sent_yaw = None
+        self._last_sent_time = 0.0
+        self._frame_skip_count = 0
+        self._delta_skip_count = 0
+        self.encoder.reset_frame_hash()
+
+        # Reset FPS counters
+        self.frame_count = 0
+        self.fps = 0.0
+        self._fps_count = 0
+        self._fps_timer = time.time()
+
+        # Regenerate checkpoints from the (now-reset) player position
+        checkpoints = generate_checkpoints_from_waypoints(
+            self.carla.world,
+            num_checkpoints=self.config.get('race', {}).get('checkpoints', 10),
+            radius=self.config.get('race', {}).get('checkpoint_radius', 15.0),
+            start_location=self.carla.player_car.get_location(),
+        )
+
+        if not checkpoints:
+            await websocket.send(json.dumps({
+                'type': 'error',
+                'message': 'Failed to generate checkpoints for restart',
+            }))
+            return
+
+        # Create fresh race state with same lap count
+        old_laps = self.race_state.total_laps if self.race_state else 3
+        self.race_state = RaceState(checkpoints, total_laps=old_laps)
+        self.race_state.start_countdown()
+
+        # Re-create race director and mistake generator with same difficulty
+        self.race_director = RaceDirector(difficulty=self.difficulty)
+        self.mistake_generator = AIMistakeGenerator(difficulty=self.difficulty)
+        self.weather_mood = WeatherMoodManager(total_laps=old_laps)
+        self.trash_talk = TrashTalkManager()
+        self.ai_personality = AIPersonality()
+
+        self.running = True
+
+        # Send ack to client
+        await websocket.send(json.dumps({'type': 'restart_ack'}))
+
+        # Restart the race/telemetry loops
+        self._race_task = asyncio.create_task(self._race_loop())
+        self._telemetry_task = asyncio.create_task(self._telemetry_loop())
+
+        print("Instant restart complete -- countdown started")
 
     # Model ID -> difficulty mapping
     MODEL_DIFFICULTY_MAP = {
@@ -540,17 +648,20 @@ class RaceServer:
         self.race_director = RaceDirector(difficulty=self.difficulty)
         self.mistake_generator = AIMistakeGenerator(difficulty=self.difficulty)
         self.weather_manager = WeatherTransitionManager(weather, total_laps=laps)
+        self.weather_mood = WeatherMoodManager(total_laps=laps)
+        self.trash_talk = TrashTalkManager()
+        self.ai_personality = AIPersonality()
 
-        # Run the frame loop (30fps) and telemetry loop (60Hz) concurrently
+        # Run the frame loop (30fps) and telemetry loop (30Hz) concurrently
         self._race_task = asyncio.create_task(self._race_loop())
         self._telemetry_task = asyncio.create_task(self._telemetry_loop())
 
     async def _race_loop(self):
-        """Main race loop: sends JPEG frames at ~30fps. Telemetry is sent separately at 60Hz."""
+        """Main race loop: sends JPEG frames at ~30fps. Telemetry is sent separately at 30Hz."""
         target_dt = 1.0 / 30.0  # 30 FPS target
+        next_frame_time = time.monotonic() + target_dt
 
         while self.running and self.ws_client:
-            loop_start = time.time()
 
             try:
                 # Handle countdown
@@ -564,6 +675,9 @@ class RaceServer:
                             print(f"Race started! Active keys at start: {active_keys}")
                         else:
                             print("Race started! Controls now active (no keys pressed yet)")
+                    # Tick CARLA during countdown so camera feeds stay alive
+                    # (in sync mode, no tick = no new camera frames)
+                    self.carla.tick()
                     # Still send frames during countdown (but don't apply controls)
                     await self._send_frame()
 
@@ -602,18 +716,33 @@ class RaceServer:
                     await asyncio.sleep(0)
 
                     # 4. Update race state with vehicle positions
-                    player_telem = self.carla.get_telemetry(self.carla.player_car)
-                    ai_telem = self.carla.get_telemetry(self.carla.ai_car)
+                    player_telem = None
+                    ai_telem = None
+                    try:
+                        player_telem = self.carla.get_telemetry(self.carla.player_car)
+                        ai_telem = self.carla.get_telemetry(self.carla.ai_car)
+                    except Exception as e:
+                        print(f"Telemetry read error (non-fatal): {e}")
 
-                    self.race_state.update_player(
-                        player_telem['x'], player_telem['y'], player_telem['speed_kmh']
-                    )
-                    self.race_state.update_ai(
-                        ai_telem['x'], ai_telem['y'], ai_telem['speed_kmh']
-                    )
+                    if player_telem and ai_telem:
+                        self.race_state.update_player(
+                            player_telem['x'], player_telem['y'], player_telem['speed_kmh']
+                        )
+                        self.race_state.update_ai(
+                            ai_telem['x'], ai_telem['y'], ai_telem['speed_kmh']
+                        )
 
                     # 4b. Speed-based resolution scaling
-                    self.encoder.update_speed_resolution(player_telem['speed_kmh'])
+                    if player_telem:
+                        self.encoder.update_speed_resolution(player_telem['speed_kmh'])
+
+                    # 4c. AI Personality: update emotional state based on race conditions
+                    if self.ai_personality and self.race_state:
+                        self.ai_personality.update(self.race_state)
+                        # Apply personality speed modifier on top of race director adjustments
+                        personality_speed_mod = self.ai_personality.get_speed_modifier()
+                        if abs(personality_speed_mod) > 0.5 and self.carla._ai_autopilot:
+                            self.carla.adjust_ai_speed(personality_speed_mod)
 
                     # Race Director: dynamically adjust AI speed (distance-based rubber banding)
                     if self.race_director and self.carla._ai_autopilot:
@@ -637,20 +766,23 @@ class RaceServer:
                             self.carla.adjust_ai_speed(0.0)
 
                     # 5. Record player position for ghost replay
-                    lap_time = self.race_state.get_current_lap_time("player")
-                    yaw = player_telem.get('yaw', 0.0)
-                    self.race_state.record_player_position(
-                        player_telem['x'], player_telem['y'], yaw, lap_time
-                    )
+                    if player_telem:
+                        lap_time = self.race_state.get_current_lap_time("player")
+                        yaw = player_telem.get('yaw', 0.0)
+                        self.race_state.record_player_position(
+                            player_telem['x'], player_telem['y'], yaw, lap_time
+                        )
 
                     # 6. Drift detection: compare heading vs velocity direction
-                    drift_event = self.race_state.update_drift(
-                        heading_deg=player_telem.get('yaw', 0.0),
-                        velocity_x=player_telem.get('velocity_x', 0.0),
-                        velocity_y=player_telem.get('velocity_y', 0.0),
-                        speed_kmh=player_telem['speed_kmh'],
-                        steer=player_telem.get('steer', 0.0),
-                    )
+                    drift_event = None
+                    if player_telem:
+                        drift_event = self.race_state.update_drift(
+                            heading_deg=player_telem.get('yaw', 0.0),
+                            velocity_x=player_telem.get('velocity_x', 0.0),
+                            velocity_y=player_telem.get('velocity_y', 0.0),
+                            speed_kmh=player_telem['speed_kmh'],
+                            steer=player_telem.get('steer', 0.0),
+                        )
 
                     # 6b. Send drift_end event as a separate message for popup display
                     if drift_event and drift_event.get('event') == 'drift_end' and self.ws_client:
@@ -677,17 +809,75 @@ class RaceServer:
                         except Exception:
                             pass
 
-                    # 8. Dynamic weather transitions
+                    # 7b. AI trash talk: opponent taunts and challenges
+                    if self.trash_talk and self.ws_client:
+                        trash_msg = self.trash_talk.check_events(self.race_state)
+                        if trash_msg:
+                            try:
+                                await self.ws_client.send(json.dumps(trash_msg))
+                            except Exception:
+                                pass
+
+                    # 8. Dynamic weather transitions (time-of-day sun path + intensity-based mood)
                     if self.weather_manager and self.race_director:
                         progress = self.race_director.get_race_progress(self.race_state)
                         weather_params = self.weather_manager.update(progress)
                         if weather_params:
+                            # Overlay mood-driven weather on top of the time-of-day sun path.
+                            # Mood controls clouds/rain/fog/wind, transition manager controls sun.
+                            if self.weather_mood:
+                                mood_params = self.weather_mood.update(self.race_state)
+                                if mood_params:
+                                    weather_params['cloudiness'] = max(weather_params.get('cloudiness', 0), mood_params.get('cloudiness', 0))
+                                    weather_params['precipitation'] = max(weather_params.get('precipitation', 0), mood_params.get('precipitation', 0))
+                                    weather_params['fog_density'] = max(weather_params.get('fog_density', 0), mood_params.get('fog_density', 0))
+                                    weather_params['wind_intensity'] = max(weather_params.get('wind_intensity', 0), mood_params.get('wind_intensity', 0))
                             self.carla.set_weather_params(**weather_params)
+                        elif self.weather_mood:
+                            # Even if time-of-day doesn't need update, mood might
+                            mood_params = self.weather_mood.update(self.race_state)
+                            if mood_params:
+                                self.carla.set_weather_params(**mood_params)
 
                     # 9. Send chase camera frame to browser
                     await self._send_frame()
 
+                elif self.race_state.status == "finishing":
+                    # One racer finished - continue simulation for 30s grace period
+                    # so the other racer can still finish and get a time
+                    await asyncio.sleep(0)
+                    self.carla.apply_player_control(self.player_keys)
+                    self.carla.tick()
+                    await asyncio.sleep(0)
+
+                    # Update positions (this may trigger the second racer finishing)
+                    try:
+                        player_telem = self.carla.get_telemetry(self.carla.player_car)
+                        ai_telem = self.carla.get_telemetry(self.carla.ai_car)
+                        self.race_state.update_player(
+                            player_telem['x'], player_telem['y'], player_telem['speed_kmh']
+                        )
+                        self.race_state.update_ai(
+                            ai_telem['x'], ai_telem['y'], ai_telem['speed_kmh']
+                        )
+                    except Exception as e:
+                        print(f"Finishing state telemetry error: {e}")
+
+                    # Check if grace period expired
+                    self.race_state.check_finishing_timeout()
+
+                    await self._send_frame()
+
                 elif self.race_state.status == "finished":
+                    # Send AI trash talk for race finish (before race_finished message)
+                    if self.trash_talk and self.ws_client:
+                        trash_msg = self.trash_talk.check_events(self.race_state)
+                        if trash_msg:
+                            try:
+                                await self.ws_client.send(json.dumps(trash_msg))
+                            except Exception:
+                                pass
+
                     # Send final race result
                     if self.ws_client:
                         paths = self.race_state.get_paths()
@@ -718,19 +908,26 @@ class RaceServer:
                 import traceback
                 traceback.print_exc()
 
-            # Frame timing
-            elapsed = time.time() - loop_start
-            sleep_time = target_dt - elapsed
+            # Frame timing: use absolute target to prevent drift accumulation
+            # If we're behind schedule (next_frame_time already passed), don't sleep
+            now = time.monotonic()
+            sleep_time = next_frame_time - now
             if sleep_time > 0:
                 await asyncio.sleep(sleep_time)
+            # Schedule next frame relative to the target, not to now,
+            # so we don't accumulate drift from sleep overshooting
+            next_frame_time += target_dt
+            # If we fell behind by more than 2 frames, reset to avoid burst catching up
+            if next_frame_time < time.monotonic() - target_dt:
+                next_frame_time = time.monotonic() + target_dt
 
             # FPS calculation
             self._fps_count += 1
-            now = time.time()
-            if now - self._fps_timer >= 1.0:
-                self.fps = self._fps_count / (now - self._fps_timer)
+            now_wall = time.time()
+            if now_wall - self._fps_timer >= 1.0:
+                self.fps = self._fps_count / (now_wall - self._fps_timer)
                 self._fps_count = 0
-                self._fps_timer = now
+                self._fps_timer = now_wall
 
         # Race loop ended (finished or client disconnected)
         # Don't cleanup actors here — _reset_race handles loop cancellation,
@@ -805,6 +1002,11 @@ class RaceServer:
 
     async def _send_frame(self):
         """Encode and send chase camera frame as binary WebSocket message.
+        Also sends rear-view mirror frames at half rate (15fps).
+
+        Binary frame format: 1-byte type prefix + JPEG data
+          0x00 = main camera frame
+          0x01 = rear-view mirror frame
 
         Optimizations:
           - Skipped when WebRTC is active and connected (video flows via RTP track)
@@ -851,7 +1053,8 @@ class RaceServer:
             return
 
         try:
-            await self.ws_client.send(jpeg_bytes)
+            # Prepend type byte 0x00 for main camera frame
+            await self.ws_client.send(b'\x00' + jpeg_bytes)
             self.frame_count += 1
 
             # Update frame skip tracking with current position
@@ -891,11 +1094,42 @@ class RaceServer:
                 except Exception:
                     pass
 
+            # --- Rear-view mirror frame (sent at 15fps = every 2nd main frame) ---
+            self._rear_frame_counter += 1
+            if self._rear_frame_counter % 2 == 0:
+                await self._send_rear_frame()
+
+        except Exception:
+            pass
+
+    async def _send_rear_frame(self):
+        """Encode and send rear-view mirror frame with 0x01 type prefix.
+
+        Uses a separate low-quality encoder (JPEG quality 30, 320x120).
+        Only sent when WebSocket is open and WebRTC is not streaming.
+        """
+        if not self.ws_client:
+            return
+        if self.pc is not None and self.pc.connectionState == "connected":
+            return
+
+        rear_frame = self.carla.get_rear_frame()
+        if rear_frame is None:
+            return
+
+        loop = asyncio.get_event_loop()
+        jpeg_bytes = await loop.run_in_executor(None, self.rear_encoder.encode, rear_frame)
+        if jpeg_bytes is None:
+            return
+
+        try:
+            # Prepend type byte 0x01 for rear camera frame
+            await self.ws_client.send(b'\x01' + jpeg_bytes)
         except Exception:
             pass
 
     async def _telemetry_loop(self):
-        """Send race telemetry JSON at 60Hz, independent of the 30fps frame loop.
+        """Send race telemetry JSON at ~30Hz, independent of the 30fps frame loop.
 
         Reads the latest vehicle telemetry from CARLA (getters work between
         ticks) and sends a race_state JSON message to the client.
@@ -906,13 +1140,16 @@ class RaceServer:
             loop_start = time.time()
 
             try:
-                if self.race_state and self.race_state.status in ("countdown", "racing"):
+                if self.race_state and self.race_state.status in ("countdown", "racing", "finishing"):
                     # Read current telemetry (works between CARLA ticks)
                     player_telem = None
                     ai_telem = None
-                    if self.race_state.status == "racing":
-                        player_telem = self.carla.get_telemetry(self.carla.player_car)
-                        ai_telem = self.carla.get_telemetry(self.carla.ai_car)
+                    if self.race_state.status in ("racing", "finishing"):
+                        try:
+                            player_telem = self.carla.get_telemetry(self.carla.player_car)
+                            ai_telem = self.carla.get_telemetry(self.carla.ai_car)
+                        except Exception:
+                            pass  # Telemetry read failed, send state without vehicle data
                     await self._send_race_state(player_telem, ai_telem)
             except asyncio.CancelledError:
                 raise
@@ -971,6 +1208,10 @@ class RaceServer:
         if self.race_director:
             progress = self.race_director.get_race_progress(self.race_state)
             state['race_progress'] = round(progress, 2)
+
+        # Weather mood info for frontend overlay effects
+        if self.weather_mood:
+            state['weather_mood'] = self.weather_mood.get_mood()
 
         try:
             await self.ws_client.send(json.dumps(state))

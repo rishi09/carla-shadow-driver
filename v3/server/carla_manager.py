@@ -52,10 +52,12 @@ class RaceManager:
         # Cameras
         self.chase_cam: Optional[carla.Sensor] = None
         self.ai_cam: Optional[carla.Sensor] = None
+        self.rear_cam: Optional[carla.Sensor] = None
 
         # Frame buffers
         self.chase_buffer = CameraBuffer()
         self.ai_buffer = CameraBuffer()
+        self.rear_buffer = CameraBuffer()
 
         # Actors to clean up
         self._actors: list = []
@@ -239,6 +241,19 @@ class RaceManager:
                 cinematic=True
             )
 
+            # Attach rear-view camera to player car (small mirror inset)
+            rear_cfg = self.config['camera'].get('rear', {})
+            self.rear_cam = self._attach_camera(
+                self.player_car,
+                width=rear_cfg.get('width', 320),
+                height=rear_cfg.get('height', 120),
+                fov=rear_cfg.get('fov', 110),
+                x=rear_cfg.get('x', -2.0), y=0.0, z=rear_cfg.get('z', 2.0),
+                pitch=rear_cfg.get('pitch', 0),
+                callback=self.rear_buffer.update,
+                yaw=180.0,  # Face backward
+            )
+
             # Attach front camera to AI car (for model inference)
             ai_cfg = self.config['camera']['ai']
             self.ai_cam = self._attach_camera(
@@ -275,7 +290,7 @@ class RaceManager:
             self.player_car.set_target_velocity(carla.Vector3D(0, 0, 0))
             self.world.tick()
 
-            print("Race setup complete: 2 cars + 2 cameras")
+            print("Race setup complete: 2 cars + 3 cameras (chase + rear + AI)")
             return True
 
         except Exception as e:
@@ -407,12 +422,13 @@ class RaceManager:
 
     def _attach_camera(self, vehicle, width: int, height: int, fov: int,
                        x: float, y: float, z: float, pitch: float,
-                       callback, cinematic: bool = False) -> Optional[carla.Sensor]:
+                       callback, cinematic: bool = False, yaw: float = 0.0) -> Optional[carla.Sensor]:
         """Attach RGB camera to vehicle.
 
         Args:
             cinematic: If True, apply cinematic post-processing attributes
                        (motion blur, histogram exposure). Used for chase cam.
+            yaw: Rotation yaw in degrees (0 = forward, 180 = backward).
         """
         bp_library = self.world.get_blueprint_library()
         camera_bp = bp_library.find('sensor.camera.rgb')
@@ -434,7 +450,7 @@ class RaceManager:
 
         transform = carla.Transform(
             carla.Location(x=x, y=y, z=z),
-            carla.Rotation(pitch=pitch)
+            carla.Rotation(pitch=pitch, yaw=yaw)
         )
 
         try:
@@ -573,9 +589,11 @@ class RaceManager:
         # At 200 km/h: 0.08 + 0.42 * 0.057 = 0.10
         steer_limit = 0.08 + 0.42 * math.exp(-speed_kmh / 70.0)
 
-        # Ramp toward target: fast attack (~80ms), fast release (~100ms)
-        steer_attack = dt * 10.0  # reaches 0.5 in ~1.5 frames at 30fps
-        steer_release = dt * 10.0 # returns to 0 in ~1.5 frames
+        # Ramp toward target: attack ~100ms, release ~167ms
+        # At 30fps (dt=0.033), attack step = 0.167/frame → 0.5 in 3 frames (100ms)
+        # Release step = 0.1/frame → 0.5 in 5 frames (167ms)
+        steer_attack = dt * 5.0   # reaches 0.5 (low-speed limit) in ~3 frames = 100ms
+        steer_release = dt * 3.0  # returns from 0.5 to 0 in ~5 frames = 167ms
 
         if keys.get('a', False):
             target_steer = -steer_limit
@@ -621,10 +639,14 @@ class RaceManager:
         final_steer = max(-1.0, min(1.0, final_steer))
 
         # --- Reverse if braking while slow or stopped ---
-        # Raise threshold so car commits to reverse once slowed down enough
-        if keys.get('s', False) and speed_kmh < 15.0:
+        # Only reverse when S is pressed WITHOUT W (W takes priority for forward).
+        # Use the ramped brake value as reverse throttle for smooth transition
+        # (the brake key has been ramping _current_brake, which we repurpose here).
+        if keys.get('s', False) and not keys.get('w', False) and speed_kmh < 15.0:
+            # Use brake ramp as reverse throttle (already 0.5-1.0 by the time we're slow)
+            reverse_throttle = max(0.5, self._current_brake)
             control = carla.VehicleControl(
-                throttle=1.0,
+                throttle=reverse_throttle,
                 steer=final_steer,
                 brake=0.0,
                 hand_brake=hand_brake,
@@ -635,7 +657,7 @@ class RaceManager:
             if self._ctrl_frame % 30 == 0:
                 active = [k for k, v in keys.items() if v]
                 print(f"[CTRL#{self._ctrl_frame}] REVERSE keys={active} spd={speed_kmh:.1f} "
-                      f"thr=1.0 steer={control.steer:.2f} brk=0.0")
+                      f"thr={reverse_throttle:.2f} steer={control.steer:.2f} brk=0.0")
             return
 
         control = carla.VehicleControl(
@@ -672,7 +694,7 @@ class RaceManager:
         that pushes toward the velocity direction.
 
         Returns:
-            Steering correction value in [-0.3, 0.3]. Positive = steer right.
+            Steering correction value in [-0.25, 0.25]. Positive = steer right.
         """
         transform = self.player_car.get_transform()
         velocity = self.player_car.get_velocity()
@@ -741,12 +763,16 @@ class RaceManager:
         acceleration = (speed_kmh - self._prev_speed_kmh) / dt  # km/h per second
 
         # Condition 1: Launch traction control
-        # At very low speed with high throttle, cap to prevent standing wheel spin
+        # At very low speed with high throttle, cap to prevent standing wheel spin.
+        # Only trigger after sustained non-acceleration (acceleration stays near zero
+        # for multiple frames despite throttle). Use a realistic expected accel for
+        # CARLA's physics with our tuned car (~20 km/h/s at full throttle from stop).
         if speed_kmh < 10.0 and throttle > 0.5:
-            expected_accel = throttle * 60.0  # Very rough: full throttle ~60 km/h/s
-            if acceleration < expected_accel * 0.2:
-                # Wheels spinning: much less acceleration than expected
-                self._tc_throttle_cap = max(0.3, self._tc_throttle_cap - dt * 4.0)
+            expected_accel = throttle * 25.0  # Realistic: full throttle ~25 km/h/s in CARLA
+            if acceleration < expected_accel * 0.15 and acceleration >= 0:
+                # Wheels spinning: almost no acceleration despite throttle.
+                # Cap at 0.5 minimum so TC slows wheelspin without killing launch.
+                self._tc_throttle_cap = max(0.5, self._tc_throttle_cap - dt * 3.0)
                 self._traction_control_active = True
                 return min(throttle, self._tc_throttle_cap)
 
@@ -1046,6 +1072,58 @@ class RaceManager:
         except Exception as e:
             print(f"Failed to respawn player: {e}")
 
+    def reset_to_start(self):
+        """Teleport both cars back to the starting positions and zero their velocities.
+        Used for instant race restart without full cleanup/respawn."""
+        if not self.world or not self.player_car or not self.ai_car:
+            print("Cannot reset to start: missing world or vehicles")
+            return
+
+        try:
+            spawn_points = self.world.get_map().get_spawn_points()
+            if len(spawn_points) < 1:
+                print("No spawn points available for reset")
+                return
+
+            # Teleport player to first spawn point
+            self.player_car.set_transform(spawn_points[0])
+            self.player_car.set_target_velocity(carla.Vector3D(0, 0, 0))
+            self.player_car.set_target_angular_velocity(carla.Vector3D(0, 0, 0))
+
+            # Teleport AI car to offset position (same as initial setup)
+            ai_transform = carla.Transform(
+                carla.Location(
+                    x=spawn_points[0].location.x + spawn_points[0].get_right_vector().x * 4.0,
+                    y=spawn_points[0].location.y + spawn_points[0].get_right_vector().y * 4.0,
+                    z=spawn_points[0].location.z,
+                ),
+                spawn_points[0].rotation,
+            )
+            self.ai_car.set_transform(ai_transform)
+            self.ai_car.set_target_velocity(carla.Vector3D(0, 0, 0))
+            self.ai_car.set_target_angular_velocity(carla.Vector3D(0, 0, 0))
+
+            # Reset progressive input state
+            self._current_throttle = 0.0
+            self._current_brake = 0.0
+            self._current_steer = 0.0
+
+            # Reset driving assists state
+            self._drift_angle = 0.0
+            self._countersteer_active = False
+            self._prev_speed_kmh = 0.0
+            self._traction_control_active = False
+            self._tc_throttle_cap = 1.0
+            self._handbrake_was_active = False
+
+            # Clear collision buffer
+            with self._collision_lock:
+                self._collisions.clear()
+
+            print("Both cars reset to starting positions")
+        except Exception as e:
+            print(f"Failed to reset to start: {e}")
+
     def get_telemetry(self, vehicle: carla.Vehicle) -> Dict:
         """Get telemetry for a vehicle including control state and velocity components."""
         transform = vehicle.get_transform()
@@ -1109,6 +1187,10 @@ class RaceManager:
     def get_ai_frame(self) -> Optional[np.ndarray]:
         """Get latest AI camera frame (for model inference)."""
         return self.ai_buffer.get()
+
+    def get_rear_frame(self) -> Optional[np.ndarray]:
+        """Get latest rear-view camera frame."""
+        return self.rear_buffer.get()
 
     def cleanup(self):
         """Destroy all actors and reset. Order matters to avoid SIGABRT:
@@ -1184,6 +1266,7 @@ class RaceManager:
         self.ai_car = None
         self.chase_cam = None
         self.ai_cam = None
+        self.rear_cam = None
         self._collision_sensor = None
         with self._collision_lock:
             self._collisions.clear()

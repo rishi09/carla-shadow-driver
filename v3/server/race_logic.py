@@ -4,6 +4,8 @@ Race Logic - Checkpoints, lap times, positions, race state
 import time
 import math
 import random
+import json
+import os
 from typing import List, Tuple, Dict, Optional
 
 
@@ -406,6 +408,11 @@ class RaceState:
         self.countdown_start: Optional[float] = None
         self.winner: Optional[str] = None
 
+        # "finishing" state: one racer finished, waiting for the other
+        # Timeout after 30 seconds to prevent infinite waiting
+        self._finishing_start: Optional[float] = None
+        self._finishing_timeout = 30.0
+
         # Drift detection
         self.drift_detector = DriftDetector()
 
@@ -483,6 +490,26 @@ class RaceState:
             'yaw': f0['yaw'] + (f1['yaw'] - f0['yaw']) * t,
         }
 
+    def check_finishing_timeout(self) -> bool:
+        """Check if the 'finishing' grace period has expired.
+
+        When one racer finishes, the race enters 'finishing' state for up to
+        30 seconds to let the other racer complete. If the timeout expires,
+        the race transitions to 'finished' and the second racer gets no time.
+
+        Returns:
+            True if the race just transitioned to 'finished'.
+        """
+        if self.status != "finishing":
+            return False
+        if self._finishing_start is None:
+            self.status = "finished"
+            return True
+        if time.time() - self._finishing_start >= self._finishing_timeout:
+            self.status = "finished"
+            return True
+        return False
+
     def get_countdown(self) -> Optional[int]:
         """Get countdown number (3, 2, 1, 0=GO). None if not in countdown."""
         if self.status != "countdown" or self.countdown_start is None:
@@ -546,7 +573,7 @@ class RaceState:
         """Update player position and check checkpoints."""
         self.player_x = x
         self.player_y = y
-        if self.status != "racing" or self.player_finished:
+        if self.status not in ("racing", "finishing") or self.player_finished:
             return
 
         # Track max speed
@@ -593,13 +620,18 @@ class RaceState:
                     self.player_finish_time = now - self.race_start_time
                     if not self.ai_finished:
                         self.winner = "player"
+                        # Use "finishing" state to let the other racer complete
+                        self.status = "finishing"
+                        self._finishing_start = now
+                    else:
+                        # Both racers done
                         self.status = "finished"
 
     def update_ai(self, x: float, y: float, speed_kmh: float):
         """Update AI position and check checkpoints."""
         self.ai_x = x
         self.ai_y = y
-        if self.status != "racing" or self.ai_finished:
+        if self.status not in ("racing", "finishing") or self.ai_finished:
             return
 
         # Track max speed
@@ -635,11 +667,16 @@ class RaceState:
                     self.ai_finish_time = now - self.race_start_time
                     if not self.player_finished:
                         self.winner = "ai"
+                        # Use "finishing" state to let the other racer complete
+                        self.status = "finishing"
+                        self._finishing_start = now
+                    else:
+                        # Both racers done
                         self.status = "finished"
 
     def get_current_lap_time(self, who: str) -> float:
         """Get current (in-progress) lap time."""
-        if self.status != "racing":
+        if self.status not in ("racing", "finishing"):
             return 0.0
         start = self.player_lap_start if who == "player" else self.ai_lap_start
         if start is None:
@@ -658,7 +695,7 @@ class RaceState:
 
     def get_gap_seconds(self) -> Optional[float]:
         """Get time gap between player and AI. Positive = player ahead."""
-        if self.status != "racing":
+        if self.status not in ("racing", "finishing"):
             return None
         # Compare current lap times at similar progress points
         player_time = self.get_current_lap_time("player")
@@ -941,8 +978,6 @@ class AIMistakeGenerator:
             'duration': seconds the mistake lasts
             'type': string describing the mistake
         """
-        import random
-
         # If a mistake is currently active, return it until it expires
         if self._active_mistake and current_time < self._mistake_end_time:
             return self._active_mistake
@@ -979,6 +1014,141 @@ class AIMistakeGenerator:
         self._mistake_end_time = current_time + mistake['duration']
 
         return mistake
+
+
+class TrashTalkManager:
+    """Generates trash talk messages from the AI opponent "SHADOW".
+
+    Loads lines from a JSON file, detects race events from telemetry,
+    and returns ai_chat messages with rate limiting (max 1 per 8 seconds).
+    """
+
+    COOLDOWN = 8.0  # Minimum seconds between messages
+
+    def __init__(self, data_dir: str = None):
+        self._last_message_time: float = 0.0
+        self._prev_gap: Optional[float] = None
+        self._prev_position: Optional[int] = None
+        self._prev_collision_count: int = 0
+        self._race_start_notified: bool = False
+        self._final_lap_notified: bool = False
+        self._close_gap_notified_at: float = 0.0
+        self._big_lead_notified_at: float = 0.0
+
+        # Load trash talk lines
+        if data_dir is None:
+            data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
+        json_path = os.path.join(data_dir, 'trash_talk.json')
+        try:
+            with open(json_path, 'r') as f:
+                self._lines: Dict[str, List[str]] = json.load(f)
+            print(f"[trash-talk] Loaded {sum(len(v) for v in self._lines.values())} lines from {json_path}")
+        except Exception as e:
+            print(f"[trash-talk] WARNING: Could not load trash_talk.json: {e}")
+            self._lines = {}
+
+    def _pick(self, event_type: str) -> Optional[str]:
+        """Pick a random line for the given event type."""
+        lines = self._lines.get(event_type, [])
+        if not lines:
+            return None
+        return random.choice(lines)
+
+    def _can_send(self) -> bool:
+        """Check if cooldown has elapsed."""
+        return time.time() - self._last_message_time >= self.COOLDOWN
+
+    def _make_message(self, text: str) -> Dict:
+        """Create an ai_chat message dict and update cooldown."""
+        self._last_message_time = time.time()
+        return {'type': 'ai_chat', 'text': text}
+
+    def check_events(self, race_state: 'RaceState') -> Optional[Dict]:
+        """Detect events from race state and return an ai_chat message, or None.
+
+        Checks events in priority order. Only one message per call.
+        """
+        if not self._lines:
+            return None
+
+        if not self._can_send():
+            return None
+
+        now = time.time()
+        gap = race_state.get_gap_seconds()
+        position = race_state.get_position()
+        player_pos = position.get('player', 1)
+
+        # --- Race start ---
+        if (race_state.status == 'racing' and not self._race_start_notified
+                and race_state.race_start_time):
+            elapsed = now - race_state.race_start_time
+            if 0.5 < elapsed < 4.0:
+                self._race_start_notified = True
+                text = self._pick('race_start')
+                if text:
+                    return self._make_message(text)
+
+        # --- Race finish ---
+        if race_state.status == 'finished' and race_state.winner:
+            if race_state.winner == 'ai':
+                text = self._pick('race_finish_win')
+            else:
+                text = self._pick('race_finish_lose')
+            if text:
+                return self._make_message(text)
+
+        # Only check race events during active racing
+        if race_state.status != 'racing':
+            return None
+
+        # --- Position change (overtakes) ---
+        if self._prev_position is not None and player_pos != self._prev_position:
+            if player_pos > self._prev_position:
+                # AI overtook player (player went from 1st to 2nd)
+                text = self._pick('ai_overtakes')
+            else:
+                # Player overtook AI (player went from 2nd to 1st)
+                text = self._pick('player_overtakes')
+            self._prev_position = player_pos
+            if text:
+                return self._make_message(text)
+        self._prev_position = player_pos
+
+        # --- Player crash ---
+        if race_state.player_collisions_count > self._prev_collision_count:
+            self._prev_collision_count = race_state.player_collisions_count
+            text = self._pick('player_crashes')
+            if text:
+                return self._make_message(text)
+
+        # --- Close gap (< 1.0 second) ---
+        if (gap is not None and abs(gap) < 1.0
+                and now - self._close_gap_notified_at > 20.0):
+            self._close_gap_notified_at = now
+            text = self._pick('close_gap')
+            if text:
+                return self._make_message(text)
+
+        # --- Big AI lead (> 5 seconds ahead) ---
+        if (gap is not None and gap < -5.0
+                and now - self._big_lead_notified_at > 25.0):
+            self._big_lead_notified_at = now
+            text = self._pick('big_lead')
+            if text:
+                return self._make_message(text)
+
+        # --- Final lap ---
+        if (not self._final_lap_notified
+                and race_state.player_lap == race_state.total_laps - 1
+                and race_state.total_laps > 1):
+            self._final_lap_notified = True
+            text = self._pick('final_lap')
+            if text:
+                return self._make_message(text)
+
+        self._prev_gap = gap
+        return None
 
 
 def generate_checkpoints_from_waypoints(world, num_checkpoints: int = 10,
@@ -1056,3 +1226,259 @@ def generate_checkpoints_from_waypoints(world, num_checkpoints: int = 10,
 
     print(f"Generated {len(checkpoints)} checkpoints along {len(route_waypoints)} road waypoints")
     return checkpoints
+
+
+class WeatherMoodManager:
+    """Dynamically adjusts weather based on how intense the competition is.
+
+    Monitors race events (gap closeness, overtakes, collisions, lap progress)
+    to compute an intensity score (0.0 to 1.0), then maps that to a weather
+    "mood" with specific CARLA weather parameters.
+
+    All parameter transitions are smoothly lerped over time so there are no
+    jarring visual changes.
+    """
+
+    # Weather mood definitions: (min_intensity, max_intensity, label, params)
+    MOODS = [
+        {
+            'name': 'CALM',
+            'min': 0.0, 'max': 0.3,
+            'params': {
+                'cloudiness': 10.0,
+                'sun_altitude': 60.0,
+                'sun_azimuth': 180.0,
+                'precipitation': 0.0,
+                'fog_density': 0.0,
+                'wind_intensity': 0.0,
+            },
+        },
+        {
+            'name': 'BUILDING',
+            'min': 0.3, 'max': 0.5,
+            'params': {
+                'cloudiness': 40.0,
+                'sun_altitude': 45.0,
+                'sun_azimuth': 200.0,
+                'precipitation': 0.0,
+                'fog_density': 0.0,
+                'wind_intensity': 20.0,
+            },
+        },
+        {
+            'name': 'TENSE',
+            'min': 0.5, 'max': 0.7,
+            'params': {
+                'cloudiness': 70.0,
+                'sun_altitude': 35.0,
+                'sun_azimuth': 220.0,
+                'precipitation': 0.0,
+                'fog_density': 10.0,
+                'wind_intensity': 40.0,
+            },
+        },
+        {
+            'name': 'DRAMATIC',
+            'min': 0.7, 'max': 0.9,
+            'params': {
+                'cloudiness': 80.0,
+                'sun_altitude': 25.0,
+                'sun_azimuth': 240.0,
+                'precipitation': 30.0,
+                'fog_density': 5.0,
+                'wind_intensity': 50.0,
+            },
+        },
+        {
+            'name': 'EPIC',
+            'min': 0.9, 'max': 1.0,
+            'params': {
+                'cloudiness': 90.0,
+                'sun_altitude': 15.0,
+                'sun_azimuth': 260.0,
+                'precipitation': 60.0,
+                'fog_density': 20.0,
+                'wind_intensity': 70.0,
+            },
+        },
+    ]
+
+    # Only apply weather changes every N seconds to avoid CARLA overhead
+    UPDATE_INTERVAL = 2.0
+
+    # Lerp speed: fraction of remaining distance to cover per second.
+    # At 0.15/s the weather takes roughly 10-20 seconds to fully transition.
+    LERP_SPEED = 0.15
+
+    def __init__(self, total_laps: int = 3):
+        self.total_laps = total_laps
+
+        # --- Intensity score components ---
+        self._intensity: float = 0.0
+        self._overtake_boost: float = 0.0        # decays over 30s
+        self._last_overtake_time: float = 0.0
+        self._collision_boost: float = 0.0        # decays over 20s
+        self._last_position: Optional[str] = None  # 'player' or 'ai' who was leading
+
+        # --- Smooth weather state ---
+        # Current (interpolated) parameter values that we send to CARLA
+        self._current_params: Dict[str, float] = {
+            'cloudiness': 10.0,
+            'sun_altitude': 60.0,
+            'sun_azimuth': 180.0,
+            'precipitation': 0.0,
+            'fog_density': 0.0,
+            'wind_intensity': 0.0,
+        }
+        self._target_params: Dict[str, float] = dict(self._current_params)
+
+        # --- Timing ---
+        self._last_update_time: float = 0.0
+        self._last_lerp_time: float = 0.0
+        self._mood_name: str = 'CALM'
+
+    def _compute_intensity(self, race_state: 'RaceState') -> float:
+        """Compute race intensity score from 0.0 to 1.0."""
+        now = time.time()
+        score = 0.0
+
+        # 1. Gap closeness
+        gap = race_state.get_gap_seconds()
+        if gap is not None:
+            abs_gap = abs(gap)
+            if abs_gap <= 1.0:
+                score += 1.0
+            elif abs_gap <= 3.0:
+                score += 0.7
+            elif abs_gap <= 5.0:
+                score += 0.4
+            else:
+                score += 0.2
+
+        # 2. Lead changes (overtakes)
+        positions = race_state.get_position()
+        current_leader = 'player' if positions.get('player', 2) == 1 else 'ai'
+        if self._last_position is not None and current_leader != self._last_position:
+            self._overtake_boost += 0.3
+            self._last_overtake_time = now
+        self._last_position = current_leader
+
+        # Decay overtake boost over 30 seconds
+        if self._overtake_boost > 0:
+            elapsed = now - self._last_overtake_time
+            self._overtake_boost = max(0.0, self._overtake_boost - elapsed * (0.3 / 30.0))
+            self._last_overtake_time = now
+        score += min(1.0, self._overtake_boost)  # Cap contribution
+
+        # 3. Collisions
+        collision_contribution = min(0.5, race_state.player_collisions_count * 0.1)
+        score += collision_contribution
+
+        # 4. Final lap bonus
+        player_on_final = race_state.player_lap >= race_state.total_laps - 1
+        ai_on_final = race_state.ai_lap >= race_state.total_laps - 1
+        if player_on_final or ai_on_final:
+            score += 0.3
+
+        # Normalize to 0.0 - 1.0
+        # Max possible raw score: 1.0 (gap) + 1.0 (overtakes) + 0.5 (collisions) + 0.3 (final) = 2.8
+        intensity = min(1.0, score / 2.0)
+        return intensity
+
+    def _get_target_params(self, intensity: float) -> Dict[str, float]:
+        """Get the target weather parameters for the given intensity.
+
+        Interpolates between the two bracketing mood tiers so
+        transitions within a tier are smooth too.
+        """
+        # Find the two bracketing moods
+        lower_mood = self.MOODS[0]
+        upper_mood = self.MOODS[-1]
+
+        for i in range(len(self.MOODS) - 1):
+            if self.MOODS[i]['min'] <= intensity <= self.MOODS[i + 1]['max']:
+                lower_mood = self.MOODS[i]
+                upper_mood = self.MOODS[i + 1] if intensity > self.MOODS[i]['max'] else self.MOODS[i]
+                break
+
+        # Find exact position between the two moods
+        if lower_mood == upper_mood:
+            return dict(lower_mood['params'])
+
+        span = upper_mood['max'] - lower_mood['min']
+        if span <= 0:
+            t = 0.0
+        else:
+            t = (intensity - lower_mood['min']) / span
+            t = max(0.0, min(1.0, t))
+
+        # Lerp each parameter
+        result = {}
+        for key in lower_mood['params']:
+            lo = lower_mood['params'][key]
+            hi = upper_mood['params'][key]
+            result[key] = lo + (hi - lo) * t
+
+        return result
+
+    def _get_mood_name(self, intensity: float) -> str:
+        """Get the mood name for the given intensity."""
+        for mood in reversed(self.MOODS):
+            if intensity >= mood['min']:
+                return mood['name']
+        return 'CALM'
+
+    def update(self, race_state: 'RaceState') -> Optional[Dict[str, float]]:
+        """Update the weather mood based on current race state.
+
+        Called every frame. Internally rate-limits CARLA weather updates
+        to every UPDATE_INTERVAL seconds, but lerps parameters smoothly
+        each call.
+
+        Args:
+            race_state: Current race state.
+
+        Returns:
+            Dict of weather params for carla_manager.set_weather_params(),
+            or None if no update is needed yet.
+        """
+        if race_state.status not in ('racing', 'finishing'):
+            return None
+
+        now = time.time()
+
+        # Compute intensity and update targets periodically
+        self._intensity = self._compute_intensity(race_state)
+        self._target_params = self._get_target_params(self._intensity)
+        self._mood_name = self._get_mood_name(self._intensity)
+
+        # Lerp current params toward target every frame
+        if self._last_lerp_time > 0:
+            dt = min(now - self._last_lerp_time, 0.1)
+        else:
+            dt = 1.0 / 30.0
+        self._last_lerp_time = now
+
+        lerp_factor = 1.0 - math.pow(1.0 - self.LERP_SPEED, dt * 30.0)
+        for key in self._current_params:
+            current = self._current_params[key]
+            target = self._target_params[key]
+            self._current_params[key] = current + (target - current) * lerp_factor
+
+        # Only send to CARLA every UPDATE_INTERVAL seconds
+        if now - self._last_update_time < self.UPDATE_INTERVAL:
+            return None
+        self._last_update_time = now
+
+        return dict(self._current_params)
+
+    def get_mood(self) -> Dict:
+        """Return current mood info for telemetry to the client."""
+        return {
+            'mood': self._mood_name,
+            'intensity': round(self._intensity, 2),
+            'precipitation': round(self._current_params.get('precipitation', 0), 1),
+            'fog_density': round(self._current_params.get('fog_density', 0), 1),
+            'wind_intensity': round(self._current_params.get('wind_intensity', 0), 1),
+            'cloudiness': round(self._current_params.get('cloudiness', 0), 1),
+        }
