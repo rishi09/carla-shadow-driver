@@ -147,6 +147,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             image: 'rkshah09/shadow-driver-v3:latest',
             disk: 80,
             onstart: ONSTART_SCRIPT,
+            ports: '8765/tcp',
             env: {
               INSTANCE_ID: String(offer.id),
               CALLBACK_URL: CALLBACK_URL,
