@@ -52,11 +52,11 @@ The perceived lag stack when turning:
 ### Frontend visual polish
 - [x] **Motion blur shader**: CSS `filter: blur()` on video canvas, driven by speed (0-1.5px). Hides JPEG artifacts at high speed.
 - [x] **Speed lines**: Animated radial lines overlaid on canvas at high speed (anime/racing game style) via SpeedLines.tsx.
-- [ ] **Better HUD design**: Redesign speedometer as an arc/gauge. Add tachometer. Use racing game UI conventions.
+- [x] **Better HUD design**: Redesign speedometer as an arc/gauge. Add tachometer. Use racing game UI conventions.
 - [x] **Particle effects**: Canvas-overlay spark particles on collisions, tire smoke on handbrake, rain drops on weather via ParticleOverlay.tsx.
 - [x] **Speed vignette enhanced**: Red tint at 200+ km/h, collision pulse (red edge flash), warp speed streaks at 180+ km/h.
 - [x] **Gear shift effect**: Brief white flash overlay on gear change, decays over ~150ms.
-- [ ] **Rear-view mirror**: Small inset showing rear camera (CARLA supports multiple cameras).
+- [x] **Rear-view mirror**: Small inset showing rear camera (CARLA supports multiple cameras).
 
 ---
 
@@ -151,12 +151,12 @@ Features designed to create sharing loops, competitive tension, and "I need to s
 ### Shareability (the Wordle lesson)
 Wordle's genius was that the colored emoji grid was a *non-spoiler flex* -- you could show your result without revealing the answer. Every share was an implicit challenge. Shadow Driver needs its own "Wordle grid" -- a compact, visual, shareable race result.
 
-- [ ] **:star: One-click race result card**: After a race, generate a canvas-rendered result card (PNG) showing: track name, lap time, gap to AI, a miniature racing line visualization, top speed, and difficulty. Add a "Share" button that uses the Web Share API (`navigator.share({ files: [pngFile] })`) on mobile or copies to clipboard on desktop. The card should be designed to look good as a tweet or Discord embed. Implementation: `canvas.toBlob()` -> `new File()` -> `navigator.share()`. Web Share API supports PNG files on Chrome/Edge/Safari mobile.
+- [x] **:star: One-click race result card**: After a race, generate a canvas-rendered result card (PNG) showing: track name, lap time, gap to AI, a miniature racing line visualization, top speed, and difficulty. Add a "Share" button that uses the Web Share API (`navigator.share({ files: [pngFile] })`) on mobile or copies to clipboard on desktop. The card should be designed to look good as a tweet or Discord embed. Implementation: `canvas.toBlob()` -> `new File()` -> `navigator.share()`. Web Share API supports PNG files on Chrome/Edge/Safari mobile.
   - Ref: https://developer.mozilla.org/en-US/docs/Web/API/Navigator/share
 
 - [ ] **:star: Challenge URL with embedded ghost**: When you share a "Challenge a Friend" link, encode your ghost replay data in the URL (base64 compressed). The friend races against YOUR ghost, not the AI. URL format: `shadow-driver-v3.vercel.app/race?ghost=<base64>&track=town05&laps=3`. Ghost data is lightweight -- just position+yaw at 10Hz for ~60-120s = ~5-15KB compressed, fits in a URL.
 
-- [ ] **Wordle-style text results**: Generate a copy-pasteable text block for Twitter/Discord:
+- [x] **Wordle-style text results**: Generate a copy-pasteable text block for Twitter/Discord:
   ```
   Shadow Driver v3 - Town05
   1:23.456 (beat AI by 2.3s)
@@ -165,14 +165,14 @@ Wordle's genius was that the colored emoji grid was a *non-spoiler flex* -- you 
   ```
   One "Copy" button. Plain text travels everywhere, no image hosting needed.
 
-- [ ] **Auto-clip recording**: Use `canvas.captureStream(30)` + `MediaRecorder` to continuously record the last 15 seconds of gameplay into a ring buffer. When something exciting happens (overtake, close finish, big crash), auto-save the clip. Player can then share it. Implementation: record to WebM chunks, keep last N chunks, on trigger save all chunks to a Blob. Ref: https://developer.mozilla.org/en-US/docs/Web/API/MediaRecorder
+- [x] **Auto-clip recording**: Use `canvas.captureStream(30)` + `MediaRecorder` to continuously record the last 15 seconds of gameplay into a ring buffer. When something exciting happens (overtake, close finish, big crash), auto-save the clip. Player can then share it. Implementation: record to WebM chunks, keep last N chunks, on trigger save all chunks to a Blob. Ref: https://developer.mozilla.org/en-US/docs/Web/API/MediaRecorder
 
-- [ ] **Photo mode**: Freeze the game (pause server tick), let player rotate/zoom the CARLA camera freely, apply CARLA post-processing (depth of field, exposure), capture a high-res screenshot. Racing games like Forza Horizon 5 and Gran Turismo 7 generate massive social media engagement from photo mode alone. Implementation: send `{ type: 'photo_mode', camera: { yaw, pitch, distance, fov } }` to server, receive a single high-res JPEG back.
+- [x] **Photo mode**: Freeze the game (pause server tick), let player rotate/zoom the CARLA camera freely, apply CARLA post-processing (depth of field, exposure), capture a high-res screenshot. Racing games like Forza Horizon 5 and Gran Turismo 7 generate massive social media engagement from photo mode alone. Implementation: send `{ type: 'photo_mode', camera: { yaw, pitch, distance, fov } }` to server, receive a single high-res JPEG back.
 
 ### Async Competition (race against the world, not with)
 The key insight from Trackmania: you don't need real-time multiplayer to create intense competition. Ghost racing (you vs a recording) creates the same competitive intensity with zero networking complexity.
 
-- [ ] **:star: Daily track challenge**: One track per day, same for everyone (seeded by date). Global leaderboard for that day's track. Resets at midnight UTC. This is the single most effective retention mechanic in Trackmania -- players come back daily to compete. Implementation: server-side seed from `Date.now() / 86400000 | 0` picks map + weather + spawn point deterministically.
+- [x] **:star: Daily track challenge**: One track per day, same for everyone (seeded by date). Global leaderboard for that day's track. Resets at midnight UTC. This is the single most effective retention mechanic in Trackmania -- players come back daily to compete. Implementation: server-side seed from `Date.now() / 86400000 | 0` picks map + weather + spawn point deterministically.
 
 - [ ] **Ghost replay storage**: Store ghost data (position/yaw/speed at 10Hz) in Vercel KV or Cloudflare R2. Each ghost is ~10-30KB. Store the top 100 ghosts per track. Players can race against any ghost from the leaderboard. Data format: `{ frames: [{t, x, y, yaw, speed}], metadata: { player_name, lap_time, date, track } }`.
 
@@ -185,20 +185,20 @@ The key insight from Trackmania: you don't need real-time multiplayer to create 
 
 - [ ] **Recent results feed**: Scrolling ticker on landing page showing recent race completions: "Player beat Hard AI by 0.3s on Town05 - 12 min ago". Creates social proof and competitive motivation.
 
-- [ ] **Naming**: Let players set a display name (stored in localStorage). Used on leaderboards and challenge cards. No auth needed -- just a text input before first race.
+- [x] **Naming**: Let players set a display name (stored in localStorage). Used on leaderboards and challenge cards. No auth needed -- just a text input before first race.
 
 ### Retention Loops (one more race)
 Lessons from Vampire Survivors (simple + addictive), Retro Bowl (session-based progression), and Trackmania (incremental improvement).
 
-- [ ] **Personal best tracker**: Per-track best times stored in localStorage. Show improvement delta after each race: "1.2s faster than your PB!" or "0.3s off your best". Satisfying even without a global leaderboard.
+- [x] **Personal best tracker**: Per-track best times stored in localStorage. Show improvement delta after each race: "1.2s faster than your PB!" or "0.3s off your best". Satisfying even without a global leaderboard.
 
-- [ ] **Medal system**: Bronze/Silver/Gold/Platinum per track based on time thresholds. Thresholds set relative to AI times on each difficulty. Visible on track select screen. Collecting all golds on all tracks becomes a meta-goal.
+- [x] **Medal system**: Bronze/Silver/Gold/Platinum per track based on time thresholds. Thresholds set relative to AI times on each difficulty. Visible on track select screen. Collecting all golds on all tracks becomes a meta-goal.
 
-- [ ] **Streak counter**: Track consecutive days played (localStorage). Display flame icon with streak count. Losing a streak is psychologically painful -- proven retention mechanic (Duolingo, Snapchat).
+- [x] **Streak counter**: Track consecutive days played (localStorage). Display flame icon with streak count. Losing a streak is psychologically painful -- proven retention mechanic (Duolingo, Snapchat).
 
-- [ ] **:star: Instant restart (R key)**: During a race, pressing R immediately respawns at the start line and restarts the timer. No menu, no confirmation, no loading. This is the #1 most important quality-of-life feature from Trackmania. The friction between "I messed up" and "I'm trying again" must be ZERO. Server implementation: `reset_race()` without full cleanup -- just teleport vehicles and reset timers.
+- [x] **:star: Instant restart (R key)**: During a race, pressing R immediately respawns at the start line and restarts the timer. No menu, no confirmation, no loading. This is the #1 most important quality-of-life feature from Trackmania. The friction between "I messed up" and "I'm trying again" must be ZERO. Server implementation: `reset_race()` without full cleanup -- just teleport vehicles and reset timers.
 
-- [ ] **Race Again button (post-race)**: One button, same track, same settings, instant restart. No returning to menus. Second most important retention feature after R-to-restart.
+- [x] **Race Again button (post-race)**: One button, same track, same settings, instant restart. No returning to menus. Second most important retention feature after R-to-restart.
 
 ---
 
@@ -218,7 +218,7 @@ The #1 lesson from every viral browser game (agar.io, slither.io, Wordle, GeoGue
 ### Gamepad API (controller support)
 Racing games on keyboard feel terrible compared to analog sticks. The Gamepad API is mature (baseline since 2017) and trivial to add.
 
-- [ ] **Gamepad support**: Poll `navigator.getGamepads()` in the rAF loop. Map left stick X to steering (analog!), right trigger to throttle (analog!), left trigger to brake (analog!). Face buttons for handbrake and respawn. This instantly makes the game feel 10x better for anyone with an Xbox/PS controller connected to their computer.
+- [x] **Gamepad support**: Poll `navigator.getGamepads()` in the rAF loop. Map left stick X to steering (analog!), right trigger to throttle (analog!), left trigger to brake (analog!). Face buttons for handbrake and respawn. This instantly makes the game feel 10x better for anyone with an Xbox/PS controller connected to their computer.
   - Implementation: ~50 lines of code. `gamepad.axes[0]` for steering, `gamepad.buttons[7].value` for RT (throttle), `gamepad.buttons[6].value` for LT (brake). Send analog values directly to server instead of binary keyboard on/off.
   - Ref: https://developer.mozilla.org/en-US/docs/Web/API/Gamepad_API/Using_the_Gamepad_API
 
@@ -244,22 +244,22 @@ Already have engine sound + background music, but there's more untapped potentia
 ### Canvas/WebGL Post-Processing
 Client-side effects that enhance the server-rendered JPEG stream.
 
-- [ ] **WebGL shader post-processing**: Instead of drawing JPEG frames to a 2D canvas, draw them to a WebGL canvas with fragment shaders for: chromatic aberration (subtle at edges, stronger at speed), color grading (warm sunset tones, cool night tones matching CARLA weather), film grain (hides JPEG compression), and barrel distortion (subtle, simulates real lens). All GPU-composited, zero CPU cost. Libraries: `regl` (lightweight WebGL wrapper) or raw WebGL2 shaders.
+- [x] **WebGL shader post-processing**: Instead of drawing JPEG frames to a 2D canvas, draw them to a WebGL canvas with fragment shaders for: chromatic aberration (subtle at edges, stronger at speed), color grading (warm sunset tones, cool night tones matching CARLA weather), film grain (hides JPEG compression), and barrel distortion (subtle, simulates real lens). All GPU-composited, zero CPU cost. Libraries: `regl` (lightweight WebGL wrapper) or raw WebGL2 shaders.
 
 - [ ] **WebGPU compute shaders for advanced effects**: Use WebGPU compute shaders for effects too expensive for fragment shaders: screen-space reflections on wet roads (compute on the client from the depth buffer), temporal anti-aliasing (blend consecutive JPEG frames), and motion vector estimation for true motion blur (compute pixel deltas between consecutive frames). Requires WebGPU (Chrome 113+).
 
 ### Screen Recording and Sharing
-- [ ] **Built-in screen recorder**: `canvas.captureStream()` + `MediaRecorder` to record gameplay as WebM video. "Record" button in HUD, saves locally. On mobile, use Web Share API to share the video directly to Instagram/TikTok/Twitter.
+- [x] **Built-in screen recorder**: `canvas.captureStream()` + `MediaRecorder` to record gameplay as WebM video. "Record" button in HUD, saves locally. On mobile, use Web Share API to share the video directly to Instagram/TikTok/Twitter.
   - Ref: https://developer.mozilla.org/en-US/docs/Web/API/HTMLCanvasElement/captureStream
 
 - [ ] **GIF export**: Record last 5 seconds as GIF (using `gif.js` library in a Web Worker for off-main-thread encoding). GIFs are the native format of social media -- they autoplay everywhere. A 5-second drift clip as a GIF is instant viral content.
 
 ### Other Browser APIs
-- [ ] **Vibration API**: `navigator.vibrate()` on mobile for haptic feedback on collisions, tire screech, and gear shifts. Subtle pattern: 50ms buzz on collision, 20ms pulse on gear shift.
+- [x] **Vibration API**: `navigator.vibrate()` on mobile for haptic feedback on collisions, tire screech, and gear shifts. Subtle pattern: 50ms buzz on collision, 20ms pulse on gear shift.
 
-- [ ] **Fullscreen API**: `element.requestFullscreen()` for immersive racing. Auto-prompt on race start on desktop. Hide browser chrome for maximum screen real estate.
+- [x] **Fullscreen API**: `element.requestFullscreen()` for immersive racing. Auto-prompt on race start on desktop. Hide browser chrome for maximum screen real estate.
 
-- [ ] **Wake Lock API**: `navigator.wakeLock.request('screen')` to prevent screen dimming during races on mobile/tablet. Essential for longer races.
+- [x] **Wake Lock API**: `navigator.wakeLock.request('screen')` to prevent screen dimming during races on mobile/tablet. Essential for longer races.
 
 - [ ] **Web Bluetooth (stretch)**: Connect BLE steering wheels/controllers. The Web Bluetooth API is experimental with limited browser support (Chrome only, not Firefox/Safari). Use as progressive enhancement, not primary input. Ref: https://developer.mozilla.org/en-US/docs/Web/API/Web_Bluetooth_API
 
