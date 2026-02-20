@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import type { RaceFinished } from '../types/index.ts';
 import type { PersonalBestResult } from '../hooks/usePersonalBests.ts';
+import type { GhostFrame } from '../hooks/useGhostRecorder.ts';
+import { encodeGhostForUrl } from '../utils/ghostUrl.ts';
 import { RacingLineViz } from './RacingLineViz.tsx';
 import { RaceResultCard } from './RaceResultCard.tsx';
 
@@ -27,6 +29,10 @@ interface RaceResultsProps {
   dailyChallengePosition?: { position: number; total: number; isNewBest: boolean } | null;
   /** Streak info after recording the race */
   streakResult?: { newStreak: number; isNewRecord: boolean } | null;
+  /** Ghost frames recorded during this race (for Challenge a Friend) */
+  ghostFrames?: GhostFrame[];
+  /** Dare challenge: time to beat (from ?dare=X query param), null if not a dare */
+  dareTime?: number | null;
 }
 
 const MEDAL_ICONS: Record<string, string> = {
@@ -85,7 +91,7 @@ function formatGap(seconds: number): string {
   return abs.toFixed(1);
 }
 
-export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onInstantReplay, personalBestResult, isDailyChallenge, dailyChallengePosition, streakResult }: RaceResultsProps) {
+export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onInstantReplay, personalBestResult, isDailyChallenge, dailyChallengePosition, streakResult, ghostFrames, dareTime }: RaceResultsProps) {
   const playerWon = result.winner === 'player';
 
   // Staggered reveal animation state
@@ -95,8 +101,38 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
   // Share link copied state
   const [shareCopied, setShareCopied] = useState(false);
 
+  // Dare a friend: generate challenge URL with time + settings
+  const [dareCopied, setDareCopied] = useState(false);
+
+  const handleDare = useCallback(() => {
+    if (!raceSettings || result.player_time == null) return;
+    const params = new URLSearchParams();
+    // Dare time in seconds (3 decimal places)
+    params.set('dare', result.player_time.toFixed(3));
+    params.set('track', raceSettings.track);
+    params.set('laps', String(raceSettings.laps));
+    params.set('weather', raceSettings.weather);
+    if (raceSettings.model) params.set('model', raceSettings.model);
+    if (raceSettings.timeOfDay) params.set('timeOfDay', raceSettings.timeOfDay);
+    // Include ws param if currently in the URL (for dev/testing)
+    const currentParams = new URLSearchParams(window.location.search);
+    const wsUrl = currentParams.get('ws');
+    if (wsUrl) params.set('ws', wsUrl);
+
+    const baseUrl = window.location.origin + '/race';
+    const dareUrl = `${baseUrl}?${params.toString()}`;
+    navigator.clipboard.writeText(dareUrl).then(() => {
+      setDareCopied(true);
+      setTimeout(() => setDareCopied(false), 2500);
+    }).catch(() => {});
+  }, [raceSettings, result.player_time]);
+
   // Copy results text state
   const [resultsCopied, setResultsCopied] = useState(false);
+
+  // Challenge a friend: ghost encoding state
+  const [challengeCopied, setChallengeCopied] = useState(false);
+  const [challengeEncoding, setChallengeEncoding] = useState(false);
 
   // Race history: load previous attempts and save current one on mount
   const [raceHistory, setRaceHistory] = useState<RaceHistoryEntry[]>([]);
@@ -225,6 +261,39 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
     }).catch(() => {});
   }, [result, raceSettings, playerWon]);
 
+  // Challenge a Friend: encode ghost and copy challenge URL to clipboard
+  const handleChallenge = useCallback(async () => {
+    if (!ghostFrames || ghostFrames.length === 0 || !raceSettings) return;
+    setChallengeEncoding(true);
+    try {
+      const encoded = await encodeGhostForUrl(ghostFrames);
+      if (!encoded) {
+        setChallengeEncoding(false);
+        return;
+      }
+      // Build challenge URL with ghost data and race settings
+      const params = new URLSearchParams();
+      params.set('ghost', encoded);
+      params.set('track', raceSettings.track);
+      params.set('laps', String(raceSettings.laps));
+      params.set('weather', raceSettings.weather);
+      if (raceSettings.model) params.set('model', raceSettings.model);
+      if (raceSettings.timeOfDay) params.set('timeOfDay', raceSettings.timeOfDay);
+      // Include ws param if currently in the URL (for dev/testing)
+      const currentParams = new URLSearchParams(window.location.search);
+      const wsUrl = currentParams.get('ws');
+      if (wsUrl) params.set('ws', wsUrl);
+
+      const url = `${window.location.origin}/race?${params.toString()}`;
+      await navigator.clipboard.writeText(url);
+      setChallengeCopied(true);
+      setTimeout(() => setChallengeCopied(false), 3000);
+    } catch {
+      // Clipboard write failed
+    }
+    setChallengeEncoding(false);
+  }, [ghostFrames, raceSettings]);
+
   // Reveal helper: returns style for staggered animation
   const revealStyle = (step: number): React.CSSProperties => ({
     opacity: revealStep >= step ? 1 : 0,
@@ -301,6 +370,56 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
             {playerWon ? 'You beat the AI!' : 'The AI was faster this time.'}
           </p>
         </div>
+
+        {/* Dare Challenge result banner */}
+        {dareTime != null && dareTime > 0 && revealStep >= 1 && (
+          <div className="mb-4" style={revealStyle(1)}>
+            {result.player_time != null && result.player_time <= dareTime ? (
+              <div className="rounded-lg border border-green-500/40 bg-green-500/10 px-5 py-3">
+                <div
+                  className="text-green-400 text-xl font-black tracking-wide uppercase"
+                  style={{
+                    textShadow: '0 0 20px rgba(74, 222, 128, 0.5)',
+                    animation: 'victory-glow 2s ease-in-out infinite',
+                  }}
+                >
+                  CHALLENGE BEATEN!
+                </div>
+                <div className="text-green-400/70 text-xs font-mono mt-1">
+                  Target: {formatRaceTime(dareTime)}
+                  <span className="text-green-300 ml-2">
+                    You were {formatGap(dareTime - result.player_time)}s faster!
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-5 py-3">
+                <div
+                  className="text-red-400 text-xl font-black tracking-wide uppercase"
+                  style={{
+                    textShadow: '0 0 15px rgba(239, 68, 68, 0.4)',
+                  }}
+                >
+                  NOT THIS TIME...
+                </div>
+                <div className="text-red-400/60 text-xs font-mono mt-1">
+                  Target: {formatRaceTime(dareTime)}
+                  {result.player_time != null && (
+                    <span className="text-red-300/70 ml-2">
+                      +{formatGap(result.player_time - dareTime)}s behind
+                    </span>
+                  )}
+                </div>
+                <button
+                  onClick={onInstantReplay ?? onPlayAgain}
+                  className="mt-2 text-red-400/80 hover:text-red-300 text-xs font-bold uppercase tracking-wider transition-colors"
+                >
+                  Try Again?
+                </button>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Daily Challenge badge */}
         {isDailyChallenge && revealStep >= 1 && (
@@ -631,6 +750,34 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
               </svg>
               {shareCopied ? 'Link copied!' : 'Share race link'}
             </button>
+            {ghostFrames && ghostFrames.length > 0 && (
+              <button
+                onClick={handleChallenge}
+                disabled={challengeEncoding}
+                className="text-cyan-400/60 hover:text-cyan-400 text-xs font-mono transition-colors inline-flex items-center gap-1.5 disabled:opacity-40"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                  <circle cx="9" cy="7" r="4" />
+                  <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                  <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                </svg>
+                {challengeEncoding ? 'Encoding...' : challengeCopied ? 'Challenge link copied!' : 'Challenge a Friend'}
+              </button>
+            )}
+            {result.player_time != null && (
+              <button
+                onClick={handleDare}
+                className="text-purple-400/60 hover:text-purple-400 text-xs font-mono transition-colors inline-flex items-center gap-1.5"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                  <path d="M2 17l10 5 10-5" />
+                  <path d="M2 12l10 5 10-5" />
+                </svg>
+                {dareCopied ? 'Dare link copied!' : 'Dare a Friend'}
+              </button>
+            )}
           </div>
         )}
 

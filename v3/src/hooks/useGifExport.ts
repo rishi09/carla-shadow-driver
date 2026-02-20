@@ -1,8 +1,8 @@
 /**
  * useGifExport.ts - Capture canvas frames into a ring buffer and export as GIF
  *
- * Continuously captures the video canvas at ~10fps into a ring buffer holding
- * the last 5 seconds (50 frames). On export, downsamples frames to 320x180
+ * Continuously captures the video canvas at ~15fps into a ring buffer holding
+ * the last 5 seconds (75 frames). On export, downsamples frames to 480x270
  * and sends them to a Web Worker for off-main-thread GIF89a encoding.
  *
  * Usage:
@@ -12,20 +12,20 @@
 import { useRef, useCallback, useState, useEffect } from 'react';
 import type { RefObject } from 'react';
 
-/** Ring buffer capacity: 5 seconds at 10fps = 50 frames */
+/** Ring buffer capacity: 5 seconds at 15fps = 75 frames */
 const BUFFER_SECONDS = 5;
-const CAPTURE_FPS = 10;
+const CAPTURE_FPS = 15;
 const BUFFER_SIZE = BUFFER_SECONDS * CAPTURE_FPS;
 
 /** Capture interval in ms */
 const CAPTURE_INTERVAL_MS = 1000 / CAPTURE_FPS;
 
-/** GIF output dimensions (16:9, small for social sharing) */
-const GIF_WIDTH = 320;
-const GIF_HEIGHT = 180;
+/** GIF output dimensions (16:9, small for social sharing, target <2MB) */
+const GIF_WIDTH = 480;
+const GIF_HEIGHT = 270;
 
-/** GIF frame delay in centiseconds (100ms = 10 centiseconds) */
-const GIF_FRAME_DELAY = 10;
+/** GIF frame delay in centiseconds (67ms = 7 centiseconds for 15fps) */
+const GIF_FRAME_DELAY = 7;
 
 export interface GifExportState {
   /** Whether GIF encoding is in progress */

@@ -111,9 +111,11 @@ interface RaceSetupProps {
     playerCar?: string;
     timeOfDay?: string;
   };
+  /** Dare challenge time in seconds (from ?dare=X.XXX query param) */
+  dareTime?: number | null;
 }
 
-export function RaceSetup({ onStartRace, onBack, onStartDailyChallenge, quickstart, isConnected, urlSettings }: RaceSetupProps) {
+export function RaceSetup({ onStartRace, onBack, onStartDailyChallenge, quickstart, isConnected, urlSettings, dareTime }: RaceSetupProps) {
   const [selectedTrack, setSelectedTrack] = useState(urlSettings?.track || DEFAULT_TRACK);
   const [selectedWeather, setSelectedWeather] = useState(urlSettings?.weather || DEFAULT_WEATHER);
   const [selectedLaps, setSelectedLaps] = useState(urlSettings?.laps || DEFAULT_LAPS);
@@ -261,6 +263,43 @@ export function RaceSetup({ onStartRace, onBack, onStartDailyChallenge, quicksta
             50% { box-shadow: 0 0 16px rgba(249, 115, 22, 0.3); }
           }
         `}</style>
+
+        {/* Dare Challenge Banner -- shown when ?dare=X param is present */}
+        {dareTime != null && dareTime > 0 && (
+          <div className="mb-6 p-4 rounded-xl border border-purple-500/40 bg-gradient-to-r from-purple-600/15 to-cyan-600/15 relative overflow-hidden">
+            <style>{`
+              @keyframes dare-pulse {
+                0%, 100% { box-shadow: 0 0 12px rgba(168, 85, 247, 0.2); }
+                50% { box-shadow: 0 0 24px rgba(168, 85, 247, 0.4); }
+              }
+              @keyframes dare-text-glow {
+                0%, 100% { text-shadow: 0 0 10px rgba(168, 85, 247, 0.3); }
+                50% { text-shadow: 0 0 25px rgba(168, 85, 247, 0.6), 0 0 50px rgba(168, 85, 247, 0.2); }
+              }
+            `}</style>
+            <div
+              className="absolute inset-0 rounded-xl pointer-events-none"
+              style={{ animation: 'dare-pulse 2s ease-in-out infinite' }}
+            />
+            <div className="flex items-center gap-2 mb-2">
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-purple-400">
+                <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                <path d="M2 17l10 5 10-5" />
+                <path d="M2 12l10 5 10-5" />
+              </svg>
+              <span className="text-purple-400 font-black text-sm uppercase tracking-wider">Friend's Dare</span>
+            </div>
+            <div
+              className="text-white text-xl font-black tracking-wide"
+              style={{ animation: 'dare-text-glow 2s ease-in-out infinite' }}
+            >
+              Can you beat {formatSetupTime(dareTime)}?
+            </div>
+            <div className="text-white/40 text-xs mt-1">
+              Track and settings locked to match the dare. Race to prove yourself!
+            </div>
+          </div>
+        )}
 
         {/* Daily Challenge Card */}
         <button

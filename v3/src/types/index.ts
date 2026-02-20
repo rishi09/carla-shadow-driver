@@ -1,5 +1,16 @@
 /** Shared types for Shadow Driver v3 */
 
+/** Re-export GhostFrame from the recorder hook for convenience */
+export type { GhostFrame } from '../hooks/useGhostRecorder.ts';
+
+/** A challenge ghost decoded from a URL, ready for rendering on the minimap */
+export interface ChallengeGhost {
+  /** The decoded ghost frames from the URL */
+  frames: import('../hooks/useGhostRecorder.ts').GhostFrame[];
+  /** Timestamp (performance.now()) when the race started, used to compute elapsed time */
+  startTime: number;
+}
+
 /** Player keyboard state sent to server */
 export interface KeyState {
   w: boolean;

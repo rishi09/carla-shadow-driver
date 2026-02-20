@@ -44,8 +44,7 @@ import { useReplayRecorder } from '../hooks/useReplayRecorder.ts';
 import { useScreenRecorder } from '../hooks/useScreenRecorder.ts';
 import { useVoiceBoost } from '../hooks/useVoiceBoost.ts';
 import { useGifExport } from '../hooks/useGifExport.ts';
-import { decodeGhostFromUrl, interpolateGhostPosition } from '../utils/ghostUrl.ts';
-import type { ChallengeGhostData } from '../components/Minimap.tsx';
+import { decodeGhostFromUrl } from '../utils/ghostUrl.ts';
 import type { KeyState } from '../types/index.ts';
 import { useEffect, useRef } from 'react';
 
@@ -313,6 +312,10 @@ export function Race() {
       ghostRecorder.start();
       // Start challenge ghost timer for interpolation
       challengeGhostStartRef.current = performance.now();
+      // Auto-dismiss the challenge ghost banner after 5 seconds
+      if (showChallengeGhostBanner) {
+        setTimeout(() => setShowChallengeGhostBanner(false), 5000);
+      }
       // First-time players get the full controls overlay; returning players get the brief hint
       if (!hasPlayedBeforeRef.current()) {
         setShowFirstTimeOverlay(true);
@@ -1751,6 +1754,22 @@ export function Race() {
           {/* HUD overlay */}
           <RaceHUD raceState={gpu.raceState} latencyMs={gpu.latencyMs} gamepadConnected={gamepad.connected} localKeys={keysRef} />
 
+          {/* Challenge ghost indicator banner */}
+          {showChallengeGhostBanner && challengeGhostFrames && (
+            <div className="absolute top-16 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
+              <div className="flex items-center gap-2 rounded-full px-4 py-1.5 border border-amber-500/30 bg-black/60 backdrop-blur-sm">
+                <div className="w-2 h-2 rounded-full bg-amber-400" style={{ animation: 'challenge-ghost-pulse 1.5s ease-in-out infinite' }} />
+                <span className="text-amber-400/90 text-xs font-bold uppercase tracking-wider">Racing against a friend's ghost</span>
+              </div>
+              <style>{`
+                @keyframes challenge-ghost-pulse {
+                  0%, 100% { opacity: 1; }
+                  50% { opacity: 0.4; }
+                }
+              `}</style>
+            </div>
+          )}
+
           {/* Drift score overlay (active drift display + score popups + total score) */}
           <DriftScore
             drift={gpu.raceState?.drift}
@@ -1789,8 +1808,14 @@ export function Race() {
             </div>
           )}
 
-          {/* Minimap */}
-          <Minimap raceState={gpu.raceState} />
+          {/* Minimap with optional challenge ghost from URL */}
+          <Minimap
+            raceState={gpu.raceState}
+            challengeGhost={challengeGhostFrames && challengeGhostStartRef.current > 0 ? {
+              frames: challengeGhostFrames,
+              startTime: challengeGhostStartRef.current,
+            } : null}
+          />
 
           {/* Rear-view mirror (toggle with M key) */}
           <RearMirror onRearFrame={gpu.onRearFrame} visible={showRearMirror} />
@@ -1872,8 +1897,6 @@ export function Race() {
           {/* Controls hint: appears briefly when race starts after countdown */}
           <ControlsHint visible={showControlsHint} />
 
-          {showChallengeGhostBanner && challengeGhostFrames && (<div className="absolute top-20 left-1/2 -translate-x-1/2 z-30 pointer-events-none" style={{ animation: 'challengeBannerFade 5s ease-out forwards' }} onAnimationEnd={() => setShowChallengeGhostBanner(false)}><div className="bg-cyan-500/20 backdrop-blur-sm border border-cyan-400/40 rounded-lg px-5 py-2.5 text-center"><div className="text-cyan-300 text-sm font-bold tracking-wide">Racing against a friend&apos;s ghost!</div><div className="text-cyan-400/60 text-xs font-mono mt-0.5">{challengeGhostFrames.length} frames | {(challengeGhostFrames[challengeGhostFrames.length - 1]?.t ?? 0).toFixed(0)}s replay</div></div><style>{`@keyframes challengeBannerFade { 0% { opacity: 0; transform: translateY(-10px); } 10% { opacity: 1; transform: translateY(0); } 70% { opacity: 1; } 100% { opacity: 0; } }`}</style></div>)}
-
           {/* Save clip button (camera icon) */}
           {replayRecorder.isRecording && (
             <button
@@ -1916,7 +1939,7 @@ export function Race() {
             }}
           />
 
-          {/* Screen recording controls (G key to toggle) */}
+          {/* Screen recording controls */}
           <RecordingControls
             isRecording={screenRecorder.isRecording}
             recordingDuration={screenRecorder.recordingDuration}
@@ -2011,6 +2034,38 @@ export function Race() {
                     </svg>
                     Save
                   </button>
+                  <button
+                    onClick={() => {
+                      if (gifExport.lastGifBlob && navigator.share) {
+                        const file = new File(
+                          [gifExport.lastGifBlob],
+                          `shadow-driver-${Date.now()}.gif`,
+                          { type: 'image/gif' },
+                        );
+                        if (navigator.canShare?.({ files: [file] })) {
+                          navigator.share({
+                            title: 'Shadow Driver Race Clip',
+                            text: 'Check out this racing moment!',
+                            files: [file],
+                          }).catch(() => {});
+                        } else {
+                          gifExport.downloadGif();
+                        }
+                      } else {
+                        gifExport.downloadGif();
+                      }
+                    }}
+                    className="flex-1 flex items-center justify-center gap-1 bg-green-500/20 hover:bg-green-500/30 rounded-lg px-2 py-1 text-green-400 text-[10px] font-mono transition-colors border border-green-500/20"
+                  >
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="18" cy="5" r="3" />
+                      <circle cx="6" cy="12" r="3" />
+                      <circle cx="18" cy="19" r="3" />
+                      <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+                      <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
+                    </svg>
+                    Share
+                  </button>
                 </div>
               </div>
             </div>
@@ -2046,6 +2101,7 @@ export function Race() {
             dailyChallengePosition={dailyChallengePosition}
             streakResult={streakResult}
             ghostFrames={ghostRecorder.getGhostData().frames}
+            dareTime={dareTime}
           />
           {/* Photo Finish overlay on results screen (golden glow + text, auto-dismisses after 3s) */}
           {photoFinish && (

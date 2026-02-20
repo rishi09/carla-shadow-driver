@@ -96,6 +96,7 @@ export interface UseEngineSoundReturn {
   playImpactPreClick: () => void;
   playDownshiftBlip: () => void;
   playPassingWhoosh: () => void;
+  playDriftBoost: () => void;
   triggerEvent: (event: 'overtake' | 'close_gap' | 'final_lap' | 'collision_hit') => void;
   stopCloseGapTension: () => void;
   setMuted: (muted: boolean) => void;
@@ -599,6 +600,55 @@ export function useEngineSound(): UseEngineSoundReturn {
     source.stop(now + 0.21);
   }, []);
 
+  // Play a drift boost sound: 300ms ascending sine sweep 200Hz->800Hz layered with a white noise burst.
+  // Volume 0.3. Triggered when a drift ends with score > 200.
+  const playDriftBoost = useCallback(() => {
+    const nodes = nodesRef.current;
+    if (!nodes || nodes.ctx.state !== 'running' || !noiseBufferRef.current) return;
+
+    const ctx = nodes.ctx;
+    const now = ctx.currentTime;
+
+    // Layer 1: Ascending sine sweep 200Hz -> 800Hz over 300ms
+    const sweepOsc = ctx.createOscillator();
+    sweepOsc.type = 'sine';
+    sweepOsc.frequency.setValueAtTime(200, now);
+    sweepOsc.frequency.exponentialRampToValueAtTime(800, now + 0.3);
+
+    const sweepGain = ctx.createGain();
+    sweepGain.gain.setValueAtTime(0, now);
+    sweepGain.gain.linearRampToValueAtTime(0.3, now + 0.02);  // Quick attack
+    sweepGain.gain.setValueAtTime(0.3, now + 0.2);
+    sweepGain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+
+    sweepOsc.connect(sweepGain);
+    sweepGain.connect(nodes.masterGain);
+    sweepOsc.start(now);
+    sweepOsc.stop(now + 0.31);
+
+    // Layer 2: Quick white noise burst (100ms, bandpass 1000-4000Hz)
+    const noiseSource = ctx.createBufferSource();
+    noiseSource.buffer = noiseBufferRef.current;
+    noiseSource.loop = false;
+
+    const noiseBp = ctx.createBiquadFilter();
+    noiseBp.type = 'bandpass';
+    noiseBp.frequency.value = 2500;
+    noiseBp.Q.value = 1.0;
+
+    const noiseGain = ctx.createGain();
+    noiseGain.gain.setValueAtTime(0, now);
+    noiseGain.gain.linearRampToValueAtTime(0.15, now + 0.01);
+    noiseGain.gain.setValueAtTime(0.15, now + 0.08);
+    noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+
+    noiseSource.connect(noiseBp);
+    noiseBp.connect(noiseGain);
+    noiseGain.connect(nodes.masterGain);
+    noiseSource.start(now);
+    noiseSource.stop(now + 0.16);
+  }, []);
+
   // --- Adaptive music event triggers ---
   // These create momentary audio effects layered on top of the engine sound
   const triggerEvent = useCallback((event: 'overtake' | 'close_gap' | 'final_lap' | 'collision_hit') => {
@@ -787,7 +837,7 @@ export function useEngineSound(): UseEngineSoundReturn {
     };
   }, []);
 
-  return { update, playCountdownBeeps, playImpact, playImpactPreClick, playDownshiftBlip, playPassingWhoosh, triggerEvent, stopCloseGapTension, setMuted, isMuted };
+  return { update, playCountdownBeeps, playImpact, playImpactPreClick, playDownshiftBlip, playPassingWhoosh, playDriftBoost, triggerEvent, stopCloseGapTension, setMuted, isMuted };
 }
 
 export default useEngineSound;

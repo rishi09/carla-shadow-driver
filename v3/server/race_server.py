@@ -944,6 +944,10 @@ class RaceServer:
                         except Exception:
                             pass
 
+                        # 6c. Drift boost: activate 5% throttle boost for 1.5s on score > 200
+                        if drift_event['score'] > 200:
+                            self.race_manager.activate_drift_boost(drift_event['score'])
+
                     # 7. Race commentary: contextual messages
                     commentary = self.race_state.get_commentary(drift_event=drift_event)
                     if commentary and self.ws_client:

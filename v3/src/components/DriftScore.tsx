@@ -9,6 +9,7 @@
  *    - Escalating text size, glow, and color per tier
  *    - INSANE tier (1000+) triggers an orange screen-edge flash
  * 3. Total drift score: persistent counter in top-right area
+ * 4. "DRIFT BOOST!" popup: appears when drift ends with score > 200 (driven by Race.tsx)
  *
  * Uses refs for animation values per LEARNINGS.md patterns.
  * CSS animations only, no external libraries.
@@ -28,6 +29,8 @@ interface DriftScoreProps {
   totalDriftScore?: number;
   /** Drift end event from server (triggers popup) */
   driftEndEvent?: DriftEndEvent | null;
+  /** Whether the drift boost popup is visible (managed by Race.tsx) */
+  showDriftBoost?: boolean;
 }
 
 /** A single popup entry that floats up and fades out */
@@ -112,7 +115,7 @@ function getLiveTierColor(score: number): string {
   return '#FF6B00';
 }
 
-export function DriftScore({ drift, totalDriftScore = 0, driftEndEvent }: DriftScoreProps) {
+export function DriftScore({ drift, totalDriftScore = 0, driftEndEvent, showDriftBoost = false }: DriftScoreProps) {
   const [popups, setPopups] = useState<ScorePopup[]>([]);
   const [insaneFlash, setInsaneFlash] = useState(false);
   const popupIdRef = useRef(0);
@@ -219,6 +222,30 @@ export function DriftScore({ drift, totalDriftScore = 0, driftEndEvent }: DriftS
         @keyframes insane-drift-flash {
           0% { opacity: 0.6; }
           100% { opacity: 0; }
+        }
+        @keyframes drift-boost-popup {
+          0% {
+            opacity: 0;
+            transform: scale(0.5);
+          }
+          15% {
+            opacity: 1;
+            transform: scale(1.08);
+          }
+          25% {
+            transform: scale(0.96);
+          }
+          32% {
+            transform: scale(1.0);
+          }
+          67% {
+            opacity: 1;
+            transform: scale(1.0);
+          }
+          100% {
+            opacity: 0;
+            transform: scale(1.0);
+          }
         }
       `}</style>
 
@@ -369,6 +396,30 @@ export function DriftScore({ drift, totalDriftScore = 0, driftEndEvent }: DriftS
             animation: 'insane-drift-flash 400ms ease-out forwards',
           }}
         />
+      )}
+
+      {/* DRIFT BOOST! popup: centered below drift score area, orange-to-yellow gradient */}
+      {showDriftBoost && (
+        <div
+          className="absolute bottom-16 left-1/2 -translate-x-1/2 z-25 pointer-events-none"
+          style={{
+            animation: 'drift-boost-popup 1.5s ease-out forwards',
+          }}
+        >
+          <div
+            className="font-black italic tracking-wider text-center whitespace-nowrap"
+            style={{
+              fontSize: '2.2rem',
+              background: 'linear-gradient(135deg, #FF8800, #FFD700)',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+              backgroundClip: 'text',
+              filter: 'drop-shadow(0 0 20px rgba(255, 136, 0, 0.7)) drop-shadow(0 0 40px rgba(255, 200, 0, 0.3)) drop-shadow(0 2px 6px rgba(0,0,0,0.9))',
+            }}
+          >
+            DRIFT BOOST!
+          </div>
+        </div>
       )}
 
       {/* Total drift score: top-right area */}

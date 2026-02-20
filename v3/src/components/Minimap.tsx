@@ -1,8 +1,18 @@
 import { useRef, useEffect, useMemo, useState } from 'react';
 import type { RaceState } from '../types/index.ts';
+import type { GhostFrame } from '../hooks/useGhostRecorder.ts';
+import { interpolateGhostPosition } from '../utils/ghostUrl.ts';
+
+/** Challenge ghost data decoded from a URL */
+export interface ChallengeGhostData {
+  frames: GhostFrame[];
+  startTime: number;
+}
 
 interface MinimapProps {
   raceState: RaceState | null;
+  /** Optional challenge ghost from a shared URL */
+  challengeGhost?: ChallengeGhostData | null;
 }
 
 const MAP_SIZE = 200;
@@ -10,7 +20,7 @@ const PADDING = 16;
 const DRAW_AREA = MAP_SIZE - PADDING * 2;
 
 /** Canvas-based minimap showing car positions on the track. */
-export function Minimap({ raceState }: MinimapProps) {
+export function Minimap({ raceState, challengeGhost }: MinimapProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [pulsePhase, setPulsePhase] = useState(0);
 
@@ -24,6 +34,15 @@ export function Minimap({ raceState }: MinimapProps) {
     frame = requestAnimationFrame(animate);
     return () => cancelAnimationFrame(frame);
   }, []);
+
+  // Compute interpolated challenge ghost position
+  const challengeGhostPos = useMemo(() => {
+    if (!challengeGhost || !challengeGhost.frames.length || challengeGhost.startTime <= 0) return null;
+    const elapsed = (performance.now() - challengeGhost.startTime) / 1000;
+    return interpolateGhostPosition(challengeGhost.frames, elapsed);
+  // Re-evaluate every render tick (driven by pulsePhase animation)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [challengeGhost, pulsePhase]);
 
   // Compute the bounding box from all known positions (checkpoints + cars)
   const bounds = useMemo(() => {
@@ -48,6 +67,10 @@ export function Minimap({ raceState }: MinimapProps) {
     if (raceState.ghost) {
       points.push({ x: raceState.ghost.x, y: raceState.ghost.y });
     }
+    // Include challenge ghost position in bounds
+    if (challengeGhostPos) {
+      points.push({ x: challengeGhostPos.x, y: challengeGhostPos.y });
+    }
 
     if (points.length === 0) return null;
 
@@ -71,7 +94,7 @@ export function Minimap({ raceState }: MinimapProps) {
       minY: minY - margin,
       maxY: maxY + margin,
     };
-  }, [raceState?.checkpoints, raceState?.player.x, raceState?.player.y, raceState?.ai.x, raceState?.ai.y, raceState?.ghost?.x, raceState?.ghost?.y]);
+  }, [raceState?.checkpoints, raceState?.player.x, raceState?.player.y, raceState?.ai.x, raceState?.ai.y, raceState?.ghost?.x, raceState?.ghost?.y, challengeGhostPos?.x, challengeGhostPos?.y]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -246,6 +269,24 @@ export function Minimap({ raceState }: MinimapProps) {
       ctx.fill();
     }
 
+    // Draw challenge ghost car (orange/yellow, from shared URL)
+    if (challengeGhostPos) {
+      const [cgx, cgy] = toCanvas(challengeGhostPos.x, challengeGhostPos.y);
+      // Outer glow
+      ctx.shadowColor = '#F59E0B';
+      ctx.shadowBlur = 8;
+      ctx.fillStyle = 'rgba(245, 158, 11, 0.6)';
+      ctx.beginPath();
+      ctx.arc(cgx, cgy, 5, 0, Math.PI * 2);
+      ctx.fill();
+      // Inner bright dot
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = '#FCD34D';
+      ctx.beginPath();
+      ctx.arc(cgx, cgy, 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
     // Draw player car (green, on top)
     if (raceState.player.x != null && raceState.player.y != null) {
       const [px, py] = toCanvas(raceState.player.x, raceState.player.y);
@@ -295,7 +336,18 @@ export function Minimap({ raceState }: MinimapProps) {
       ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
       ctx.fillText('GHOST', PADDING + 78, legendY + 3);
     }
-  }, [raceState, bounds, pulsePhase]);
+
+    // Challenge ghost dot (orange, from shared URL)
+    if (challengeGhostPos) {
+      const challengeLegendX = raceState.ghost ? PADDING + 120 : PADDING + 72;
+      ctx.fillStyle = '#F59E0B';
+      ctx.beginPath();
+      ctx.arc(challengeLegendX, legendY, 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+      ctx.fillText('FRIEND', challengeLegendX + 6, legendY + 3);
+    }
+  }, [raceState, bounds, pulsePhase, challengeGhostPos]);
 
   return (
     <canvas

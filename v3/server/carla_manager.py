@@ -91,6 +91,10 @@ class RaceManager:
         self._handbrake_was_active = False
         self._original_rear_friction: Optional[List[float]] = None
 
+        # Drift boost: temporary 5% throttle multiplier after a drift with score > 200
+        self._drift_boost_multiplier = 1.0
+        self._drift_boost_end_time = 0.0
+
         # Camera mode
         self._camera_mode = 'chase'
         self._camera_transforms = {
@@ -656,6 +660,11 @@ class RaceManager:
         # Update previous speed for next frame's traction control
         self._prev_speed_kmh = speed_kmh
 
+        # --- Drift boost: apply temporary throttle multiplier after a good drift ---
+        drift_boost = self._get_drift_boost_multiplier()
+        if drift_boost > 1.0:
+            effective_throttle = min(1.0, effective_throttle * drift_boost)
+
         # --- Combine steer with countersteer assist ---
         final_steer = self._current_steer + countersteer_correction
         final_steer = max(-1.0, min(1.0, final_steer))
@@ -903,6 +912,31 @@ class RaceManager:
             self._traction_control_active = False
 
         return min(throttle, self._tc_throttle_cap)
+
+    def activate_drift_boost(self, score: float):
+        """Activate a temporary 5% throttle boost after a successful drift.
+
+        Called by the race server when a drift ends with score > 200.
+        The boost lasts 1.5 seconds and multiplies effective throttle by 1.05.
+
+        Args:
+            score: The drift score that triggered the boost.
+        """
+        self._drift_boost_multiplier = 1.05
+        self._drift_boost_end_time = time.time() + 1.5
+        print(f"[DRIFT BOOST] Activated! score={score:.0f}, 5% boost for 1.5s")
+
+    def _get_drift_boost_multiplier(self) -> float:
+        """Return the current drift boost throttle multiplier.
+
+        Returns 1.05 if boost is active, otherwise 1.0.
+        Automatically deactivates the boost when it expires.
+        """
+        if self._drift_boost_multiplier > 1.0:
+            if time.time() >= self._drift_boost_end_time:
+                self._drift_boost_multiplier = 1.0
+                print("[DRIFT BOOST] Expired")
+        return self._drift_boost_multiplier
 
     def _apply_handbrake_friction(self, handbrake_active: bool):
         """Manage rear tire friction for handbrake drifting.
@@ -1182,6 +1216,8 @@ class RaceManager:
             self._tc_stuck_time = 0.0
             self._tc_recovery_time = 0.0
             self._handbrake_was_active = False
+            self._drift_boost_multiplier = 1.0
+            self._drift_boost_end_time = 0.0
 
             print("Player respawned at nearest waypoint")
         except Exception as e:
@@ -1232,6 +1268,8 @@ class RaceManager:
             self._tc_stuck_time = 0.0
             self._tc_recovery_time = 0.0
             self._handbrake_was_active = False
+            self._drift_boost_multiplier = 1.0
+            self._drift_boost_end_time = 0.0
 
             # Clear collision buffer
             with self._collision_lock:
@@ -1402,6 +1440,8 @@ class RaceManager:
         self._tc_stuck_time = 0.0
         self._tc_recovery_time = 0.0
         self._handbrake_was_active = False
+        self._drift_boost_multiplier = 1.0
+        self._drift_boost_end_time = 0.0
         self._original_rear_friction = None
 
         print("Cleanup complete")
