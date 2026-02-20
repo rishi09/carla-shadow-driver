@@ -276,7 +276,7 @@ The most HackerNews-viral concept: let players train their own AI driver, then p
 
 - [ ] **AI vs AI tournament**: Players submit their trained AI clones. The system runs automated races between them (server-side, no player input). Results posted to a leaderboard. This creates a metagame: players optimize their driving to produce the best AI, not just the fastest lap time. Similar to GT Sophy (Gran Turismo's AI that achieved superhuman racing via reinforcement learning, published in Nature 2022) but democratized -- anyone can train a driver.
 
-- [ ] **Neural network explainability HUD**: Real-time display showing: what the AI "sees" (attention heatmap on camera image), what the AI "thinks" (steering/throttle prediction bar), and confidence level (how certain the model is). Toggle with a hotkey. This makes the AI transparent and educational, not a black box.
+- [x] **Neural network explainability HUD**: Real-time display showing: what the AI "sees" (attention heatmap on camera image), what the AI "thinks" (steering/throttle prediction bar), and confidence level (how certain the model is). Toggle with a hotkey. This makes the AI transparent and educational, not a black box.
 
 ### AI-Generated Content
 - [x] **AI race commentary**: Use an LLM (Claude API or local small model) to generate live race commentary based on telemetry events. "And the player takes the inside line through turn 3! The AI is closing the gap -- only 1.2 seconds behind now!" Displayed as subtitles or spoken via Web Speech API (`window.speechSynthesis`). This is both entertaining and highly shareable (imagine a clip with AI commentary).

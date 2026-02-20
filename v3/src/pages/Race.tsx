@@ -5,7 +5,8 @@ import { useEngineSound } from '../hooks/useEngineSound.ts';
 import { useRaceCommentary } from '../hooks/useRaceCommentary.ts';
 import { useCommentary } from '../hooks/useCommentary.ts';
 import { useAIEngineSound } from '../hooks/useAIEngineSound.ts';
-import { useBackgroundMusic } from '../hooks/useBackgroundMusic.ts';
+import { useDynamicSoundtrack } from '../hooks/useDynamicSoundtrack.ts';
+import type { IntensityLevel } from '../hooks/useDynamicSoundtrack.ts';
 import { useSteeringPrediction } from '../hooks/useSteeringPrediction.ts';
 import { useFrameExtrapolation } from '../hooks/useFrameExtrapolation.ts';
 import { useLeaderboard } from '../hooks/useLeaderboard.ts';
@@ -42,6 +43,7 @@ import { PhotoMode } from '../components/PhotoMode.tsx';
 import { AsciiOverlay } from '../components/AsciiOverlay.tsx';
 import { ClipPreview } from '../components/ClipPreview.tsx';
 import { RearMirror } from '../components/RearMirror.tsx';
+import { AIBrainHUD } from '../components/AIBrainHUD.tsx';
 import { RecordingControls } from '../components/RecordingControls.tsx';
 import { SplitTimeDelta } from '../components/SplitTimeDelta.tsx';
 import { VoiceBoostOverlay } from '../components/VoiceBoostOverlay.tsx';
@@ -145,7 +147,7 @@ export function Race() {
   const gpu = useGPUConnection();
   const engineSound = useEngineSound();
   const aiEngineSound = useAIEngineSound();
-  const bgMusic = useBackgroundMusic();
+  const bgMusic = useDynamicSoundtrack();
   const crowd = useCrowdAmbiance();
   const leaderboard = useLeaderboard();
   const personalBests = usePersonalBests();
@@ -221,6 +223,9 @@ export function Race() {
 
   // --- ASCII Art Mode state (toggled with backtick key) ---
   const [asciiMode, setAsciiMode] = useState(false);
+
+  // --- AI Brain HUD state (toggled with B key) ---
+  const [showAIBrain, setShowAIBrain] = useState(false);
 
   // --- Replay clip recording ---
   const replayCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -358,11 +363,24 @@ export function Race() {
           highlightDetector.update(gpu.raceState);
         }
 
-        // Update background music intensity based on speed and gap
-        const speedFactor = player.speed_kmh / 150;
-        const gapCloseFactor = (player.gap_seconds != null && Math.abs(player.gap_seconds) < 3) ? 0.3 : 0;
-        const intensity = Math.min(1.0, speedFactor + gapCloseFactor);
-        bgMusic.updateIntensity(intensity);
+        // Update dynamic soundtrack intensity based on race state
+        {
+          const absGap = player.gap_seconds != null ? Math.abs(player.gap_seconds) : 99;
+          const isFinalLap = player.total_laps > 1 && player.lap === player.total_laps;
+          const checkpointProgress = player.total_checkpoints && player.total_checkpoints > 0
+            ? player.checkpoint / player.total_checkpoints
+            : 0;
+
+          let level: IntensityLevel = 'cruise';
+          if (isFinalLap && absGap < 1.0 && checkpointProgress > 0.9) {
+            level = 'climax';
+          } else if (absGap < 2.0 || isFinalLap) {
+            level = 'intense';
+          } else if (absGap < 5.0) {
+            level = 'chase';
+          }
+          bgMusic.setIntensity(level);
+        }
       }
 
       // Update AI engine sound (spatial Doppler) when positions are available
@@ -382,7 +400,7 @@ export function Race() {
     rafId = requestAnimationFrame(tick);
 
     return () => { cancelAnimationFrame(rafId); };
-  }, [view, gpu.raceState, engineSound.update, bgMusic.updateIntensity, aiEngineSound.update, ghostRecorder.recordFrame, highlightDetector.update]);
+  }, [view, gpu.raceState, engineSound.update, bgMusic.setIntensity, aiEngineSound.update, ghostRecorder.recordFrame, highlightDetector.update]);
 
   // --- Cargo mode: update integrity each frame ---
   useEffect(() => {
@@ -1095,6 +1113,11 @@ export function Race() {
             }
           });
         }
+        return;
+      }
+      if (key === 'b') {
+        // Toggle AI Brain HUD
+        setShowAIBrain(prev => !prev);
         return;
       }
       if (key === ' ') {
@@ -2100,6 +2123,18 @@ export function Race() {
 
           {/* Rear-view mirror (toggle with M key) */}
           <RearMirror onRearFrame={gpu.onRearFrame} visible={showRearMirror} />
+
+          {/* AI Brain HUD: neural network explainability overlay (toggle with B key) */}
+          {(gpu.raceState?.race_status === 'racing' || gpu.raceState?.race_status === 'finishing') && (
+            <AIBrainHUD
+              steer={gpu.raceState?.ai?.steer ?? 0}
+              throttle={gpu.raceState?.ai?.throttle ?? 0}
+              brake={gpu.raceState?.ai?.brake ?? 0}
+              speed={gpu.raceState?.ai?.speed_kmh ?? 0}
+              playerGap={gpu.raceState?.player?.gap_seconds ?? 0}
+              isVisible={showAIBrain}
+            />
+          )}
 
           {/* Mute/unmute button (controls both engine sound and background music) */}
           <button

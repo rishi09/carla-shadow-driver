@@ -202,7 +202,7 @@ export function RaceHUD({ raceState, latencyMs, gamepadConnected = false, classN
           {raceState.weather_mood && raceState.weather_mood.mood !== 'CALM' && (
             <WeatherIndicator mood={raceState.weather_mood.mood} intensity={raceState.weather_mood.intensity} />
           )}
-          <div className="text-white/20 text-xs font-mono mt-1">WASD + Space | R=Respawn | C=Camera | G=GIF</div>
+          <div className="text-white/20 text-xs font-mono mt-1">WASD + Space | R=Respawn | C=Camera | G=GIF | B=AI Brain</div>
           {gamepadConnected && (
             <div className="flex items-center gap-1.5 mt-1">
               <GamepadIcon />
