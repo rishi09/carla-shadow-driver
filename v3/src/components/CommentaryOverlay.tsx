@@ -3,11 +3,15 @@
  *
  * Displays contextual messages about race events as animated toasts
  * that slide in from the top, hold briefly, then fade out.
+ *
+ * Also shows spoken commentary subtitles at the bottom of the screen.
  */
 import type { CommentaryMessage } from '../hooks/useGPUConnection.ts';
 
 interface CommentaryOverlayProps {
   messages: CommentaryMessage[];
+  /** Currently spoken commentary text (from useRaceCommentary) */
+  spokenText?: string | null;
 }
 
 const CATEGORY_STYLES: Record<string, { bg: string; border: string; text: string; icon: string }> = {
@@ -49,28 +53,52 @@ const CATEGORY_STYLES: Record<string, { bg: string; border: string; text: string
   },
 };
 
-export function CommentaryOverlay({ messages }: CommentaryOverlayProps) {
-  if (messages.length === 0) return null;
+export function CommentaryOverlay({ messages, spokenText }: CommentaryOverlayProps) {
+  const hasMessages = messages.length > 0;
+  const hasSubtitle = !!spokenText;
+
+  if (!hasMessages && !hasSubtitle) return null;
 
   return (
-    <div className="absolute top-28 right-4 z-20 pointer-events-none flex flex-col items-end gap-2 w-[360px] max-w-[40vw]">
-      {messages.map((msg) => {
-        const style = CATEGORY_STYLES[msg.category] || CATEGORY_STYLES.info;
-        return (
+    <>
+      {/* Server-sent commentary toasts (top-right) */}
+      {hasMessages && (
+        <div className="absolute top-28 right-4 z-20 pointer-events-none flex flex-col items-end gap-2 w-[360px] max-w-[40vw]">
+          {messages.map((msg) => {
+            const style = CATEGORY_STYLES[msg.category] || CATEGORY_STYLES.info;
+            return (
+              <div
+                key={msg.id}
+                className={`${style.bg} ${style.border} border backdrop-blur-md rounded-lg px-5 py-2.5 shadow-lg`}
+                style={{
+                  animation: 'commentary-slide-in 0.4s ease-out',
+                }}
+              >
+                <div className={`${style.text} font-bold text-sm font-mono text-center flex items-center gap-2 justify-center`}>
+                  <span className="text-base">{style.icon}</span>
+                  <span>{msg.text}</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Spoken commentary subtitle (bottom-center) */}
+      {hasSubtitle && (
+        <div className="absolute bottom-24 left-1/2 -translate-x-1/2 z-20 pointer-events-none max-w-[80vw] w-auto">
           <div
-            key={msg.id}
-            className={`${style.bg} ${style.border} border backdrop-blur-md rounded-lg px-5 py-2.5 shadow-lg`}
+            className="bg-black/70 backdrop-blur-md rounded-xl px-6 py-3 shadow-2xl border border-white/10"
             style={{
-              animation: 'commentary-slide-in 0.4s ease-out',
+              animation: 'subtitle-fade-in 0.3s ease-out',
             }}
           >
-            <div className={`${style.text} font-bold text-sm font-mono text-center flex items-center gap-2 justify-center`}>
-              <span className="text-base">{style.icon}</span>
-              <span>{msg.text}</span>
-            </div>
+            <p className="text-white text-base font-semibold text-center leading-relaxed tracking-wide drop-shadow-lg">
+              {spokenText}
+            </p>
           </div>
-        );
-      })}
+        </div>
+      )}
 
       <style>{`
         @keyframes commentary-slide-in {
@@ -83,7 +111,17 @@ export function CommentaryOverlay({ messages }: CommentaryOverlayProps) {
             transform: translateY(0) scale(1);
           }
         }
+        @keyframes subtitle-fade-in {
+          0% {
+            opacity: 0;
+            transform: translateX(-50%) translateY(10px);
+          }
+          100% {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+          }
+        }
       `}</style>
-    </div>
+    </>
   );
 }

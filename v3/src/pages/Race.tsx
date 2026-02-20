@@ -2,6 +2,7 @@ import { useState, useCallback, useMemo } from 'react';
 import { useGPUConnection } from '../hooks/useGPUConnection.ts';
 import { getLastWsUrl } from '../hooks/useGPUConnection.ts';
 import { useEngineSound } from '../hooks/useEngineSound.ts';
+import { useRaceCommentary } from '../hooks/useRaceCommentary.ts';
 import { useAIEngineSound } from '../hooks/useAIEngineSound.ts';
 import { useBackgroundMusic } from '../hooks/useBackgroundMusic.ts';
 import { useSteeringPrediction } from '../hooks/useSteeringPrediction.ts';
@@ -33,6 +34,7 @@ import { ControlsHint } from '../components/ControlsHint.tsx';
 import { WeatherOverlay } from '../components/WeatherOverlay.tsx';
 import { FirstTimeOverlay } from '../components/FirstTimeOverlay.tsx';
 import { PhotoMode } from '../components/PhotoMode.tsx';
+import { AsciiOverlay } from '../components/AsciiOverlay.tsx';
 import { ClipPreview } from '../components/ClipPreview.tsx';
 import { RearMirror } from '../components/RearMirror.tsx';
 import { RecordingControls } from '../components/RecordingControls.tsx';
@@ -40,10 +42,13 @@ import { SplitTimeDelta } from '../components/SplitTimeDelta.tsx';
 import { VoiceBoostOverlay } from '../components/VoiceBoostOverlay.tsx';
 import { useGhostRecorder } from '../hooks/useGhostRecorder.ts';
 import type { GhostFrame } from '../hooks/useGhostRecorder.ts';
+import { useHighlightDetector } from '../hooks/useHighlightDetector.ts';
 import { useReplayRecorder } from '../hooks/useReplayRecorder.ts';
 import { useScreenRecorder } from '../hooks/useScreenRecorder.ts';
 import { useVoiceBoost } from '../hooks/useVoiceBoost.ts';
 import { useGifExport } from '../hooks/useGifExport.ts';
+import { useCargoMode } from '../hooks/useCargoMode.ts';
+import { CargoMeter } from '../components/CargoMeter.tsx';
 import { decodeGhostFromUrl } from '../utils/ghostUrl.ts';
 import type { KeyState } from '../types/index.ts';
 import { useEffect, useRef } from 'react';
@@ -124,6 +129,7 @@ export function Race() {
   const streak = useStreak();
   const adaptiveDifficulty = useAdaptiveDifficulty();
   const voiceBoost = useVoiceBoost();
+  const commentary = useRaceCommentary();
   const steeringPrediction = useSteeringPrediction(keysRef, view === 'racing', gpu.raceState?.player?.speed_kmh ?? 0);
   const ghostRecorder = useGhostRecorder();
   const frameExtrapolation = useFrameExtrapolation(
@@ -170,6 +176,9 @@ export function Race() {
 
   // --- Photo Mode state ---
   const [photoModeActive, setPhotoModeActive] = useState(false);
+
+  // --- ASCII Art Mode state (toggled with backtick key) ---
+  const [asciiMode, setAsciiMode] = useState(false);
 
   // --- Replay clip recording ---
   const replayCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -298,6 +307,12 @@ export function Race() {
 
     return () => { cancelAnimationFrame(rafId); };
   }, [view, gpu.raceState, engineSound.update, bgMusic.updateIntensity, aiEngineSound.update, ghostRecorder.recordFrame]);
+
+  // --- Race commentary updates ---
+  useEffect(() => {
+    if (view !== 'racing') return;
+    commentary.update(gpu.raceState ?? null);
+  }, [view, gpu.raceState, commentary.update]);
 
   // --- Countdown beeps + GO screen shake ---
   useEffect(() => {
@@ -849,6 +864,12 @@ export function Race() {
           keysRef.current = { w: false, a: false, s: false, d: false, space: false };
           gpu.sendControls({ w: false, a: false, s: false, d: false, space: false });
         }
+        return;
+      }
+
+      // ASCII Art Mode toggle: backtick/tilde key
+      if (key === '`' || key === '~') {
+        setAsciiMode(prev => !prev);
         return;
       }
 
@@ -1779,7 +1800,7 @@ export function Race() {
           />
 
           {/* AI race commentary */}
-          <CommentaryOverlay messages={gpu.commentary} />
+          <CommentaryOverlay messages={gpu.commentary} spokenText={commentary.isEnabled ? commentary.currentText : null} />
 
           {/* AI opponent trash talk bubble */}
           <AIChatBubble message={gpu.aiChat} />
@@ -1843,6 +1864,30 @@ export function Race() {
                 <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
                 <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
                 <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+              </svg>
+            )}
+          </button>
+
+          {/* Commentary toggle button */}
+          <button
+            onClick={commentary.toggleCommentary}
+            className="absolute top-[132px] left-4 z-10 pointer-events-auto bg-black/60 backdrop-blur-sm rounded-lg px-3 py-2 text-white/60 hover:text-white text-sm border border-white/10 transition-colors"
+            title={commentary.isEnabled ? 'Disable Commentary' : 'Enable Commentary'}
+          >
+            {commentary.isEnabled ? (
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                <line x1="12" y1="19" x2="12" y2="23" />
+                <line x1="8" y1="23" x2="16" y2="23" />
+              </svg>
+            ) : (
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                <line x1="12" y1="19" x2="12" y2="23" />
+                <line x1="8" y1="23" x2="16" y2="23" />
+                <line x1="1" y1="1" x2="23" y2="23" />
               </svg>
             )}
           </button>
@@ -2078,6 +2123,9 @@ export function Race() {
               onExit={handleExitPhotoMode}
             />
           )}
+
+          {/* ASCII Art Mode overlay: converts video to colored ASCII characters */}
+          <AsciiOverlay canvasRef={replayCanvasRef} enabled={asciiMode} />
 
           {/* First-time player overlay: full controls guide, dismiss with any key */}
           <FirstTimeOverlay
