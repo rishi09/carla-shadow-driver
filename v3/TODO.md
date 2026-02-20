@@ -46,8 +46,8 @@ The perceived lag stack when turning:
 - [ ] **Higher render resolution**: Render at 1920x1080 on server, downscale to 1280x720 for streaming (supersampling anti-aliasing). CARLA supports arbitrary camera resolution.
 - [ ] **Post-processing effects**: Enable CARLA's built-in post-processing — motion blur, bloom, lens flare via `carla.ColorConverter` or UE4 post-process settings.
 - [ ] **Better camera settings**: Tune FOV, exposure, gamma. CARLA cameras support `fov`, `shutter_speed`, `iso`, `fstop`, `gamma` attributes.
-- [ ] **Time of day**: Add sunset/sunrise/night race options. CARLA's weather system supports sun altitude/azimuth for dramatic lighting.
-- [ ] **Rain/wet roads**: CARLA has wet road reflections when precipitation > 0. Looks dramatically better than dry roads.
+- [x] **Time of day**: Dynamic sun path transitions during race via WeatherTransitionManager. Sun moves from dawn to sunset over the course of a race.
+- [ ] **Rain/wet roads**: CARLA has wet road reflections when precipitation > 0. Looks dramatically better than dry roads. (Partial: storm event triggers at 70% race progress for 3+ lap races)
 
 ### Frontend visual polish
 - [x] **Motion blur shader**: CSS `filter: blur()` on video canvas, driven by speed (0-1.5px). Hides JPEG artifacts at high speed.
