@@ -47,6 +47,7 @@ import { AIBrainHUD } from '../components/AIBrainHUD.tsx';
 import { RecordingControls } from '../components/RecordingControls.tsx';
 import { SplitTimeDelta } from '../components/SplitTimeDelta.tsx';
 import { VoiceBoostOverlay } from '../components/VoiceBoostOverlay.tsx';
+import { VoiceCommandHUD } from '../components/VoiceCommandHUD.tsx';
 import { useGhostRecorder } from '../hooks/useGhostRecorder.ts';
 import type { GhostFrame } from '../hooks/useGhostRecorder.ts';
 import { useHighlightDetector } from '../hooks/useHighlightDetector.ts';
@@ -54,6 +55,7 @@ import type { Highlight } from '../hooks/useHighlightDetector.ts';
 import { useReplayRecorder } from '../hooks/useReplayRecorder.ts';
 import { useScreenRecorder } from '../hooks/useScreenRecorder.ts';
 import { useVoiceBoost } from '../hooks/useVoiceBoost.ts';
+import { useVoiceCommands } from '../hooks/useVoiceCommands.ts';
 import { useGifExport } from '../hooks/useGifExport.ts';
 import { useCargoMode } from '../hooks/useCargoMode.ts';
 import { CargoMeter } from '../components/CargoMeter.tsx';
@@ -156,6 +158,22 @@ export function Race() {
   const streak = useStreak();
   const adaptiveDifficulty = useAdaptiveDifficulty();
   const voiceBoost = useVoiceBoost();
+  const voiceCommands = useVoiceCommands(
+    () => {
+      gpu.sendRespawn();
+      setShowRespawning(true);
+      if (respawnTimeoutRef.current) clearTimeout(respawnTimeoutRef.current);
+      respawnTimeoutRef.current = setTimeout(() => setShowRespawning(false), 1500);
+    },
+    () => {
+      if (!photoModeActive) {
+        setPhotoModeActive(true);
+        gpu.sendPause();
+        keysRef.current = { w: false, a: false, s: false, d: false, space: false };
+        gpu.sendControls({ w: false, a: false, s: false, d: false, space: false });
+      }
+    },
+  );
   const cargoMode = useCargoMode();
   const aiPersonality = useAIPersonality();
   const commentary = useRaceCommentary();
@@ -685,7 +703,6 @@ export function Race() {
         engineSound.triggerEvent('overtake');
         engineSound.playPassingWhoosh();
         crowd.cheer();
-        bgMusic.triggerMusicEvent('overtake');
         aiPersonality.triggerTrashTalk('player_overtakes');
         subtitleCommentary.triggerCommentary('overtake_player');
       }
@@ -702,7 +719,6 @@ export function Race() {
         if (!closeGapTriggeredRef.current) {
           closeGapTriggeredRef.current = true;
           engineSound.triggerEvent('close_gap');
-          bgMusic.triggerMusicEvent('close_gap_start');
           aiPersonality.triggerTrashTalk('close_gap');
         }
         // Crowd anticipation scales with proximity (0.5s gap = max tension)
@@ -711,7 +727,6 @@ export function Race() {
         if (closeGapTriggeredRef.current) {
           closeGapTriggeredRef.current = false;
           engineSound.stopCloseGapTension();
-          bgMusic.triggerMusicEvent('close_gap_end');
         }
         crowd.setAnticipation(0);
       }
@@ -728,20 +743,11 @@ export function Race() {
     // Final lap detection
     if (player.total_laps > 1 && player.lap === player.total_laps && prevLapRef.current !== player.total_laps) {
       engineSound.triggerEvent('final_lap');
-      bgMusic.triggerMusicEvent('final_lap');
       subtitleCommentary.triggerCommentary('final_lap');
       aiPersonality.triggerTrashTalk('final_lap');
     }
     prevLapRef.current = player.lap;
-
-    // Final lap tension: heartbeat bass when gap < 1.0s, layer ducking near finish
-    const isFinalLap = player.total_laps > 1 && player.lap === player.total_laps;
-    const absGap = gap != null ? Math.abs(gap) : Infinity;
-    const checkpointProgress = player.total_checkpoints && player.total_checkpoints > 0
-      ? player.checkpoint / player.total_checkpoints
-      : 0;
-    bgMusic.setFinalLapTension(absGap, isFinalLap, checkpointProgress);
-  }, [view, gpu.raceState?.player?.gap_seconds, gpu.raceState?.player?.lap, gpu.raceState?.player?.total_laps, gpu.raceState?.player?.checkpoint, gpu.raceState?.player?.total_checkpoints, engineSound.triggerEvent, engineSound.stopCloseGapTension, engineSound.playPassingWhoosh, crowd.cheer, crowd.setAnticipation, bgMusic.triggerMusicEvent, bgMusic.setFinalLapTension]);
+  }, [view, gpu.raceState?.player?.gap_seconds, gpu.raceState?.player?.lap, gpu.raceState?.player?.total_laps, gpu.raceState?.player?.checkpoint, gpu.raceState?.player?.total_checkpoints, engineSound.triggerEvent, engineSound.stopCloseGapTension, engineSound.playPassingWhoosh, crowd.cheer, crowd.setAnticipation]);
 
   // Collision hit sound (percussive white noise burst, layered on top of existing impact)
   useEffect(() => {
@@ -1166,13 +1172,16 @@ export function Race() {
     // Expose keysRef for browser console debugging
     (window as unknown as Record<string, unknown>).__keysRef = keysRef;
 
-    // Send controls at 30Hz, merging keyboard + gamepad
+    // Send controls at 30Hz, merging keyboard + gamepad + voice commands
     keyIntervalRef.current = setInterval(() => {
       // E2E testing override: if window.__e2eKeys is set, use those keys
       const e2eKeys = (window as unknown as Record<string, unknown>).__e2eKeys as KeyState | undefined;
       if (e2eKeys) {
         keysRef.current = e2eKeys;
       }
+
+      // Voice command effects: overlay onto key state
+      const vc = voiceCommands.activeEffects;
 
       if (gamepad.connected) {
         // Gamepad connected: send analog controls
@@ -1185,21 +1194,30 @@ export function Race() {
           space: gamepad.handbrake,
         };
         // Merge: gamepad takes priority, but also keep keyboard keys active
+        // Voice commands also contribute to the merged state
         const mergedKeys: KeyState = {
-          w: keysRef.current.w || gpKeys.w,
-          a: keysRef.current.a || gpKeys.a,
-          s: keysRef.current.s || gpKeys.s,
-          d: keysRef.current.d || gpKeys.d,
+          w: keysRef.current.w || gpKeys.w || vc.throttleBoost,
+          a: keysRef.current.a || gpKeys.a || vc.steerLeft,
+          s: keysRef.current.s || gpKeys.s || vc.brakeAssist,
+          d: keysRef.current.d || gpKeys.d || vc.steerRight,
           space: keysRef.current.space || gpKeys.space,
         };
         gpu.sendControls(mergedKeys, {
-          steer: gamepad.steering,
-          throttle: gamepad.throttle,
-          brake: gamepad.brake,
+          steer: gamepad.steering + (vc.steerLeft ? -0.3 : 0) + (vc.steerRight ? 0.3 : 0),
+          throttle: Math.min(1.0, gamepad.throttle + (vc.throttleBoost ? 0.5 : 0)),
+          brake: Math.min(1.0, gamepad.brake + (vc.brakeAssist ? 0.7 : 0)),
           handbrake: gamepad.handbrake,
         });
       } else {
-        gpu.sendControls(keysRef.current);
+        // Keyboard-only: merge voice command effects into keys
+        const mergedKeys: KeyState = {
+          w: keysRef.current.w || vc.throttleBoost,
+          a: keysRef.current.a || vc.steerLeft,
+          s: keysRef.current.s || vc.brakeAssist,
+          d: keysRef.current.d || vc.steerRight,
+          space: keysRef.current.space,
+        };
+        gpu.sendControls(mergedKeys);
       }
     }, 33);
 

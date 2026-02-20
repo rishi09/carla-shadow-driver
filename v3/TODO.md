@@ -469,11 +469,11 @@ Comprehensive research into AI in games beyond self-driving, with concrete imple
 - At runtime, crossfade between stem layers based on race state using Web Audio API. This is what AAA games actually do (dynamic stems, not real-time generation).
 - Real-time AI music generation is NOT feasible at game latency.
 - **Feasibility**: 6/10. Pre-generating stems is free. Runtime crossfading is straightforward with existing Web Audio infrastructure.
-- [ ] Generate stem sets using MusicGen or Stable Audio Open (offline)
-- [ ] Load stems as AudioBuffers at race start
-- [ ] Crossfade layers based on race intensity (gap, speed, lap number)
-- [ ] Sync transitions to bar boundaries for musical coherence
-- [ ] Replace current oscillator-based background music
+- [x] Generate stem sets using MusicGen or Stable Audio Open (offline)
+- [x] Load stems as AudioBuffers at race start
+- [x] Crossfade layers based on race intensity (gap, speed, lap number)
+- [x] Sync transitions to bar boundaries for musical coherence
+- [x] Replace current oscillator-based background music
 
 #### AI for Streaming & Visual Quality
 
