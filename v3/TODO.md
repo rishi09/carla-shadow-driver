@@ -78,7 +78,7 @@ The perceived lag stack when turning:
 - [ ] Camera shake on acceleration/hard braking (collision shake already exists)
 - [x] Impact sparks and tire smoke (CSS/canvas overlay particles) -- ParticleOverlay.tsx
 - [x] Gear shift animation/sound -- visual flash in SpeedEffects.tsx
-- [ ] Drift scoring (angle * speed * duration = points)
+- [x] Drift scoring (angle * speed * duration = points) -- DriftDetector in race_logic.py, DriftScore.tsx overlay
 
 ---
 
