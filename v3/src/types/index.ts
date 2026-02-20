@@ -125,6 +125,8 @@ export interface RaceFinished {
   total_drift_score?: number;
   best_single_drift?: number;
   drift_count?: number;
+  /** Number of training data frames recorded during this race (for AI clone) */
+  training_frames?: number;
 }
 
 /** Handshake ack from server */

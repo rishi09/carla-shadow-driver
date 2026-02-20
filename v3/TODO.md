@@ -364,8 +364,8 @@ Comprehensive research into AI in games beyond self-driving, with concrete imple
 - **Challenge**: Keyboard input is binary (0 or 1 for each key), making imitation learning harder than analog controller data. Mitigation: use the ramped/smoothed control values (post-ramping) as training targets, not raw key states.
 - **Impressiveness**: 9/10. "Race against an AI that drives like you" is an incredible hook for social sharing and retention.
 - **Implementation plan**:
-  - [ ] Record (200x66 downscaled frame, smoothed controls) pairs in race_server.py during gameplay
-  - [ ] Store recordings per player session (in-memory ring buffer, cap at 5000 frames)
+  - [x] Record (200x66 downscaled frame, smoothed controls) pairs in race_server.py during gameplay
+  - [x] Store recordings per player session (in-memory ring buffer, cap at 5000 frames)
   - [ ] Build training pipeline: PilotNet architecture from sergiopaniego weights, MSE loss for steer + BCE for throttle/brake, Adam optimizer lr=1e-4
   - [ ] Add "Train My Clone" button on RaceResults screen
   - [ ] Train for 50 epochs on recorded data (~2-3 min on RTX 3090, ~2GB VRAM)

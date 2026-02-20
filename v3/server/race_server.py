@@ -21,13 +21,14 @@ from webrtc_track import CarlaVideoTrack, force_codec
 from carla_manager import RaceManager
 from model_manager import ModelManager
 from frame_encoder import FrameEncoder
-from race_logic import RaceState, generate_checkpoints_from_waypoints, RaceDirector, AIMistakeGenerator, TrashTalkManager, WeatherMoodManager
+from race_logic import RaceState, generate_checkpoints_from_waypoints, RaceDirector, AIMistakeGenerator, TrashTalkManager, WeatherMoodManager, compute_coaching_tips
 from weather_transitions import WeatherTransitionManager
 from weather_manager import WeatherManager
 from ai_personality import AIPersonality
 from skill_matcher import SkillMatcher
 from highlight_buffer import HighlightBuffer
 from cost_tracker import CostTracker, DEFAULT_HOURLY_RATE, DEFAULT_DAILY_ALERT_THRESHOLD
+from training_recorder import TrainingRecorder
 
 
 # ---------------------------------------------------------------------------
@@ -240,6 +241,10 @@ class RaceServer:
             hourly_rate=cost_rate,
             daily_threshold=cost_threshold,
         )
+
+        # --- Training data recorder (imitation learning) ---
+        self.training_recorder = TrainingRecorder(max_frames=5000, frame_size=(200, 66))
+        self._training_frame_counter: int = 0  # Counts race loop frames for 10Hz subsampling
 
         # --- Previous gap tracking for overtake detection in highlights ---
         self._prev_gap_seconds: Optional[float] = None
@@ -611,6 +616,11 @@ class RaceServer:
         self.encoder.reset_frame_hash()
         self.rear_encoder.reset_frame_hash()
 
+        # Stop training recorder if active
+        if self.training_recorder.recording:
+            self.training_recorder.stop_recording()
+        self._training_frame_counter = 0
+
         # Close WebRTC peer connection
         if self.pc is not None:
             await self.pc.close()
@@ -674,6 +684,11 @@ class RaceServer:
         self.fps = 0.0
         self._fps_count = 0
         self._fps_timer = time.time()
+
+        # Reset training recorder for fresh recording on restart
+        if self.training_recorder.recording:
+            self.training_recorder.stop_recording()
+        self._training_frame_counter = 0
 
         # Regenerate checkpoints from the (now-reset) player position
         checkpoints = generate_checkpoints_from_waypoints(
@@ -896,6 +911,9 @@ class RaceServer:
                     countdown = self.race_state.get_countdown()
                     if countdown == 0:
                         self.race_state.start_race()
+                        # Start recording training data
+                        self.training_recorder.start_recording()
+                        self._training_frame_counter = 0
                         # Log any pre-buffered key state so we know controls are flowing
                         active_keys = [k for k, v in self.player_keys.items() if v]
                         if active_keys:
@@ -971,6 +989,19 @@ class RaceServer:
                     # 4b. Speed-based resolution scaling
                     if player_telem:
                         self.encoder.update_speed_resolution(player_telem['speed_kmh'])
+
+                    # 4b1. Record training data at 10Hz (every 3rd frame of 30fps loop)
+                    self._training_frame_counter += 1
+                    if self._training_frame_counter % 3 == 0 and player_telem:
+                        training_frame = self.carla.get_chase_frame()
+                        if training_frame is not None:
+                            self.training_recorder.record_frame(
+                                training_frame,
+                                steer=player_telem.get('steer', 0.0),
+                                throttle=player_telem.get('throttle', 0.0),
+                                brake=player_telem.get('brake', 0.0),
+                                speed=player_telem['speed_kmh'],
+                            )
 
                     # 4b2. Skill Matcher: feed player telemetry for adaptive AI
                     if self.skill_matcher and player_telem:
@@ -1197,6 +1228,9 @@ class RaceServer:
                     await self._send_frame()
 
                 elif self.race_state.status == "finished":
+                    # Stop training data recording
+                    training_frames = self.training_recorder.stop_recording()
+
                     # Capture finish as a highlight
                     self.highlight_buffer.capture_highlight('finish', metadata={
                         'winner': self.race_state.winner,
@@ -1236,6 +1270,7 @@ class RaceServer:
                             'drift_count': stats.get('drift_count', 0),
                             'highlights': self.highlight_buffer.get_highlights(),
                             'session_cost': self.cost_tracker.get_cost_summary(),
+                            'training_frames': training_frames,
                         }))
 
                     # Report race completion for social presence feed

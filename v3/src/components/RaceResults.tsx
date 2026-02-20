@@ -957,6 +957,30 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
           </div>
         )}
 
+        {/* Training data info card (teaser for AI clone feature) */}
+        {result.training_frames != null && result.training_frames > 0 && (
+          <div className="mb-6" style={revealStyle(11)}>
+            <div className="rounded-lg border border-violet-500/20 bg-violet-500/[0.06] px-4 py-3">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-sm">&#x1F9E0;</span>
+                <span className="text-violet-400 text-xs font-bold">
+                  Training Data: {result.training_frames.toLocaleString()} frames recorded
+                </span>
+              </div>
+              <div className="text-violet-400/50 text-[10px] font-mono">
+                Your driving style has been captured for AI clone training
+              </div>
+              <button
+                disabled
+                className="mt-2 text-violet-400/30 text-[10px] font-bold uppercase tracking-wider cursor-not-allowed"
+                title="Coming soon: train an AI that drives like you"
+              >
+                Train My Clone (Coming Soon)
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Action buttons */}
         <div className="flex gap-3" style={revealStyle(12)}>
           {/* Instant Race Again (same settings) -- primary action */}
