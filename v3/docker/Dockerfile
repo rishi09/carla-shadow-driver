@@ -3,13 +3,11 @@ FROM carlasim/carla:0.9.15
 # Switch to root for installing packages
 USER root
 
-# Install system dependencies
+# Install system dependencies (libopus/libvpx for aiortc)
 RUN apt-get update -qq && \
     apt-get install -y -qq --no-install-recommends \
-    curl wget \
-    libavformat-dev libavcodec-dev libavdevice-dev libavutil-dev \
-    libswscale-dev libswresample-dev libavfilter-dev \
-    libopus-dev libvpx-dev libx264-dev && \
+    curl wget pkg-config \
+    libopus-dev libvpx-dev && \
     rm -rf /var/lib/apt/lists/*
 
 # Install Miniconda (provides Python 3.10, since CARLA base has Python 3.6 which is too old for PyTorch)
@@ -18,6 +16,10 @@ RUN curl -sL https://repo.anaconda.com/miniconda/Miniconda3-py310_24.11.1-0-Linu
     rm /tmp/miniconda.sh && \
     /opt/conda/bin/conda clean -a -y
 ENV PATH="/opt/conda/bin:$PATH"
+
+# Install av (PyAV) via conda-forge — it bundles its own FFmpeg,
+# avoiding the Ubuntu 18.04 FFmpeg 3.4 incompatibility with modern PyAV
+RUN conda install -y -c conda-forge av && conda clean -a -y
 
 # Install cloudflared
 RUN curl -sL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 \
