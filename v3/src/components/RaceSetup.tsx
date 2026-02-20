@@ -120,6 +120,10 @@ interface RaceSetupProps {
   isCargoMode?: boolean;
   /** Toggle cargo mode on/off */
   onToggleCargoMode?: (on: boolean) => void;
+  /** Whether blindfold mode is enabled */
+  isBlindfoldMode?: boolean;
+  /** Toggle blindfold mode on/off */
+  onToggleBlindfoldMode?: (on: boolean) => void;
   /** Whether voice commands are supported in this browser */
   voiceCommandsSupported?: boolean;
   /** Whether voice commands are currently enabled */
@@ -132,6 +136,12 @@ interface RaceSetupProps {
   ambientLightEnabled?: boolean;
   /** Toggle ambient light on/off */
   onToggleAmbientLight?: (on: boolean) => void;
+  /** Whether head tracking (FaceDetector API) is supported in this browser */
+  headTrackingSupported?: boolean;
+  /** Whether head tracking is currently enabled */
+  headTrackingEnabled?: boolean;
+  /** Toggle head tracking on/off */
+  onToggleHeadTracking?: (on: boolean) => void;
   /** Current Twitch channel name (null if not in Twitch mode) */
   twitchChannel?: string | null;
   /** Callback to set Twitch channel name */
@@ -142,9 +152,13 @@ interface RaceSetupProps {
   phoneSteeringEnabled?: boolean;
   /** Toggle phone steering on/off (triggers iOS permission request if needed) */
   onTogglePhoneSteering?: (on: boolean) => void;
+  /** Whether synthwave aesthetic mode is enabled */
+  synthwaveEnabled?: boolean;
+  /** Toggle synthwave mode on/off */
+  onToggleSynthwave?: () => void;
 }
 
-export function RaceSetup({ onStartRace, onBack, onStartDailyChallenge, quickstart, isConnected, urlSettings, dareTime, challengeData, isCargoMode, onToggleCargoMode, voiceCommandsSupported, voiceCommandsEnabled, onToggleVoiceCommands, ambientLightSupported, ambientLightEnabled, onToggleAmbientLight, twitchChannel, onSetTwitchChannel, phoneSteeringSupported, phoneSteeringEnabled, onTogglePhoneSteering }: RaceSetupProps) {
+export function RaceSetup({ onStartRace, onBack, onStartDailyChallenge, quickstart, isConnected, urlSettings, dareTime, challengeData, isCargoMode, onToggleCargoMode, isBlindfoldMode, onToggleBlindfoldMode, voiceCommandsSupported, voiceCommandsEnabled, onToggleVoiceCommands, ambientLightSupported, ambientLightEnabled, onToggleAmbientLight, headTrackingSupported, headTrackingEnabled, onToggleHeadTracking, twitchChannel, onSetTwitchChannel, phoneSteeringSupported, phoneSteeringEnabled, onTogglePhoneSteering, synthwaveEnabled, onToggleSynthwave }: RaceSetupProps) {
   const [selectedTrack, setSelectedTrack] = useState(urlSettings?.track || DEFAULT_TRACK);
   const [selectedWeather, setSelectedWeather] = useState(urlSettings?.weather || DEFAULT_WEATHER);
   const [selectedLaps, setSelectedLaps] = useState(urlSettings?.laps || DEFAULT_LAPS);
@@ -511,6 +525,58 @@ export function RaceSetup({ onStartRace, onBack, onStartDailyChallenge, quicksta
           </div>
         )}
 
+        {/* Blindfold Mode */}
+        {onToggleBlindfoldMode && (
+          <div className="mb-6">
+            <button
+              onClick={() => onToggleBlindfoldMode(!isBlindfoldMode)}
+              className={`w-full flex items-center gap-3 py-3 px-4 rounded-lg border text-left transition-all ${
+                isBlindfoldMode
+                  ? 'bg-red-500/10 border-red-500/40'
+                  : 'bg-black/60 border-white/10 hover:border-white/20'
+              }`}
+            >
+              {/* Skull icon */}
+              <div className="shrink-0">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={isBlindfoldMode ? '#ef4444' : 'rgba(255,255,255,0.4)'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="9" cy="12" r="1" />
+                  <circle cx="15" cy="12" r="1" />
+                  <path d="M8 20v-4" />
+                  <path d="M12 20v-4" />
+                  <path d="M16 20v-4" />
+                  <path d="M2 12c0-5.5 4.5-10 10-10s10 4.5 10 10-2 6-2 6H4s-2-.5-2-6z" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <span className={`text-sm font-medium ${isBlindfoldMode ? 'text-red-400' : 'text-white'}`}>
+                    Blindfold Mode
+                  </span>
+                  {isBlindfoldMode && (
+                    <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded border border-red-500/40 bg-red-500/20 text-red-400">
+                      ON
+                    </span>
+                  )}
+                  <span className="text-[9px] font-mono uppercase px-1.5 py-0.5 rounded border border-red-500/30 bg-red-500/10 text-red-400/70">
+                    EXTREME CHALLENGE
+                  </span>
+                </div>
+                <p className="text-white/40 text-xs mt-0.5">
+                  Screen goes dark every 3 seconds. Drive from memory.
+                </p>
+              </div>
+              {/* Toggle indicator */}
+              <div className={`w-10 h-5 rounded-full relative transition-colors ${isBlindfoldMode ? 'bg-red-500/40' : 'bg-white/10'}`}>
+                <div
+                  className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${
+                    isBlindfoldMode ? 'left-[22px] bg-red-400' : 'left-0.5 bg-white/40'
+                  }`}
+                />
+              </div>
+            </button>
+          </div>
+        )}
+
         {/* Voice Commands (Web Speech API, Chrome/Edge only) */}
         {voiceCommandsSupported && onToggleVoiceCommands && (
           <div className="mb-6">
@@ -655,6 +721,52 @@ export function RaceSetup({ onStartRace, onBack, onStartDailyChallenge, quicksta
           </div>
         )}
 
+        {/* Head Tracking (FaceDetector API, Chrome 94+ only) */}
+        {headTrackingSupported && onToggleHeadTracking && (
+          <div className="mb-6">
+            <button
+              onClick={() => onToggleHeadTracking(!headTrackingEnabled)}
+              className={`w-full flex items-center gap-3 py-3 px-4 rounded-lg border text-left transition-all ${
+                headTrackingEnabled
+                  ? 'bg-cyan-500/10 border-cyan-500/40'
+                  : 'bg-black/60 border-white/10 hover:border-white/20'
+              }`}
+            >
+              {/* Face/camera icon */}
+              <div className="shrink-0">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={headTrackingEnabled ? '#22d3ee' : 'rgba(255,255,255,0.4)'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M9 11a3 3 0 1 0 6 0a3 3 0 0 0-6 0" />
+                  <path d="M2 8V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-2" />
+                  <path d="M2 12h2" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <span className={`text-sm font-medium ${headTrackingEnabled ? 'text-cyan-400' : 'text-white'}`}>
+                    Head Tracking
+                  </span>
+                  {headTrackingEnabled && (
+                    <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded border border-cyan-500/40 bg-cyan-500/20 text-cyan-400">
+                      ON
+                    </span>
+                  )}
+                </div>
+                <p className="text-white/40 text-xs mt-0.5">
+                  Lean to look around corners. Your webcam tracks head position to shift the camera view. Chrome 94+ only.
+                </p>
+              </div>
+              {/* Toggle indicator */}
+              <div className={`w-10 h-5 rounded-full relative transition-colors ${headTrackingEnabled ? 'bg-cyan-500/40' : 'bg-white/10'}`}>
+                <div
+                  className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${
+                    headTrackingEnabled ? 'left-[22px] bg-cyan-400' : 'left-0.5 bg-white/40'
+                  }`}
+                />
+              </div>
+            </button>
+          </div>
+        )}
+
         {/* Twitch Plays Mode */}
         {onSetTwitchChannel && (
           <div className="mb-6">
@@ -713,6 +825,70 @@ export function RaceSetup({ onStartRace, onBack, onStartDailyChallenge, quicksta
                 </p>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Synthwave Aesthetic Mode */}
+        {onToggleSynthwave && (
+          <div className="mb-6">
+            <button
+              onClick={onToggleSynthwave}
+              className={`w-full flex items-center gap-3 py-3 px-4 rounded-lg border text-left transition-all ${
+                synthwaveEnabled
+                  ? 'bg-fuchsia-500/10 border-fuchsia-500/40'
+                  : 'bg-black/60 border-white/10 hover:border-white/20'
+              }`}
+            >
+              {/* Retro sun/grid icon */}
+              <div className="shrink-0">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={synthwaveEnabled ? '#ff00ff' : 'rgba(255,255,255,0.4)'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="2" y1="14" x2="22" y2="14" />
+                  <path d="M6 14 A6 6 0 0 1 18 14" />
+                  <line x1="4" y1="17" x2="20" y2="17" />
+                  <line x1="6" y1="20" x2="18" y2="20" />
+                  <line x1="12" y1="14" x2="12" y2="22" />
+                  <line x1="8" y1="14" x2="6" y2="22" />
+                  <line x1="16" y1="14" x2="18" y2="22" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`text-sm font-medium ${synthwaveEnabled ? '' : 'text-white'}`}
+                    style={synthwaveEnabled ? {
+                      color: '#ff00ff',
+                      textShadow: '0 0 8px rgba(255,0,255,0.5)',
+                    } : undefined}
+                  >
+                    Synthwave Mode
+                  </span>
+                  {synthwaveEnabled && (
+                    <span
+                      className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded border"
+                      style={{
+                        color: '#00ffff',
+                        borderColor: 'rgba(0,255,255,0.4)',
+                        backgroundColor: 'rgba(0,255,255,0.1)',
+                        textShadow: '0 0 6px rgba(0,255,255,0.5)',
+                      }}
+                    >
+                      ON
+                    </span>
+                  )}
+                </div>
+                <p className="text-white/40 text-xs mt-0.5">
+                  Outrun aesthetic -- CRT scanlines, neon colors, retro vibes. Forces nighttime for maximum effect.
+                </p>
+              </div>
+              {/* Toggle indicator */}
+              <div className={`w-10 h-5 rounded-full relative transition-colors ${synthwaveEnabled ? 'bg-fuchsia-500/40' : 'bg-white/10'}`}>
+                <div
+                  className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${
+                    synthwaveEnabled ? 'left-[22px] bg-fuchsia-400' : 'left-0.5 bg-white/40'
+                  }`}
+                />
+              </div>
+            </button>
           </div>
         )}
 

@@ -41,6 +41,7 @@ import { Minimap } from '../components/Minimap.tsx';
 import { ControlsHint } from '../components/ControlsHint.tsx';
 import { WeatherOverlay } from '../components/WeatherOverlay.tsx';
 import { WeatherEffects } from '../components/WeatherEffects.tsx';
+import { useWeatherEffects } from '../hooks/useWeatherEffects.ts';
 import { FirstTimeOverlay } from '../components/FirstTimeOverlay.tsx';
 import { PhotoMode } from '../components/PhotoMode.tsx';
 import { AsciiOverlay } from '../components/AsciiOverlay.tsx';
@@ -201,6 +202,7 @@ export function Race() {
   const ambientLight = useAmbientLight();
   const headTracking = useHeadTracking();
   const synthwave = useSynthwaveMode();
+  const weatherFx = useWeatherEffects(raceWeather, gpu.raceState?.weather_mood);
   // Fourth-wall breaking meta features
   const browserQuip = useMemo(() => getBrowserQuip(), []);
   const batteryDifficulty = useBatteryDifficulty();
@@ -1643,7 +1645,6 @@ export function Race() {
         }
 
         // Record tournament result if applicable
-        const settings = lastRaceSettingsRef.current;
         if (settings && tournaments.isCurrentTournamentRace(config.track, config.laps, settings.weather ?? 'clear', settings.model)) {
           tournaments.recordResult(config.track, gpu.raceFinished.player_time);
           // Compute tournament progress for the results screen
@@ -1760,6 +1761,8 @@ export function Race() {
     cargoMode.reset();
     // Reset blindfold mode timing for the new race
     blindfoldMode.reset();
+    // Reset tab penalty tracking for the new race
+    tabPenalty.reset();
     if (isDemo || directWsUrl) {
       pendingDemoRaceRef.current = { track, laps, weather, model, player_car: playerCar, time_of_day: timeOfDay };
       const wsUrl = directWsUrl || DEMO_WS_URL;
@@ -1873,17 +1876,20 @@ export function Race() {
           ambientLightSupported={ambientLight.isSupported}
           ambientLightEnabled={ambientLight.isActive}
           onToggleAmbientLight={(on) => on ? ambientLight.enable() : ambientLight.disable()}
+          headTrackingSupported={headTracking.isSupported}
+          headTrackingEnabled={headTracking.enabled}
+          onToggleHeadTracking={(on) => on ? headTracking.enable() : headTracking.disable()}
           twitchChannel={twitchChannel}
           onSetTwitchChannel={setTwitchChannel}
-          isBlindfoldMode={blindfoldMode.isBlindfoldMode}
-          onToggleBlindfoldMode={blindfoldMode.setBlindfoldMode}
+          synthwaveEnabled={synthwave.enabled}
+          onToggleSynthwave={synthwave.toggle}
         />
       )}
 
       {/* Racing view */}
       {view === 'racing' && (
         <div
-          className={`relative w-full h-screen overflow-hidden${synthwave.enabled ? ' synthwave-active' : ''}`}
+          className={`relative w-full h-screen overflow-hidden${synthwave.containerClass ? ` ${synthwave.containerClass}` : ''}`}
           style={{ transform: `translate(${shakeX}px, ${shakeY}px)` }}
         >
           {/* Video feed: prefer WebRTC, fall back to JPEG canvas */}
@@ -1907,6 +1913,7 @@ export function Race() {
                 // Skip CSS blur when WebGL2 is active (radial blur shader handles it)
                 !useWebGL2 && motionBlurPx > 0.05 ? `blur(${motionBlurPx.toFixed(2)}px)` : '',
                 crashDesaturate ? 'grayscale(50%)' : '',
+                synthwave.videoFilter || '',
               ].filter(Boolean).join(' ') || 'none',
               transition: 'filter 100ms ease-out',
             }}
@@ -2004,10 +2011,16 @@ export function Race() {
             speedKmh={gpu.raceState?.player.speed_kmh ?? 0}
           />
 
+          {/* Synthwave / Outrun aesthetic overlay (CRT scanlines, neon grid, VHS glitch) */}
+          <SynthwaveOverlay
+            enabled={synthwave.enabled}
+            speedKmh={gpu.raceState?.player.speed_kmh ?? 0}
+          />
+
           {/* Canvas-based weather visual effects (rain particles, snow, thunder, fog blur) */}
           <WeatherEffects
-            weatherMood={gpu.raceState?.weather_mood}
-            weatherPreset={raceWeather}
+            effects={weatherFx.effectState}
+            onLightningFlash={weatherFx.playThunder}
             speedKmh={gpu.raceState?.player.speed_kmh ?? 0}
           />
 
@@ -2254,7 +2267,7 @@ export function Race() {
           `}</style>
 
           {/* HUD overlay */}
-          <RaceHUD raceState={gpu.raceState} latencyMs={gpu.latencyMs} gamepadConnected={gamepad.connected} localKeys={keysRef} />
+          <RaceHUD raceState={gpu.raceState} latencyMs={gpu.latencyMs} gamepadConnected={gamepad.connected} localKeys={keysRef} browserQuip={browserQuip} batteryQuip={batteryQuip} batteryState={batteryDifficulty.battery} tabPenaltyMessage={tabPenalty.message} />
 
           {/* Cargo integrity meter (Fragile Cargo mode) */}
           {cargoMode.isCargoMode && (gpu.raceState?.race_status === 'racing' || gpu.raceState?.race_status === 'finishing') && (
@@ -2272,7 +2285,6 @@ export function Race() {
               isBlind={blindfoldMode.isBlind}
               blindTimeLeft={blindfoldMode.blindTimeLeft}
               visibleTimeLeft={blindfoldMode.visibleTimeLeft}
-              totalBlindTime={blindfoldMode.totalBlindTime}
             />
           )}
 
@@ -2730,6 +2742,8 @@ export function Race() {
             challengeData={challengeData}
             cargoIntegrity={cargoMode.isCargoMode ? cargoMode.integrity : undefined}
             cargoScore={cargoMode.isCargoMode && gpu.raceFinished.player_time != null ? cargoMode.computeScore(gpu.raceFinished.player_time) : undefined}
+            blindfoldTotalTime={blindfoldMode.isBlindfoldMode ? blindfoldMode.totalBlindTime : undefined}
+            tabPenalty={tabPenalty.switchCount > 0 ? { switchCount: tabPenalty.switchCount, totalSecondsAway: tabPenalty.totalSecondsAway } : undefined}
             highlights={raceHighlights}
             tournamentProgress={tournamentProgressResult}
             onNextTournamentTrack={tournamentProgressResult?.nextTrack ? () => {
