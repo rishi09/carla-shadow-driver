@@ -19,6 +19,7 @@ Shadow Driver is a browser-based racing game where you race against an AI car in
 - CARLA 0.9.15 running on Vast.ai GPU (RTX 3090, root privilege fix applied)
 - Direct WebSocket connection via `?ws=<tunnel_url>` query parameter
 - JPEG video streaming over WebSocket through Cloudflare tunnels (~18 FPS, ~271ms latency)
+- NVENC H.264 encoding pipeline (server) + WebCodecs VideoDecoder (client) — auto-fallback to JPEG if unavailable
 - Player car controls: WASD + Space (handbrake), R (respawn), C (camera toggle)
 - Car selection: 6 vehicles (Tesla Model 3, Ford Mustang, Dodge Charger, Audi TT, Mini Cooper, Chevrolet Impala)
 - AI opponent using CARLA autopilot with 3 difficulty levels (Easy/Medium/Hard)
@@ -47,15 +48,17 @@ Shadow Driver is a browser-based racing game where you race against an AI car in
 - GitHub Actions auto-builds Docker image on push to v3 (server/docker/configs paths)
 
 ### Not Working / TODO
-- **Vercel auto-deploy broken**: Pushes to v3 branch are NOT deploying. The deployed bundle (index-C4bDUZj8.js) is stale. **Fix options:**
-  1. **GitHub Actions** (preferred): `.github/workflows/deploy-frontend.yml` is ready. Add these GitHub secrets: `VERCEL_TOKEN` (from https://vercel.com/account/tokens), `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` (from Vercel dashboard > Project Settings > General). Then push to v3.
-  2. **Vercel dashboard**: Set Root Directory to `v3/` and Production Branch to `v3`.
-  3. **CLI deploy**: `cd v3 && npx vercel login && npx vercel --prod`
+- **Vercel deploy**: Project is `shadow-driver-v3` under team `rishi09-3609s-projects`. Root directory is `v3/`.
+  - **CLI deploy** (from repo root, NOT from v3/): `npx vercel deploy --prod --yes --scope rishi09-3609s-projects --token <VERCEL_TOKEN>`
+  - **IMPORTANT**: Must run from repo root (`/Users/rkshah20/side-projects/carla-shadow-driver/`), not from `v3/`. Vercel project has `rootDirectory: v3` configured server-side.
+  - **IMPORTANT**: Git email must be `rishi09@gmail.com` (not `rkshah20@fb.com`). Set with: `git config user.email "rishi09@gmail.com"`
+  - **Free tier limit**: 100 deployments/day. If rate limited, wait ~1 hour.
+  - **Token**: Generate at https://vercel.com/account/tokens (scope: full account)
 - **WebRTC disabled (intentional)**: WebRTC video was disabled in commit 92e56e0 because Cloudflare quick tunnels don't support UDP. JPEG-over-WebSocket works reliably. TODO: Re-enable WebRTC when using direct IP connections (not tunnels).
 - **Server SIGABRT crash (mitigated)**: Cleanup now disables autopilot and sync mode before destroying actors, sensors destroyed before vehicles. Server no longer calls cleanup on client disconnect — only on new race start. Still close extra tabs to be safe.
 - **No trained model weights**: AI uses CARLA autopilot fallback. PilotNet weights available at HuggingFace (sergiopaniego/OptimizedPilotNet, 200x66 input). Alpamayo is 10B params (~20GB), probably won't fit alongside CARLA on 24GB GPU.
 - **Full provisioning flow untested**: The "Play Game" button flow (Vast.ai auto-provision + Cloudflare tunnel + callback) hasn't been tested end-to-end with the v3 Docker image.
-- **Docker Hub token**: May need to regenerate Docker Hub access token for GitHub Actions (was getting "Password required" error).
+- **Docker Hub token**: Secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` are set in GitHub. Push to v3 branch (paths: `v3/server/**`, `v3/docker/**`, `v3/configs/**`) triggers auto-build via `.github/workflows/docker-build.yml`.
 
 ---
 
@@ -108,14 +111,15 @@ Vast.ai GPU Instance (Docker: rkshah09/shadow-driver-v3:latest)
 - `types/index.ts` - TypeScript interfaces (RaceState, RacerState, etc.)
 
 **Server (v3/server/):**
-- `race_server.py` - WebSocket server, WebRTC signaling, race loop (30Hz frames + 30Hz telemetry)
-- `carla_manager.py` - CARLA vehicle/camera/control management, physics, AI speed adjustment
+- `race_server.py` - WebSocket server, WebRTC signaling, race loop (30Hz frames + 30Hz telemetry), NVENC H.264 encoding with JPEG fallback
+- `carla_manager.py` - CARLA vehicle/camera/control management, physics, AI speed adjustment, raw BGRA frame buffer
 - `race_logic.py` - Checkpoints, lap tracking, race state, RaceDirector (rubber banding), AIMistakeGenerator
+- `nvenc_encoder.py` - FFmpeg NVENC subprocess H.264 encoder, NAL unit parsing, codec config extraction
 - `webrtc_track.py` - CarlaVideoTrack (MediaStreamTrack) for H.264 streaming via aiortc
 - `model_manager.py` - AI model loading (PilotNet/Alpamayo)
 
 **Infrastructure:**
-- `v3/docker/Dockerfile` - Based on carlasim/carla:0.9.15 + Miniconda + PyTorch
+- `v3/docker/Dockerfile` - Based on carlasim/carla:0.9.15 + Miniconda + PyTorch + FFmpeg NVENC
 - `v3/docker/entrypoint.sh` - Starts CARLA (as carla user) + race server + cloudflare tunnel
 - `v3/api/gpu/start.ts` - Vast.ai provisioning with onstart script
 - `.github/workflows/docker-build.yml` - Auto Docker build on push
