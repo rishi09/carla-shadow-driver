@@ -97,23 +97,30 @@ Learnings from Forza Horizon 5, Mario Kart, Trackmania, Slow Roads, agar.io.
 - [ ] Show CARLA gameplay video as hero background (requires video asset)
 
 ### Countdown Sequence
-- [ ] Let player rev engine during countdown (throttle input accepted, car doesn't move)
-- [ ] Camera starts wider/higher, pulls into gameplay position on GO
-- [ ] Screen shake or zoom burst on GO
-- [ ] Hide HUD during countdown, fade in on GO
-- [ ] Engine rev sound builds through 3-2-1
+- [x] Let player rev engine during countdown (W key accepted, plays engine rev sound, car doesn't move)
+- [x] Camera starts wider/higher (scale 0.95, translateY -10px), pulls into gameplay position on GO
+- [x] Screen shake burst on GO (6px magnitude, 250ms duration)
+- [x] Hide HUD during countdown, staggered fade-in on GO (0-350ms delays per element)
+- [x] Engine rev sound builds through 3-2-1 (W key controls rev intensity via oscillator banks)
+- [x] Enhanced countdown visuals: huge numbers (clamp 10rem-16rem), slam-in scale animation, radial gradient flash behind each number, "GO!" explode-outward animation with bright green flash, traffic light dots with pulse animation
 
 ### Post-Race / Retention
-- [ ] "Race Again" button that's instant — no menus (Trackmania-style)
+- [x] "Race Again" button that's instant -- same settings, skip setup (Trackmania-style)
+- [x] Enter key shortcut for instant race again on results screen
+- [x] Post-race stats comparison: total time, best lap, worst lap, top speed, avg speed, distance, collisions (player vs AI)
+- [x] Victory/defeat celebration: "VICTORY" green glow + confetti particle burst, "DEFEATED" red pulse
+- [x] Staggered reveal animation: stats slide in one-by-one (150ms intervals, 10 steps)
+- [x] Lap-by-lap breakdown with per-lap winner highlighting (green bold)
+- [x] Time difference callout (e.g., "-2.3s ahead" / "+1.5s behind")
+- [x] Share button: copies URL with track/laps/weather/model pre-filled
 - [ ] Ghost replay of your previous best lap
 - [ ] Personal best times with medals (Bronze/Silver/Gold per track)
 - [ ] Simple leaderboard (per track, stored in KV or DB)
-- [ ] "Challenge a Friend" button that copies a ready-to-play URL with same track/settings
 
 ### Browser Advantage
 - [ ] Minimize time from URL click to gameplay (target: <5 seconds for returning players)
 - [ ] Show something exciting during GPU provisioning wait (replays, leaderboards, tips)
-- [ ] Make the `?ws=` URL shareable — post-race "Share this track" button
+- [x] Make the `?ws=` URL shareable -- post-race "Share this race" button copies URL with settings
 
 ---
 

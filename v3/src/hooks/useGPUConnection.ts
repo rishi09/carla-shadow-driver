@@ -279,6 +279,15 @@ export function useGPUConnection(): UseGPUConnectionReturn {
           } else if (data.type === 'camera_mode_changed') {
             const camMsg = data as { mode: string };
             setCameraMode(camMsg.mode);
+          } else if (data.type === 'no_change') {
+            // Server says frame is unchanged -- keep displaying the last frame.
+            // No action needed; the VideoCanvas retains the last rendered frame.
+          } else if (data.type === 'perf_stats') {
+            // Server performance stats for debug overlay
+            console.log(`[perf_stats] encode=${(data as any).avg_encode_ms}ms, ` +
+              `size=${(data as any).avg_frame_size_kb}KB, ` +
+              `q=${(data as any).quality}, res=${(data as any).resolution}, ` +
+              `fps=${(data as any).fps}`);
           } else if (data.type === 'commentary') {
             const msg = data as { text: string; category: string };
             const id = ++commentaryIdRef.current;
@@ -515,7 +524,7 @@ export function useGPUConnection(): UseGPUConnectionReturn {
 
   return {
     provisioningState, connectionState, instanceData, error,
-    raceState, raceFinished, availableModels, activeModel, latencyMs, cameraMode,
+    raceState, raceFinished, availableModels, activeModel, latencyMs, cameraMode, commentary,
     retryCount, maxRetries: MAX_RETRIES,
     startGPU, stopGPU, sendControls, sendStartRace, sendSwitchModel, sendRespawn, sendCameraMode,
     connectDirect, clearError, onBinaryFrame, remoteStream,
