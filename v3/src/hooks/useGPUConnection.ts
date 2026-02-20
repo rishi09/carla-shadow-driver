@@ -21,6 +21,12 @@ const WS_RETRY_DELAY = 2000;
 // API base URL - v3's own API routes for start, shared API for status/callback/stop
 const API_BASE_URL = '';
 
+export interface CommentaryMessage {
+  text: string;
+  category: string;
+  id: number;
+}
+
 export interface UseGPUConnectionReturn {
   provisioningState: GPUProvisioningState;
   connectionState: WebSocketConnectionState;
@@ -32,6 +38,7 @@ export interface UseGPUConnectionReturn {
   activeModel: string | null;
   latencyMs: number | null;
   cameraMode: string;
+  commentary: CommentaryMessage[];
   retryCount: number;
   maxRetries: number;
   startGPU: () => Promise<void>;
@@ -67,6 +74,8 @@ export function useGPUConnection(): UseGPUConnectionReturn {
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
   const [retryCount, setRetryCount] = useState(0);
   const [cameraMode, setCameraMode] = useState<string>('chase');
+  const [commentary, setCommentary] = useState<CommentaryMessage[]>([]);
+  const commentaryIdRef = useRef(0);
 
   const wsRef = useRef<WebSocket | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
@@ -270,6 +279,16 @@ export function useGPUConnection(): UseGPUConnectionReturn {
           } else if (data.type === 'camera_mode_changed') {
             const camMsg = data as { mode: string };
             setCameraMode(camMsg.mode);
+          } else if (data.type === 'commentary') {
+            const msg = data as { text: string; category: string };
+            const id = ++commentaryIdRef.current;
+            setCommentary(prev => [...prev, { text: msg.text, category: msg.category, id }]);
+            // Auto-remove after 4 seconds
+            setTimeout(() => {
+              if (isMountedRef.current) {
+                setCommentary(prev => prev.filter(m => m.id !== id));
+              }
+            }, 4000);
           } else if (data.type === 'error') {
             setError({ message: (data as { message: string }).message, code: 'SERVER_ERROR' });
           }

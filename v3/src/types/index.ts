@@ -24,6 +24,13 @@ export interface RaceState {
   collisions?: Array<{ intensity: number }>;
   camera_mode?: string;
   ghost?: { x: number; y: number; yaw: number };
+  drift?: {
+    active: boolean;
+    score: number;
+    angle: number;
+    chain: number;
+  };
+  total_drift_score?: number;
 }
 
 export interface RacerState {
@@ -64,6 +71,9 @@ export interface RaceFinished {
   player_distance?: number;
   ai_distance?: number;
   player_collisions?: number;
+  total_drift_score?: number;
+  best_single_drift?: number;
+  drift_count?: number;
 }
 
 /** Handshake ack from server */
@@ -73,8 +83,22 @@ export interface HandshakeAck {
   models: string[];
 }
 
+/** Performance stats from server (sent every ~3 seconds) */
+export interface PerfStats {
+  type: 'perf_stats';
+  avg_encode_ms: number;
+  avg_frame_size_kb: number;
+  quality: number;
+  resolution: string;
+  speed_downscaled: boolean;
+  auto_reduced: boolean;
+  samples: number;
+  fps: number;
+  frames_sent: number;
+}
+
 /** Any JSON message from the server */
-export type ServerMessage = RaceState | RaceFinished | HandshakeAck | {
+export type ServerMessage = RaceState | RaceFinished | HandshakeAck | PerfStats | {
   type: 'pong';
   timestamp: number;
 } | {
@@ -87,12 +111,18 @@ export type ServerMessage = RaceState | RaceFinished | HandshakeAck | {
   type: 'camera_mode_changed';
   mode: string;
 } | {
+  type: 'commentary';
+  text: string;
+  category: string;
+} | {
   type: 'error';
   message: string;
 } | {
   type: 'webrtc_answer';
   sdp: string;
   sdpType: RTCSdpType;
+} | {
+  type: 'no_change';
 };
 
 /** GPU provisioning states */

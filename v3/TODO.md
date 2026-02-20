@@ -49,10 +49,12 @@ The perceived lag stack when turning:
 - [ ] **Rain/wet roads**: CARLA has wet road reflections when precipitation > 0. Looks dramatically better than dry roads.
 
 ### Frontend visual polish
-- [ ] **Motion blur shader**: CSS/WebGL post-process motion blur on the video canvas, driven by speed. Cheap to compute, hides frame rate artifacts.
-- [ ] **Speed lines**: Animated radial lines overlaid on canvas at high speed (anime/racing game style).
+- [x] **Motion blur shader**: CSS `filter: blur()` on video canvas, driven by speed (0-1.5px). Hides JPEG artifacts at high speed.
+- [x] **Speed lines**: Animated radial lines overlaid on canvas at high speed (anime/racing game style) via SpeedLines.tsx.
 - [ ] **Better HUD design**: Redesign speedometer as an arc/gauge. Add tachometer. Use racing game UI conventions.
-- [ ] **Particle effects**: Canvas-overlay spark particles on collisions, tire smoke on handbrake.
+- [x] **Particle effects**: Canvas-overlay spark particles on collisions, tire smoke on handbrake, rain drops on weather via ParticleOverlay.tsx.
+- [x] **Speed vignette enhanced**: Red tint at 200+ km/h, collision pulse (red edge flash), warp speed streaks at 180+ km/h.
+- [x] **Gear shift effect**: Brief white flash overlay on gear change, decays over ~150ms.
 - [ ] **Rear-view mirror**: Small inset showing rear camera (CARLA supports multiple cameras).
 
 ---
@@ -73,8 +75,8 @@ The perceived lag stack when turning:
 - [x] Let player pick their car from 6 vehicles (Tesla, Mustang, Charger, Audi TT, Mini Cooper, Impala)
 - [x] Speed vignette: GPU-accelerated CSS radial gradient, scales with speed
 - [ ] Camera shake on acceleration/hard braking (collision shake already exists)
-- [ ] Impact sparks and tire smoke (CSS/canvas overlay particles)
-- [ ] Gear shift animation/sound
+- [x] Impact sparks and tire smoke (CSS/canvas overlay particles) -- ParticleOverlay.tsx
+- [x] Gear shift animation/sound -- visual flash in SpeedEffects.tsx
 - [ ] Drift scoring (angle * speed * duration = points)
 
 ---

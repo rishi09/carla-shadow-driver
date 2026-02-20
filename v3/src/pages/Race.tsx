@@ -34,6 +34,9 @@ export function Race() {
   const cameraIndexRef = useRef(0);
   const CAMERA_MODES = ['chase', 'hood', 'bumper'] as const;
 
+  // Store last race settings for instant replay and share link
+  const lastRaceSettingsRef = useRef<{ track: string; laps: number; weather: string; model?: string; playerCar?: string } | null>(null);
+
   const gpu = useGPUConnection();
   const engineSound = useEngineSound();
   const bgMusic = useBackgroundMusic();
@@ -41,6 +44,9 @@ export function Race() {
 
   // Track previous race_status for countdown detection
   const prevRaceStatusRef = useRef<string | null>(null);
+
+  // Countdown rev engine: track W key during countdown for rev sound
+  const countdownRevRef = useRef(false);
 
   // Controls hint: show when race transitions from countdown to racing
   const [showControlsHint, setShowControlsHint] = useState(false);
@@ -52,6 +58,25 @@ export function Race() {
   const shakeRef = useRef<{ x: number; y: number; decay: number }>({ x: 0, y: 0, decay: 0 });
   const shakeRafRef = useRef<number | null>(null);
 
+  // --- GO screen shake trigger ---
+  const goShakeTriggeredRef = useRef(false);
+
+  // --- Camera countdown zoom state ---
+  // During countdown: scale(0.95) translateY(-10px), on GO: scale(1.0) translateY(0)
+  const isCountdown = gpu.raceState?.race_status === 'countdown';
+  const countdownZoomStyle = useMemo(() => {
+    if (isCountdown) {
+      return {
+        transform: 'scale(0.95) translateY(-10px)',
+        transition: 'transform 1.0s ease-out',
+      };
+    }
+    return {
+      transform: 'scale(1.0) translateY(0px)',
+      transition: 'transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1)',
+    };
+  }, [isCountdown]);
+
   // --- Engine sound + background music update loop ---
   useEffect(() => {
     if (view !== 'racing') return;
@@ -59,7 +84,14 @@ export function Race() {
     let rafId: number;
     const tick = () => {
       const player = gpu.raceState?.player;
-      if (player) {
+      const raceStatus = gpu.raceState?.race_status;
+
+      if (raceStatus === 'countdown') {
+        // During countdown: rev engine if W is held (via countdownRevRef)
+        const revThrottle = countdownRevRef.current ? 0.8 : 0.0;
+        const revRpm = countdownRevRef.current ? 4000 : 800;
+        engineSound.update(revRpm, revThrottle, 0, 0);
+      } else if (player) {
         engineSound.update(
           player.rpm ?? 800,
           player.throttle ?? 0,
@@ -80,11 +112,12 @@ export function Race() {
     return () => { cancelAnimationFrame(rafId); };
   }, [view, gpu.raceState, engineSound.update, bgMusic.updateIntensity]);
 
-  // --- Countdown beeps ---
+  // --- Countdown beeps + GO screen shake ---
   useEffect(() => {
     const status = gpu.raceState?.race_status ?? null;
     if (status === 'countdown' && prevRaceStatusRef.current !== 'countdown') {
       engineSound.playCountdownBeeps();
+      goShakeTriggeredRef.current = false;
     }
     // Show controls hint when transitioning from countdown to racing
     if (status === 'racing' && prevRaceStatusRef.current === 'countdown') {
@@ -92,8 +125,47 @@ export function Race() {
       if (controlsHintTimeoutRef.current) clearTimeout(controlsHintTimeoutRef.current);
       controlsHintTimeoutRef.current = setTimeout(() => setShowControlsHint(false), 4000);
     }
+
+    // Trigger screen shake on GO (countdown === 0)
+    if (status === 'countdown' && gpu.raceState?.countdown === 0 && !goShakeTriggeredRef.current) {
+      goShakeTriggeredRef.current = true;
+      triggerScreenShake(6, 250);
+    }
+
     prevRaceStatusRef.current = status;
-  }, [gpu.raceState?.race_status, engineSound.playCountdownBeeps]);
+  }, [gpu.raceState?.race_status, gpu.raceState?.countdown, engineSound.playCountdownBeeps]);
+
+  // --- Screen shake helper ---
+  const triggerScreenShake = useCallback((magnitude: number, duration: number) => {
+    shakeRef.current = {
+      x: (Math.random() - 0.5) * 2 * magnitude,
+      y: (Math.random() - 0.5) * 2 * magnitude,
+      decay: magnitude,
+    };
+
+    if (shakeRafRef.current !== null) {
+      cancelAnimationFrame(shakeRafRef.current);
+    }
+
+    const shakeStart = performance.now();
+
+    const animateShake = (now: number) => {
+      const elapsed = now - shakeStart;
+      if (elapsed >= duration) {
+        setShakeX(0);
+        setShakeY(0);
+        shakeRafRef.current = null;
+        return;
+      }
+      const decayFactor = 1 - elapsed / duration;
+      const currentMag = magnitude * decayFactor;
+      setShakeX((Math.random() - 0.5) * 2 * currentMag);
+      setShakeY((Math.random() - 0.5) * 2 * currentMag);
+      shakeRafRef.current = requestAnimationFrame(animateShake);
+    };
+
+    shakeRafRef.current = requestAnimationFrame(animateShake);
+  }, []);
 
   // --- Collision: screen shake + impact sound ---
   useEffect(() => {
@@ -107,46 +179,8 @@ export function Race() {
 
     // Use the strongest collision for shake intensity
     const maxIntensity = Math.max(...collisions.map(c => c.intensity));
-    // Shake magnitude: proportional to intensity, capped at 10px
     const magnitude = Math.min(10, maxIntensity / 500);
-
-    // Set initial shake values
-    shakeRef.current = {
-      x: (Math.random() - 0.5) * 2 * magnitude,
-      y: (Math.random() - 0.5) * 2 * magnitude,
-      decay: magnitude,
-    };
-
-    // Cancel any existing shake animation
-    if (shakeRafRef.current !== null) {
-      cancelAnimationFrame(shakeRafRef.current);
-    }
-
-    const shakeStart = performance.now();
-    const shakeDuration = 300; // ms
-
-    const animateShake = (now: number) => {
-      const elapsed = now - shakeStart;
-      if (elapsed >= shakeDuration) {
-        setShakeX(0);
-        setShakeY(0);
-        shakeRafRef.current = null;
-        return;
-      }
-
-      // Decay factor: starts at 1, goes to 0 over shakeDuration
-      const decayFactor = 1 - elapsed / shakeDuration;
-      const currentMag = magnitude * decayFactor;
-
-      const newX = (Math.random() - 0.5) * 2 * currentMag;
-      const newY = (Math.random() - 0.5) * 2 * currentMag;
-      setShakeX(newX);
-      setShakeY(newY);
-
-      shakeRafRef.current = requestAnimationFrame(animateShake);
-    };
-
-    shakeRafRef.current = requestAnimationFrame(animateShake);
+    triggerScreenShake(magnitude, 300);
 
     return () => {
       if (shakeRafRef.current !== null) {
@@ -154,7 +188,7 @@ export function Race() {
         shakeRafRef.current = null;
       }
     };
-  }, [gpu.raceState?.collisions, engineSound.playImpact]);
+  }, [gpu.raceState?.collisions, engineSound.playImpact, triggerScreenShake]);
 
   // --- Background music lifecycle ---
   useEffect(() => {
@@ -166,12 +200,22 @@ export function Race() {
     }
   }, [view, gpu.raceState?.race_status, bgMusic.start, bgMusic.stop]);
 
-  // --- Keyboard controls ---
+  // --- Keyboard controls (racing view) ---
   useEffect(() => {
     if (view !== 'racing') return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       const key = e.key.toLowerCase();
+      const raceStatus = gpu.raceState?.race_status;
+
+      // During countdown, only accept W for engine rev (no movement)
+      if (raceStatus === 'countdown') {
+        if (key === 'w') {
+          countdownRevRef.current = true;
+        }
+        return; // Don't process other keys during countdown
+      }
+
       if (key === 'r') {
         gpu.sendRespawn();
         setShowRespawning(true);
@@ -194,6 +238,9 @@ export function Race() {
 
     const handleKeyUp = (e: KeyboardEvent) => {
       const key = e.key.toLowerCase();
+      if (key === 'w') {
+        countdownRevRef.current = false;
+      }
       if (key === ' ') {
         keysRef.current = { ...keysRef.current, space: false };
       } else if (key in keysRef.current) {
@@ -226,8 +273,9 @@ export function Race() {
       }
       // Reset key state so stale keys don't persist across view changes
       keysRef.current = { w: false, a: false, s: false, d: false, space: false };
+      countdownRevRef.current = false;
     };
-  }, [view, gpu.sendControls, gpu.sendRespawn, gpu.sendCameraMode]);
+  }, [view, gpu.sendControls, gpu.sendRespawn, gpu.sendCameraMode, gpu.raceState?.race_status]);
 
   // --- Watch for race finished ---
   useEffect(() => {
@@ -235,6 +283,21 @@ export function Race() {
       setView('results');
     }
   }, [gpu.raceFinished]);
+
+  // --- Enter key for instant race again on results screen ---
+  useEffect(() => {
+    if (view !== 'results') return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        handleInstantReplay();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [view]);
 
   const handleProceedToRace = useCallback(() => {
     setView('pre_race');
@@ -269,6 +332,8 @@ export function Race() {
   }, [isDemo, directWsUrl, gpu.isConnected, gpu.sendStartRace]);
 
   const handleStartRace = useCallback((track: string, laps: number, weather: string, model?: string, playerCar?: string) => {
+    // Save settings for instant replay
+    lastRaceSettingsRef.current = { track, laps, weather, model, playerCar };
     setView('racing');
     setRaceWeather(weather);
     if (isDemo || directWsUrl) {
@@ -284,10 +349,34 @@ export function Race() {
     setView('pre_race');
   }, []);
 
+  // Instant replay: restart with same settings, skip setup screen
+  const handleInstantReplay = useCallback(() => {
+    const settings = lastRaceSettingsRef.current;
+    if (settings) {
+      handleStartRace(settings.track, settings.laps, settings.weather, settings.model, settings.playerCar);
+    } else {
+      // Fallback to setup if no saved settings
+      setView('pre_race');
+    }
+  }, [handleStartRace]);
+
   const handleMainMenu = useCallback(() => {
     gpu.stopGPU();
     window.location.href = '/';
   }, [gpu]);
+
+  // Build race settings object for RaceResults share link
+  const raceSettingsForResults = useMemo(() => {
+    const s = lastRaceSettingsRef.current;
+    if (!s) return undefined;
+    return {
+      track: s.track,
+      laps: s.laps,
+      weather: s.weather,
+      model: s.model,
+      playerCar: s.playerCar,
+    };
+  }, [view]); // Re-compute when view changes (entering results)
 
   return (
     <div className="min-h-screen bg-dark-500 text-white">
@@ -323,15 +412,17 @@ export function Race() {
           style={{ transform: `translate(${shakeX}px, ${shakeY}px)` }}
         >
           {/* Video feed: prefer WebRTC, fall back to JPEG canvas */}
-          {/* Speed-based FOV scale + client-side steering prediction + motion blur applied to video */}
+          {/* Speed-based FOV scale + client-side steering prediction + motion blur + countdown zoom */}
           <div
             className="absolute inset-0"
             style={{
-              transform: steeringPrediction.transform !== 'none'
-                ? `scale(${speedFovScale}) ${steeringPrediction.transform}`
-                : `scale(${speedFovScale})`,
+              ...countdownZoomStyle,
+              transform: isCountdown
+                ? countdownZoomStyle.transform
+                : (steeringPrediction.transform !== 'none'
+                  ? `scale(${speedFovScale}) ${steeringPrediction.transform}`
+                  : `scale(${speedFovScale})`),
               filter: motionBlurPx > 0.05 ? `blur(${motionBlurPx.toFixed(2)}px)` : 'none',
-              transition: 'transform 0.15s ease-out, filter 0.3s ease-out',
             }}
           >
           {gpu.remoteStream ? (
@@ -455,6 +546,8 @@ export function Race() {
           result={gpu.raceFinished}
           onPlayAgain={handlePlayAgain}
           onMainMenu={handleMainMenu}
+          raceSettings={raceSettingsForResults}
+          onInstantReplay={handleInstantReplay}
         />
       )}
     </div>

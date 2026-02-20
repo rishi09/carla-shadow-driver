@@ -630,8 +630,15 @@ class RaceServer:
 
     async def _send_frame(self):
         """Encode and send chase camera frame as binary WebSocket message.
-        Skipped when WebRTC is active and connected (video flows via the RTP track instead).
-        Uses thread pool for JPEG encoding to avoid blocking the asyncio event loop."""
+
+        Optimizations:
+          - Skipped when WebRTC is active and connected (video flows via RTP track)
+          - Position-based skip: if car is stationary, skip encoding entirely
+          - Frame delta skip: if frame content is similar to last sent, send
+            a lightweight 'no_change' JSON message instead of re-encoding JPEG
+          - JPEG encoding runs in thread pool to avoid blocking asyncio event loop
+          - Periodically sends perf_stats to client for debug overlay
+        """
         if not self.ws_client:
             return
 
@@ -640,7 +647,7 @@ class RaceServer:
         if self.pc is not None and self.pc.connectionState == "connected":
             return
 
-        # Frame skip: don't encode/send if the camera view hasn't changed
+        # Position-based frame skip: don't encode/send if camera hasn't moved
         if self._should_skip_frame():
             self._frame_skip_count += 1
             return
@@ -649,17 +656,24 @@ class RaceServer:
         if frame is None:
             return
 
+        # Frame delta detection: check if this frame is similar to the last sent
+        # This is fast (<0.5ms) and saves encoding + bandwidth when idle
+        if self.encoder.is_frame_similar(frame):
+            self._delta_skip_count += 1
+            # Send a lightweight no_change message so the client knows
+            # the connection is alive and can keep displaying the last frame
+            try:
+                await self.ws_client.send(json.dumps({'type': 'no_change'}))
+            except Exception:
+                pass
+            return
+
         # Encode JPEG in a thread pool to avoid blocking the event loop (~5-10ms)
-        t0 = time.time()
         loop = asyncio.get_event_loop()
         jpeg_bytes = await loop.run_in_executor(None, self.encoder.encode, frame)
-        encode_ms = (time.time() - t0) * 1000
 
         if jpeg_bytes is None:
             return
-
-        # Track encode times for perf logging
-        self._encode_times.append(encode_ms)
 
         try:
             await self.ws_client.send(jpeg_bytes)
@@ -678,16 +692,30 @@ class RaceServer:
 
             # Enhanced perf logging every 90 frames (~3 seconds)
             if self.frame_count % 90 == 0:
-                avg_encode = 0.0
-                if self._encode_times:
-                    avg_encode = sum(self._encode_times) / len(self._encode_times)
-                print(f"[perf] frame #{self.frame_count}: encode={encode_ms:.1f}ms, "
-                      f"avg_encode={avg_encode:.1f}ms, size={len(jpeg_bytes)//1024}KB, "
-                      f"fps={self.fps:.1f}, quality={self.encoder.get_quality()}, "
-                      f"skipped={self._frame_skip_count}")
-                # Reset counters for next interval
-                self._encode_times.clear()
+                perf = self.encoder.get_perf_stats()
+                print(f"[perf] frame #{self.frame_count}: "
+                      f"avg_encode={perf['avg_encode_ms']:.1f}ms, "
+                      f"avg_size={perf['avg_frame_size_kb']:.0f}KB, "
+                      f"fps={self.fps:.1f}, quality={perf['quality']}, "
+                      f"res={perf['resolution']}, "
+                      f"pos_skip={self._frame_skip_count}, "
+                      f"delta_skip={self._delta_skip_count}"
+                      f"{' [AUTO-REDUCED]' if perf['auto_reduced'] else ''}")
+                # Reset skip counters for next interval
                 self._frame_skip_count = 0
+                self._delta_skip_count = 0
+
+            # Send perf_stats to client periodically (every 3 seconds)
+            if self.encoder.should_send_perf_stats(interval=3.0):
+                perf = self.encoder.get_perf_stats()
+                perf['type'] = 'perf_stats'
+                perf['fps'] = round(self.fps, 1)
+                perf['frames_sent'] = self.frame_count
+                try:
+                    await self.ws_client.send(json.dumps(perf))
+                except Exception:
+                    pass
+
         except Exception:
             pass
 

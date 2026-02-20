@@ -344,3 +344,31 @@ Format: `## [timestamp] Category: Short description`
 - **Rule**: Always keep the previous tunnel as a fallback. If the new tunnel's auth token isn't configured or the service is down, the system should degrade gracefully to the working (if slower) alternative.
 
 ---
+
+## [2026-02-19] Visual polish: SpeedEffects, ParticleOverlay, motion blur, gear shift flash
+
+### Enhanced SpeedEffects (SpeedEffects.tsx)
+- **Red-tinted vignette at high speed**: The existing black vignette now blends to a red tint above 150 km/h, ramping to full red-tinted edges at 250 km/h. Implemented as an interpolated `rgba(R,0,0,...)` in the radial gradient, where R scales from 0 to 100 based on speed.
+- **Collision pulse overlay**: When collisions arrive, a red edge-flash div (radial gradient, transparent center, red edges) appears and decays over ~250ms via a ref-based decay in the RAF loop. This provides immediate "damage" visual feedback without obscuring the center of the screen.
+- **Gear shift flash**: When `gear` changes (excluding initial gear 0), a brief white translucent overlay (`rgba(255,255,255,0.07)`) flashes and decays over ~150ms. This simulates the visual "clunk" of a gear change without being distracting.
+- **Warp speed streaks**: At 180+ km/h, a second canvas layer draws radial lines from ~60% screen radius outward toward edges. Line count scales from 12 to 40, speed and length scale with intensity. Uses per-line linear gradients for a streak/trail effect. At extreme speeds (250+ km/h), a blue-tinted radial glow is added to screen edges.
+- **Rule**: The collision pulse and gear flash are driven by refs decayed in the RAF loop, with React state (`setCollisionFlash`, `setGearFlashOpacity`) updated from the RAF loop only when the value changes. This avoids re-rendering on every animation frame while still allowing the CSS overlay divs to appear/disappear.
+
+### ParticleOverlay (ParticleOverlay.tsx) -- New component
+- **Collision sparks**: 15-40 particles spawned per collision, originating from the lower-center screen area. Orange-yellow color palette (R=255, G=120-255, B=0-50). Particles have gravity (800 px/s^2 downward), air resistance (velocity *= 0.97/frame), and shrink as they die. Each spark has a glow via `ctx.shadowBlur`.
+- **Tire smoke**: On handbrake (Space key) while speed > 20 km/h, 3 white/gray smoke puffs spawn per frame near the bottom of the screen. They rise (vy=-40 to -120), expand (radius triples over lifetime), and fade (max alpha 0.25). This gives the visual impression of tire smoke during drifts.
+- **Rain particles**: When weather is 'rain' or 'storm', 3-6 rain drops spawn per frame. Each drop is drawn as a diagonal line (using `atan2(vy, vx)` for angle) falling at 600-1000 px/s with a lateral component of 80-350 px/s. Storm mode has larger, faster, more numerous drops.
+- **Performance**: Single canvas with a 200-particle cap. Particles are removed via `splice` when dead (iterating backwards). All prop values are read from refs to avoid effect teardown. Canvas uses `devicePixelRatio` scaling via ResizeObserver for crisp rendering on Retina displays.
+- **Rule**: When using `ctx.shadowBlur` for glow effects on canvas particles, always reset `ctx.shadowBlur = 0` after drawing glowing particles. Otherwise the shadow setting leaks to subsequent draw calls (smoke, rain) and tanks performance.
+
+### CSS Motion Blur (Race.tsx)
+- **Implementation**: A `filter: blur(Npx)` is applied to the video feed container, where N scales linearly from 0 at rest to 1.5px at 200+ km/h. The blur is applied to the same div that handles FOV scaling and steering prediction transforms.
+- **Performance**: CSS `filter: blur()` is GPU-composited in all modern browsers. Combined with `transition: filter 0.3s ease-out`, the blur transitions smoothly without layout thrashing. At rest (speed=0), the filter is set to `'none'` to avoid any compositor overhead.
+- **Subtlety**: 1.5px max blur is intentionally subtle -- it hides JPEG compression artifacts at high speed while giving a sensation of motion. Stronger blur would obscure gameplay.
+
+### TypeScript narrowing in canvas useEffect (all canvas components)
+- **Bug**: TypeScript does not carry null-narrowing from an outer scope into inner function declarations. `const ctx = canvas.getContext('2d'); if (!ctx) return;` narrows `ctx` in the effect body, but the inner `function draw()` does not inherit this narrowing -- so `ctx.clearRect(...)` errors with "possibly null".
+- **Fix**: After the null guard, re-assign to an explicitly typed const: `const ctx: CanvasRenderingContext2D = c;`. This creates a new binding with a non-nullable type that inner functions can close over safely.
+- **Rule**: In canvas-based React components, always use the pattern `const c = ref.getContext('2d'); if (!c) return; const ctx: CanvasRenderingContext2D = c;` to get correct types in inner functions without non-null assertions.
+
+---
