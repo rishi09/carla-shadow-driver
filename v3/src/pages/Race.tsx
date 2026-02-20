@@ -2,10 +2,13 @@ import { useState, useCallback, useMemo } from 'react';
 import { useGPUConnection } from '../hooks/useGPUConnection.ts';
 import { useEngineSound } from '../hooks/useEngineSound.ts';
 import { useBackgroundMusic } from '../hooks/useBackgroundMusic.ts';
+import { useSteeringPrediction } from '../hooks/useSteeringPrediction.ts';
 import { VideoCanvas } from '../components/VideoCanvas.tsx';
 import { WebRTCVideo } from '../components/WebRTCVideo.tsx';
 import { RaceHUD } from '../components/RaceHUD.tsx';
 import { SpeedEffects } from '../components/SpeedEffects.tsx';
+import { SpeedLines } from '../components/SpeedLines.tsx';
+import { ParticleOverlay } from '../components/ParticleOverlay.tsx';
 import { GPUConnectionModal } from '../components/GPUConnectionModal.tsx';
 import { RaceResults } from '../components/RaceResults.tsx';
 import { RaceSetup } from '../components/RaceSetup.tsx';
@@ -24,6 +27,7 @@ export function Race() {
   const directWsUrl = params.get('ws');
   const [view, setView] = useState<RaceView>(isDemo || directWsUrl ? 'pre_race' : 'setup');
   const [showRespawning, setShowRespawning] = useState(false);
+  const [raceWeather, setRaceWeather] = useState('clear');
   const keysRef = useRef<KeyState>({ w: false, a: false, s: false, d: false, space: false });
   const keyIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const respawnTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -33,6 +37,7 @@ export function Race() {
   const gpu = useGPUConnection();
   const engineSound = useEngineSound();
   const bgMusic = useBackgroundMusic();
+  const steeringPrediction = useSteeringPrediction(keysRef, view === 'racing', gpu.raceState?.player?.speed_kmh ?? 0);
 
   // Track previous race_status for countdown detection
   const prevRaceStatusRef = useRef<string | null>(null);
@@ -243,6 +248,14 @@ export function Race() {
     return 1.0 + t * 0.05;
   }, [gpu.raceState?.player?.speed_kmh]);
 
+  // --- Speed-based motion blur ---
+  // Subtle CSS blur: 0px at rest, max 1.5px at 200+ km/h
+  const motionBlurPx = useMemo(() => {
+    const speed = gpu.raceState?.player?.speed_kmh ?? 0;
+    const t = Math.min(1, speed / 200);
+    return t * 1.5;
+  }, [gpu.raceState?.player?.speed_kmh]);
+
   // Track pending demo race config to send once WebSocket connects
   const pendingDemoRaceRef = useRef<{ track: string; laps: number; weather: string; model?: string; player_car?: string } | null>(null);
 
@@ -257,6 +270,7 @@ export function Race() {
 
   const handleStartRace = useCallback((track: string, laps: number, weather: string, model?: string, playerCar?: string) => {
     setView('racing');
+    setRaceWeather(weather);
     if (isDemo || directWsUrl) {
       pendingDemoRaceRef.current = { track, laps, weather, model, player_car: playerCar };
       const wsUrl = directWsUrl || DEMO_WS_URL;
@@ -309,12 +323,15 @@ export function Race() {
           style={{ transform: `translate(${shakeX}px, ${shakeY}px)` }}
         >
           {/* Video feed: prefer WebRTC, fall back to JPEG canvas */}
-          {/* Speed-based FOV scale applied to video for subtle zoom effect */}
+          {/* Speed-based FOV scale + client-side steering prediction + motion blur applied to video */}
           <div
             className="absolute inset-0"
             style={{
-              transform: `scale(${speedFovScale})`,
-              transition: 'transform 0.3s ease-out',
+              transform: steeringPrediction.transform !== 'none'
+                ? `scale(${speedFovScale}) ${steeringPrediction.transform}`
+                : `scale(${speedFovScale})`,
+              filter: motionBlurPx > 0.05 ? `blur(${motionBlurPx.toFixed(2)}px)` : 'none',
+              transition: 'transform 0.15s ease-out, filter 0.3s ease-out',
             }}
           >
           {gpu.remoteStream ? (
@@ -330,8 +347,23 @@ export function Race() {
           )}
           </div>
 
-          {/* Speed effects overlay (speed lines + vignette) */}
-          <SpeedEffects speedKmh={gpu.raceState?.player.speed_kmh ?? 0} />
+          {/* Speed lines overlay (anime-style radial lines at high speed) */}
+          <SpeedLines speedKmh={gpu.raceState?.player.speed_kmh ?? 0} />
+
+          {/* Speed effects overlay (vignette + warp + collision flash + gear flash) */}
+          <SpeedEffects
+            speedKmh={gpu.raceState?.player.speed_kmh ?? 0}
+            collisions={gpu.raceState?.collisions}
+            gear={gpu.raceState?.player.gear}
+          />
+
+          {/* Particle effects overlay (sparks, tire smoke, rain) */}
+          <ParticleOverlay
+            collisions={gpu.raceState?.collisions}
+            handbrake={keysRef.current.space}
+            speedKmh={gpu.raceState?.player.speed_kmh ?? 0}
+            weather={raceWeather}
+          />
 
           {/* HUD overlay */}
           <RaceHUD raceState={gpu.raceState} latencyMs={gpu.latencyMs} />

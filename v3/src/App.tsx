@@ -1,4 +1,4 @@
-import { Home } from './pages/Home.tsx';
+import { Landing } from './pages/Landing.tsx';
 import { Race } from './pages/Race.tsx';
 
 function App() {
@@ -9,7 +9,7 @@ function App() {
     return <Race />;
   }
 
-  return <Home />;
+  return <Landing />;
 }
 
 export default App;

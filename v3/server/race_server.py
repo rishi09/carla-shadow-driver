@@ -55,6 +55,16 @@ class RaceServer:
         self.pc: Optional[RTCPeerConnection] = None
         self.video_track: Optional[CarlaVideoTrack] = None
 
+        # --- Frame skip state (stationary camera optimization) ---
+        self._last_sent_x: Optional[float] = None
+        self._last_sent_y: Optional[float] = None
+        self._last_sent_yaw: Optional[float] = None
+        self._last_sent_time: float = 0.0
+        self._frame_skip_count: int = 0  # Frames skipped since last perf log
+
+        # --- Performance tracking ---
+        self._encode_times: list = []  # Recent encode times in ms (for perf log)
+
     async def handle_client(self, websocket):
         """Handle a single WebSocket client connection."""
         print(f"Client connected: {websocket.remote_address}")
@@ -100,19 +110,26 @@ class RaceServer:
                     elif self._control_msg_count % 30 == 0:
                         active = [k for k, v in self.player_keys.items() if v]
                         print(f"Controls #{self._control_msg_count}: {active or 'none'}")
-                    # Adaptive JPEG quality based on client latency
+                    # Adaptive JPEG quality based on client latency (piggy-backed on control messages)
                     latency = data.get('latency')
                     if latency is not None:
-                        if latency > 200:
-                            self.encoder.set_quality(50)
-                        elif latency < 100:
-                            self.encoder.set_quality(80)
-                        else:
-                            self.encoder.set_quality(70)
+                        self.encoder.adapt_quality(float(latency))
 
                 elif msg_type == 'switch_model':
                     model_name = data.get('model', 'carla_pilotnet')
                     await self._switch_model(model_name)
+
+                elif msg_type == 'latency_report':
+                    # Client sends its measured round-trip latency (from ping/pong).
+                    # We use it to adaptively adjust JPEG quality & resolution.
+                    # NOTE: The frontend needs to send this message periodically:
+                    #   ws.send(JSON.stringify({type: "latency_report", latency_ms: <number>}))
+                    # This should be sent after each pong is received, e.g.:
+                    #   const latency = Date.now() - pingTimestamp;
+                    #   ws.send(JSON.stringify({type: "latency_report", latency_ms: latency}));
+                    latency_ms = data.get('latency_ms')
+                    if latency_ms is not None:
+                        self.encoder.adapt_quality(float(latency_ms))
 
                 elif msg_type == 'start_race':
                     track = data.get('track', 'Town03')
@@ -241,6 +258,14 @@ class RaceServer:
         self.fps = 0.0
         self._fps_count = 0
         self._fps_timer = time.time()
+
+        # Reset frame skip state
+        self._last_sent_x = None
+        self._last_sent_y = None
+        self._last_sent_yaw = None
+        self._last_sent_time = 0.0
+        self._frame_skip_count = 0
+        self._encode_times = []
 
         # Close WebRTC peer connection
         if self.pc is not None:
@@ -503,9 +528,69 @@ class RaceServer:
             self._telemetry_task = None
         print("Race loop ended")
 
+    def _should_skip_frame(self) -> bool:
+        """Check if the frame can be skipped because the car is stationary.
+
+        Skip conditions (ALL must be true):
+          - Position delta < 0.1m
+          - Yaw delta < 0.5 degrees
+          - Speed < 2 km/h
+          - Less than 1 second since last sent frame (ensures at least 1 fps when idle)
+
+        Never skip during countdown or when we have no previous reference frame.
+        """
+        # Never skip if we haven't sent a frame yet
+        if self._last_sent_x is None:
+            return False
+
+        # Never skip during countdown
+        if self.race_state and self.race_state.status == "countdown":
+            return False
+
+        # Get current player telemetry
+        if not self.carla.player_car:
+            return False
+
+        try:
+            telem = self.carla.get_telemetry(self.carla.player_car)
+        except Exception:
+            return False
+
+        speed_kmh = telem.get('speed_kmh', 0.0)
+
+        # Always send frames when car is moving
+        if speed_kmh > 2.0:
+            return False
+
+        x, y = telem['x'], telem['y']
+        yaw = telem.get('yaw', 0.0)
+
+        # Check position delta
+        dx = x - self._last_sent_x
+        dy = y - self._last_sent_y
+        pos_delta = (dx * dx + dy * dy) ** 0.5
+
+        if pos_delta >= 0.1:
+            return False
+
+        # Check yaw delta (handle wraparound at +/-180)
+        yaw_delta = abs(yaw - self._last_sent_yaw)
+        if yaw_delta > 180:
+            yaw_delta = 360 - yaw_delta
+        if yaw_delta >= 0.5:
+            return False
+
+        # Stationary: but enforce at least 1 frame per second
+        now = time.time()
+        if now - self._last_sent_time >= 1.0:
+            return False
+
+        return True
+
     async def _send_frame(self):
         """Encode and send chase camera frame as binary WebSocket message.
-        Skipped when WebRTC is active and connected (video flows via the RTP track instead)."""
+        Skipped when WebRTC is active and connected (video flows via the RTP track instead).
+        Uses thread pool for JPEG encoding to avoid blocking the asyncio event loop."""
         if not self.ws_client:
             return
 
@@ -514,23 +599,54 @@ class RaceServer:
         if self.pc is not None and self.pc.connectionState == "connected":
             return
 
+        # Frame skip: don't encode/send if the camera view hasn't changed
+        if self._should_skip_frame():
+            self._frame_skip_count += 1
+            return
+
         frame = self.carla.get_chase_frame()
         if frame is None:
             return
 
+        # Encode JPEG in a thread pool to avoid blocking the event loop (~5-10ms)
         t0 = time.time()
-        jpeg_bytes = self.encoder.encode(frame)
+        loop = asyncio.get_event_loop()
+        jpeg_bytes = await loop.run_in_executor(None, self.encoder.encode, frame)
         encode_ms = (time.time() - t0) * 1000
 
         if jpeg_bytes is None:
             return
 
+        # Track encode times for perf logging
+        self._encode_times.append(encode_ms)
+
         try:
             await self.ws_client.send(jpeg_bytes)
             self.frame_count += 1
-            # Log encode stats every 90 frames (~3 seconds)
+
+            # Update frame skip tracking with current position
+            if self.carla.player_car:
+                try:
+                    telem = self.carla.get_telemetry(self.carla.player_car)
+                    self._last_sent_x = telem['x']
+                    self._last_sent_y = telem['y']
+                    self._last_sent_yaw = telem.get('yaw', 0.0)
+                    self._last_sent_time = time.time()
+                except Exception:
+                    pass
+
+            # Enhanced perf logging every 90 frames (~3 seconds)
             if self.frame_count % 90 == 0:
-                print(f"[perf] frame #{self.frame_count}: encode={encode_ms:.1f}ms, size={len(jpeg_bytes)//1024}KB, fps={self.fps:.1f}")
+                avg_encode = 0.0
+                if self._encode_times:
+                    avg_encode = sum(self._encode_times) / len(self._encode_times)
+                print(f"[perf] frame #{self.frame_count}: encode={encode_ms:.1f}ms, "
+                      f"avg_encode={avg_encode:.1f}ms, size={len(jpeg_bytes)//1024}KB, "
+                      f"fps={self.fps:.1f}, quality={self.encoder.get_quality()}, "
+                      f"skipped={self._frame_skip_count}")
+                # Reset counters for next interval
+                self._encode_times.clear()
+                self._frame_skip_count = 0
         except Exception:
             pass
 

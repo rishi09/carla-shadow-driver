@@ -73,6 +73,20 @@ class RaceManager:
         self._current_brake = 0.0
         self._current_steer = 0.0
 
+        # --- Driving assists state ---
+        # Countersteer assist: tracks drift angle for logging
+        self._drift_angle = 0.0
+        self._countersteer_active = False
+
+        # Traction control: tracks previous speed to detect wheel spin
+        self._prev_speed_kmh = 0.0
+        self._traction_control_active = False
+        self._tc_throttle_cap = 1.0  # 1.0 = no cap
+
+        # Handbrake drift: tracks state to only apply physics changes on transitions
+        self._handbrake_was_active = False
+        self._original_rear_friction: Optional[List[float]] = None
+
         # Camera mode
         self._camera_mode = 'chase'
         self._camera_transforms = {
@@ -156,14 +170,43 @@ class RaceManager:
                     for point in physics.torque_curve:
                         boosted.append(carla.Vector2D(point.x, point.y * 1.4))
                     physics.torque_curve = boosted
-                # Stiffer suspension for less body roll
-                for wheel in physics.wheels:
-                    wheel.tire_friction = max(wheel.tire_friction, 3.5)
+
+                # --- Improved tire friction model ---
+                # Front tires: higher friction for responsive steering grip
+                # Rear tires: slightly lower friction for mild oversteer (more fun)
+                # Lateral stiffness tuned for keyboard input stability
+                wheels = physics.wheels
+                for i, wheel in enumerate(wheels):
+                    is_front = (i < 2)  # wheels[0,1] = front, wheels[2,3] = rear
+                    if is_front:
+                        wheel.tire_friction = max(wheel.tire_friction, 3.8)
+                        # Higher lateral stiffness on front = more grip in turns
+                        wheel.lat_stiff_max_load = 3.0
+                        wheel.lat_stiff_value = 20.0
+                    else:
+                        # Rear slightly lower friction = mild oversteer tendency
+                        wheel.tire_friction = max(wheel.tire_friction, 3.2)
+                        # Lower lateral stiffness on rear = slides a bit more
+                        wheel.lat_stiff_max_load = 2.5
+                        wheel.lat_stiff_value = 17.0
+                    # Stiffer damping for less bouncy feel over bumps
                     wheel.damping_rate = wheel.damping_rate * 1.3
-                # Lower center of mass for stability
+
+                # Lower center of mass for stability (reduces roll in corners)
                 physics.center_of_mass = carla.Vector3D(0.0, 0.0, -0.3)
+
                 self.player_car.apply_physics_control(physics)
-                print(f"Physics tuned: mass={physics.mass:.0f}kg, tire_friction={physics.wheels[0].tire_friction:.1f}")
+
+                # Store original rear friction for handbrake drift restore
+                self._original_rear_friction = [
+                    wheels[i].tire_friction for i in range(len(wheels)) if i >= 2
+                ]
+
+                print(f"Physics tuned: mass={physics.mass:.0f}kg, "
+                      f"front_friction={wheels[0].tire_friction:.1f}, "
+                      f"rear_friction={wheels[2].tire_friction:.1f}, "
+                      f"front_lat_stiff={wheels[0].lat_stiff_value:.0f}, "
+                      f"rear_lat_stiff={wheels[2].lat_stiff_value:.0f}")
             except Exception as e:
                 print(f"Physics tuning failed (non-critical): {e}")
 
