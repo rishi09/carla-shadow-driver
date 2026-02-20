@@ -518,13 +518,19 @@ class RaceServer:
         if frame is None:
             return
 
+        t0 = time.time()
         jpeg_bytes = self.encoder.encode(frame)
+        encode_ms = (time.time() - t0) * 1000
+
         if jpeg_bytes is None:
             return
 
         try:
             await self.ws_client.send(jpeg_bytes)
             self.frame_count += 1
+            # Log encode stats every 90 frames (~3 seconds)
+            if self.frame_count % 90 == 0:
+                print(f"[perf] frame #{self.frame_count}: encode={encode_ms:.1f}ms, size={len(jpeg_bytes)//1024}KB, fps={self.fps:.1f}")
         except Exception:
             pass
 

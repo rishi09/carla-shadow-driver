@@ -411,9 +411,11 @@ class RaceManager:
         else:
             steer_limit = 0.15
 
-        # Ramp toward target: fast attack (~150ms to full), medium release (~200ms to center)
-        steer_attack = dt * 6.5   # reaches 0.7 in ~3-4 frames
-        steer_release = dt * 5.0  # returns to 0 in ~4-6 frames
+        # Ramp toward target: very fast attack (~50ms), fast release (~100ms)
+        # Steering responsiveness is critical — network lag already adds ~50ms,
+        # so server-side ramping must be minimal to avoid compounding delay.
+        steer_attack = dt * 18.0  # reaches 0.7 in ~1-2 frames at 30fps
+        steer_release = dt * 12.0 # returns to 0 in ~2-3 frames
 
         if keys.get('a', False):
             target_steer = -steer_limit
