@@ -1,12 +1,13 @@
 import { useRef, useEffect, useState, useMemo } from 'react';
 
 interface WeatherMood {
-  mood: 'CALM' | 'BUILDING' | 'TENSE' | 'DRAMATIC' | 'EPIC';
+  mood: 'CALM' | 'BUILDING' | 'TENSE' | 'DRAMATIC' | 'EPIC' | 'FINALE' | 'NIGHT_TENSE';
   intensity: number;
   precipitation: number;
   fog_density: number;
   wind_intensity: number;
   cloudiness: number;
+  wetness?: number;
 }
 
 interface WeatherOverlayProps {
@@ -32,13 +33,17 @@ export function WeatherOverlay({ weatherMood, speedKmh }: WeatherOverlayProps) {
   const lightningTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevMoodRef = useRef<string | null>(null);
 
-  // Schedule lightning flashes during EPIC mood
+  // Schedule lightning flashes during EPIC or DRAMATIC mood
   useEffect(() => {
     const mood = weatherMood?.mood ?? 'CALM';
 
-    if (mood === 'EPIC') {
+    if (mood === 'EPIC' || mood === 'DRAMATIC') {
+      // EPIC: more frequent lightning (15-30s), DRAMATIC: less frequent (25-45s)
+      const minDelay = mood === 'EPIC' ? 15000 : 25000;
+      const maxExtra = mood === 'EPIC' ? 15000 : 20000;
+
       const scheduleFlash = () => {
-        const delay = 15000 + Math.random() * 15000; // 15-30 seconds
+        const delay = minDelay + Math.random() * maxExtra;
         lightningTimerRef.current = setTimeout(() => {
           setLightningFlash(true);
           // Flash lasts 100ms
@@ -49,7 +54,7 @@ export function WeatherOverlay({ weatherMood, speedKmh }: WeatherOverlayProps) {
       };
 
       // Start the cycle (first flash after a shorter initial delay)
-      if (prevMoodRef.current !== 'EPIC') {
+      if (prevMoodRef.current !== mood) {
         const initialDelay = 5000 + Math.random() * 10000;
         lightningTimerRef.current = setTimeout(() => {
           setLightningFlash(true);
@@ -58,7 +63,7 @@ export function WeatherOverlay({ weatherMood, speedKmh }: WeatherOverlayProps) {
         }, initialDelay);
       }
     } else {
-      // Not EPIC: cancel any pending flash
+      // Not EPIC or DRAMATIC: cancel any pending flash
       if (lightningTimerRef.current) {
         clearTimeout(lightningTimerRef.current);
         lightningTimerRef.current = null;
@@ -158,7 +163,11 @@ export function WeatherOverlay({ weatherMood, speedKmh }: WeatherOverlayProps) {
   // Don't render anything if there's no weather mood or all effects are off
   if (!weatherMood) return null;
 
-  const hasAnyEffect = rainDrops || fogStyle || lightningFlash || windParticles;
+  const mood = weatherMood.mood;
+  const isFinale = mood === 'FINALE';
+  const isNightTense = mood === 'NIGHT_TENSE';
+  const isTense = mood === 'TENSE' || mood === 'DRAMATIC' || mood === 'EPIC';
+  const hasAnyEffect = rainDrops || fogStyle || lightningFlash || windParticles || isFinale || isNightTense || isTense;
   if (!hasAnyEffect) return null;
 
   return (
@@ -237,6 +246,39 @@ export function WeatherOverlay({ weatherMood, speedKmh }: WeatherOverlayProps) {
             />
           ))}
         </div>
+      )}
+
+      {/* FINALE: golden hour warm tint overlay */}
+      {isFinale && (
+        <div
+          className="absolute inset-0 pointer-events-none z-[7]"
+          style={{
+            background: 'radial-gradient(ellipse 130% 100% at 50% 60%, transparent 30%, rgba(255,180,50,0.08) 60%, rgba(255,140,20,0.15) 100%)',
+            transition: 'opacity 3s ease-out',
+          }}
+        />
+      )}
+
+      {/* NIGHT_TENSE: dark blue vignette for night tension */}
+      {isNightTense && (
+        <div
+          className="absolute inset-0 pointer-events-none z-[7]"
+          style={{
+            background: 'radial-gradient(ellipse 110% 100% at 50% 50%, transparent 35%, rgba(20,30,60,0.12) 65%, rgba(10,15,40,0.25) 100%)',
+            transition: 'opacity 3s ease-out',
+          }}
+        />
+      )}
+
+      {/* TENSE / DRAMATIC / EPIC: blue-tinted vignette for rain mood */}
+      {isTense && (
+        <div
+          className="absolute inset-0 pointer-events-none z-[7]"
+          style={{
+            background: `radial-gradient(ellipse 120% 100% at 50% 50%, transparent 40%, rgba(40,60,100,${(weatherMood.intensity * 0.08).toFixed(3)}) 70%, rgba(20,30,60,${(weatherMood.intensity * 0.15).toFixed(3)}) 100%)`,
+            transition: 'opacity 2s ease-out',
+          }}
+        />
       )}
 
       {/* Lightning flash */}

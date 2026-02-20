@@ -11,9 +11,10 @@ vehicle:
 
 camera:
   # Chase camera (follows player, streams to browser)
+  # Rendered at 1920x1080 for quality, downscaled by encoder for streaming
   chase:
-    width: 1280
-    height: 720
+    width: 1920
+    height: 1080
     fov: 100
     x: -6.0    # Behind the car
     z: 3.0     # Above

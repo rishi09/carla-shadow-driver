@@ -387,6 +387,16 @@ class RaceManager:
                 'wind_intensity': 80.0,
                 'wetness': 100.0,
             },
+            'rain': {
+                'sun_altitude_angle': 40.0,
+                'sun_azimuth_angle': 160.0,
+                'cloudiness': 75.0,
+                'precipitation': 60.0,
+                'precipitation_deposits': 70.0,
+                'fog_density': 5.0,
+                'wind_intensity': 30.0,
+                'wetness': 80.0,
+            },
         }
 
         params = presets.get(preset)
