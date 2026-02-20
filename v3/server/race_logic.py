@@ -720,6 +720,19 @@ class RaceState:
         # Same checkpoint: compare current lap times
         return ai_time - player_time
 
+    def get_racing_line(self) -> List[Dict[str, float]]:
+        """Return the ideal racing line as a polyline of checkpoint positions.
+
+        Since we don't have trained model weights yet, the "ideal" racing line
+        is derived from the checkpoint positions. These are placed along the
+        center of the road by generate_checkpoints_from_waypoints(), so they
+        approximate the optimal path through the circuit.
+
+        Returns:
+            List of {x, y} dicts forming a closed loop.
+        """
+        return [{"x": round(cx, 1), "y": round(cy, 1)} for cx, cy, _ in self.checkpoints]
+
     def get_paths(self) -> Dict:
         """Return recorded paths for both cars."""
         return {

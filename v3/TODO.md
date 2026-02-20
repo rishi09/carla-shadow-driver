@@ -281,7 +281,7 @@ The most HackerNews-viral concept: let players train their own AI driver, then p
 ### AI-Generated Content
 - [x] **AI race commentary**: Use an LLM (Claude API or local small model) to generate live race commentary based on telemetry events. "And the player takes the inside line through turn 3! The AI is closing the gap -- only 1.2 seconds behind now!" Displayed as subtitles or spoken via Web Speech API (`window.speechSynthesis`). This is both entertaining and highly shareable (imagine a clip with AI commentary).
 
-- [ ] **AI-suggested racing line**: Before the race starts, show a visualization of the optimal racing line (computed by the AI from its learned behavior). Player can try to follow it. Post-race, overlay the player's actual line vs the AI's suggested line for comparison.
+- [x] **AI-suggested racing line**: Before the race starts, show a visualization of the optimal racing line (computed by the AI from its learned behavior). Player can try to follow it. Post-race, overlay the player's actual line vs the AI's suggested line for comparison.
 
 ---
 

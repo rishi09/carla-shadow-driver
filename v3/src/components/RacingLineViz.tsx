@@ -4,18 +4,22 @@ interface RacingLineVizProps {
   playerPath?: Array<[number, number]>;
   aiPath?: Array<[number, number]>;
   checkpoints?: Array<{ x: number; y: number }>;
+  /** Ideal racing line (checkpoint polyline) for comparison overlay */
+  racingLine?: Array<{ x: number; y: number }>;
 }
 
 const WIDTH = 400;
 const HEIGHT = 300;
 const PADDING = 32;
 
-/** Canvas-based post-race racing line visualization showing paths taken by both cars. */
-export function RacingLineViz({ playerPath, aiPath, checkpoints }: RacingLineVizProps) {
+/** Canvas-based post-race racing line visualization showing paths taken by both cars
+ *  with an optional ideal racing line overlay for comparison. */
+export function RacingLineViz({ playerPath, aiPath, checkpoints, racingLine }: RacingLineVizProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   const hasPlayerPath = playerPath && playerPath.length > 1;
   const hasAiPath = aiPath && aiPath.length > 1;
+  const hasRacingLine = racingLine && racingLine.length > 1;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -61,6 +65,9 @@ export function RacingLineViz({ playerPath, aiPath, checkpoints }: RacingLineViz
     }
     if (checkpoints) {
       for (const cp of checkpoints) allPoints.push([cp.x, cp.y]);
+    }
+    if (hasRacingLine) {
+      for (const p of racingLine) allPoints.push([p.x, p.y]);
     }
 
     if (allPoints.length < 2) {
@@ -133,6 +140,26 @@ export function RacingLineViz({ playerPath, aiPath, checkpoints }: RacingLineViz
       }
     }
 
+    // Draw ideal racing line (dashed blue-white, semi-transparent)
+    if (hasRacingLine && racingLine) {
+      ctx.setLineDash([6, 4]);
+      ctx.strokeStyle = 'rgba(147, 197, 253, 0.45)';
+      ctx.lineWidth = 2;
+      ctx.globalAlpha = 0.7;
+      ctx.beginPath();
+      const [rlx0, rly0] = toCanvas(racingLine[0].x, racingLine[0].y);
+      ctx.moveTo(rlx0, rly0);
+      for (let i = 1; i < racingLine.length; i++) {
+        const [rlx, rly] = toCanvas(racingLine[i].x, racingLine[i].y);
+        ctx.lineTo(rlx, rly);
+      }
+      // Close the loop
+      ctx.lineTo(rlx0, rly0);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 1.0;
+    }
+
     // Draw racing line helper
     function drawPath(
       path: Array<[number, number]>,
@@ -192,36 +219,53 @@ export function RacingLineViz({ playerPath, aiPath, checkpoints }: RacingLineViz
 
     // Legend (bottom)
     const legendY = HEIGHT - 10;
+    let legendX = PADDING;
+
     // Player legend
     ctx.fillStyle = '#22C55E';
     ctx.beginPath();
-    ctx.arc(PADDING, legendY, 3, 0, Math.PI * 2);
+    ctx.arc(legendX, legendY, 3, 0, Math.PI * 2);
     ctx.fill();
     ctx.strokeStyle = '#22C55E';
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(PADDING + 7, legendY);
-    ctx.lineTo(PADDING + 18, legendY);
+    ctx.moveTo(legendX + 7, legendY);
+    ctx.lineTo(legendX + 18, legendY);
     ctx.stroke();
     ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
     ctx.font = '9px monospace';
-    ctx.fillText('YOU', PADDING + 22, legendY + 3);
+    ctx.fillText('YOU', legendX + 22, legendY + 3);
+    legendX += 55;
 
     // AI legend
-    const aiLegendX = PADDING + 55;
     ctx.fillStyle = '#3B82F6';
     ctx.beginPath();
-    ctx.arc(aiLegendX, legendY, 3, 0, Math.PI * 2);
+    ctx.arc(legendX, legendY, 3, 0, Math.PI * 2);
     ctx.fill();
     ctx.strokeStyle = '#3B82F6';
     ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.moveTo(aiLegendX + 7, legendY);
-    ctx.lineTo(aiLegendX + 18, legendY);
+    ctx.moveTo(legendX + 7, legendY);
+    ctx.lineTo(legendX + 18, legendY);
     ctx.stroke();
     ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-    ctx.fillText('AI', aiLegendX + 22, legendY + 3);
-  }, [playerPath, aiPath, checkpoints, hasPlayerPath, hasAiPath]);
+    ctx.fillText('AI', legendX + 22, legendY + 3);
+    legendX += 45;
+
+    // Ideal racing line legend (only if shown)
+    if (hasRacingLine) {
+      ctx.strokeStyle = 'rgba(147, 197, 253, 0.7)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([4, 3]);
+      ctx.beginPath();
+      ctx.moveTo(legendX, legendY);
+      ctx.lineTo(legendX + 18, legendY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+      ctx.fillText('IDEAL', legendX + 22, legendY + 3);
+    }
+  }, [playerPath, aiPath, checkpoints, racingLine, hasPlayerPath, hasAiPath, hasRacingLine]);
 
   // Don't render at all if there's no path data
   if (!hasPlayerPath && !hasAiPath) {

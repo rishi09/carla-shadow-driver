@@ -835,6 +835,7 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
             <RacingLineViz
               playerPath={result.player_path}
               aiPath={result.ai_path}
+              racingLine={result.racing_line}
             />
           </div>
         )}

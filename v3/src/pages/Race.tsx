@@ -254,6 +254,16 @@ export function Race() {
   // --- GO screen shake trigger ---
   const goShakeTriggeredRef = useRef(false);
 
+  // --- Player trail for minimap racing line comparison ---
+  // Records player positions at ~10Hz (every 100ms), max 1000 entries
+  const playerTrailRef = useRef<Array<{ x: number; y: number }>>([]);
+  const lastTrailTimeRef = useRef(0);
+  const [playerTrail, setPlayerTrail] = useState<Array<{ x: number; y: number }>>([]);
+
+  // --- Racing line (checkpoint polyline, stored from first telemetry with checkpoints) ---
+  const racingLineRef = useRef<Array<{ x: number; y: number }> | null>(null);
+  const [racingLine, setRacingLine] = useState<Array<{ x: number; y: number }> | null>(null);
+
   // --- Camera countdown zoom state ---
   // During countdown: scale(0.95) translateY(-10px), on GO: scale(1.0) translateY(0)
   const isCountdown = gpu.raceState?.race_status === 'countdown';
@@ -296,6 +306,21 @@ export function Race() {
         // Record ghost frame (internally throttled to 10Hz)
         if (player.x != null && player.y != null) {
           ghostRecorder.recordFrame(player.x, player.y, player.yaw ?? 0, player.speed_kmh);
+
+          // Record player trail for minimap (throttled to ~10Hz, max 1000 entries)
+          const now = performance.now();
+          if (now - lastTrailTimeRef.current >= 100) {
+            lastTrailTimeRef.current = now;
+            playerTrailRef.current.push({ x: player.x, y: player.y });
+            // Cap at 1000 entries (remove oldest)
+            if (playerTrailRef.current.length > 1000) {
+              playerTrailRef.current = playerTrailRef.current.slice(-1000);
+            }
+            // Update state every 10th recording (~1Hz) to avoid excessive re-renders
+            if (playerTrailRef.current.length % 10 === 0) {
+              setPlayerTrail([...playerTrailRef.current]);
+            }
+          }
         }
 
         // Feed telemetry to highlight detector
@@ -417,6 +442,15 @@ export function Race() {
 
     prevRaceStatusRef.current = status;
   }, [gpu.raceState?.race_status, gpu.raceState?.countdown, engineSound.playCountdownBeeps, ghostRecorder.start, highlightDetector.start]);
+
+  // --- Capture racing line from checkpoints (once, on first telemetry) ---
+  useEffect(() => {
+    const checkpoints = gpu.raceState?.checkpoints;
+    if (checkpoints && checkpoints.length > 1 && !racingLineRef.current) {
+      racingLineRef.current = checkpoints;
+      setRacingLine(checkpoints);
+    }
+  }, [gpu.raceState?.checkpoints]);
 
   // --- Screen shake helper ---
   // dirX/dirY: optional directional bias for the initial impulse (normalized direction vector).
@@ -1184,6 +1218,9 @@ export function Race() {
       // Stop ghost recording
       ghostRecorder.stop();
 
+      // Snapshot final player trail for post-race display
+      setPlayerTrail([...playerTrailRef.current]);
+
       // Finalize highlight detection and store highlights for results screen
       highlightDetector.onRaceFinished(gpu.raceFinished);
       setRaceHighlights(highlightDetector.getHighlights());
@@ -1451,6 +1488,12 @@ export function Race() {
     splitLapRef.current = 0;
     // Reset ghost recorder for the new race
     ghostRecorder.reset();
+    // Reset player trail and racing line for the new race
+    playerTrailRef.current = [];
+    lastTrailTimeRef.current = 0;
+    setPlayerTrail([]);
+    racingLineRef.current = null;
+    setRacingLine(null);
     // Initialize AI personality for trash talk
     aiPersonality.initPersonality(model);
     // Reset cargo integrity for the new race
@@ -1975,6 +2018,9 @@ export function Race() {
               frames: challengeGhostFrames,
               startTime: challengeGhostStartRef.current,
             } : null}
+            racingLine={racingLine}
+            playerTrail={playerTrail}
+            raceFinished={view === 'results'}
           />
 
           {/* Rear-view mirror (toggle with M key) */}

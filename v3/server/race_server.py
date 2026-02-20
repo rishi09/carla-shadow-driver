@@ -25,6 +25,9 @@ from race_logic import RaceState, generate_checkpoints_from_waypoints, RaceDirec
 from weather_transitions import WeatherTransitionManager
 from weather_manager import WeatherManager
 from ai_personality import AIPersonality
+from skill_matcher import SkillMatcher
+from highlight_buffer import HighlightBuffer
+from cost_tracker import CostTracker, DEFAULT_HOURLY_RATE, DEFAULT_DAILY_ALERT_THRESHOLD
 
 
 # ---------------------------------------------------------------------------
@@ -219,11 +222,26 @@ class RaceServer:
         self.weather_event_manager: Optional[WeatherManager] = None
         self.trash_talk: Optional[TrashTalkManager] = None
         self.ai_personality: Optional[AIPersonality] = None
+        self.skill_matcher: Optional[SkillMatcher] = None
         self.pc: Optional[RTCPeerConnection] = None
         self.video_track: Optional[CarlaVideoTrack] = None
 
         # Auto-shutdown manager (shared across all client connections)
         self.shutdown_manager = AutoShutdownManager()
+
+        # --- Highlight ring buffer (stores last 5s of frames for replay) ---
+        self.highlight_buffer = HighlightBuffer()
+
+        # --- Instance cost tracker ---
+        cost_rate = float(os.environ.get('GPU_HOURLY_RATE', str(DEFAULT_HOURLY_RATE)))
+        cost_threshold = float(os.environ.get('GPU_DAILY_BUDGET', str(DEFAULT_DAILY_ALERT_THRESHOLD)))
+        self.cost_tracker = CostTracker(
+            hourly_rate=cost_rate,
+            daily_threshold=cost_threshold,
+        )
+
+        # --- Previous gap tracking for overtake detection in highlights ---
+        self._prev_gap_seconds: Optional[float] = None
 
         # --- Frame skip state (stationary camera optimization) ---
         self._last_sent_x: Optional[float] = None
@@ -530,6 +548,7 @@ class RaceServer:
         self.weather_event_manager = None
         self.trash_talk = None
         self.ai_personality = None
+        self.skill_matcher = None
         self.difficulty = 'easy'
         self.frame_count = 0
         self.fps = 0.0
@@ -555,6 +574,11 @@ class RaceServer:
             self.pc = None
             self.video_track = None
             print("WebRTC peer connection closed")
+
+        # Log session cost and reset highlight buffer
+        self.cost_tracker.log_session_cost("race reset")
+        self.highlight_buffer.reset()
+        self._prev_gap_seconds = None
 
         print("Race reset (actors preserved for reconnect)")
 
@@ -633,11 +657,18 @@ class RaceServer:
         self.weather_mood = WeatherMoodManager(total_laps=old_laps)
         self.trash_talk = TrashTalkManager()
         self.ai_personality = AIPersonality()
+        self.skill_matcher = SkillMatcher(difficulty=self.difficulty)
 
         # Re-create event-driven weather manager
         if self.carla.world:
             self.weather_event_manager = WeatherManager(self.carla.world, is_night=False)
             self.weather_event_manager.set_target_mood('CALM', transition_time=5.0)
+
+        # Reset highlight buffer and start new cost session
+        self.highlight_buffer.reset()
+        self._prev_gap_seconds = None
+        self.cost_tracker.log_session_cost("restart")
+        self.cost_tracker.start_session()
 
         self.running = True
 
@@ -790,11 +821,17 @@ class RaceServer:
         self.weather_mood = WeatherMoodManager(total_laps=laps)
         self.trash_talk = TrashTalkManager()
         self.ai_personality = AIPersonality()
+        self.skill_matcher = SkillMatcher(difficulty=self.difficulty)
 
         # Event-driven weather manager: smooth lerp transitions based on race events
         is_night = time_of_day == 'night' or weather == 'night'
         self.weather_event_manager = WeatherManager(self.carla.world, is_night=is_night)
         self.weather_event_manager.set_target_mood('CALM', transition_time=5.0)
+
+        # Start cost tracking and reset highlight buffer for new race
+        self.cost_tracker.start_session()
+        self.highlight_buffer.reset()
+        self._prev_gap_seconds = None
 
         # Run the frame loop (30fps) and telemetry loop (30Hz) concurrently
         self._race_task = asyncio.create_task(self._race_loop())
@@ -889,6 +926,33 @@ class RaceServer:
                     if player_telem:
                         self.encoder.update_speed_resolution(player_telem['speed_kmh'])
 
+                    # 4b2. Skill Matcher: feed player telemetry for adaptive AI
+                    if self.skill_matcher and player_telem:
+                        self.skill_matcher.record_speed(player_telem['speed_kmh'])
+
+                        # Detect new checkpoint hits by comparing with previous count
+                        prev_cp = getattr(self, '_prev_player_checkpoint', 0)
+                        curr_cp = self.race_state.player_checkpoint
+                        if curr_cp > prev_cp:
+                            self.skill_matcher.record_checkpoint(curr_cp)
+                        self._prev_player_checkpoint = curr_cp
+
+                        # Detect new lap completions
+                        prev_lap_count = getattr(self, '_prev_player_lap_count', 0)
+                        curr_lap_count = len(self.race_state.player_lap_times)
+                        if curr_lap_count > prev_lap_count:
+                            self.skill_matcher.record_lap_time(
+                                self.race_state.player_lap_times[-1]
+                            )
+                        self._prev_player_lap_count = curr_lap_count
+
+                        # Update skill score (internally throttled to every 30s)
+                        if self.skill_matcher.update():
+                            # Apply skill-based speed adjustment to AI traffic manager
+                            if self.carla._ai_autopilot:
+                                skill_speed_adj = self.skill_matcher.get_speed_adjustment()
+                                self.carla.adjust_ai_speed(skill_speed_adj)
+
                     # 4c. AI Personality: update emotional state based on race conditions
                     if self.ai_personality and self.race_state:
                         personality_progress = 0.0
@@ -968,6 +1032,10 @@ class RaceServer:
                         if drift_event['score'] > 200:
                             self.race_manager.activate_drift_boost(drift_event['score'])
 
+                        # 6d. Feed drift score to skill matcher for adaptive AI
+                        if self.skill_matcher:
+                            self.skill_matcher.record_drift_score(drift_event['score'])
+
                     # 7. Race commentary: contextual messages
                     commentary = self.race_state.get_commentary(drift_event=drift_event)
                     if commentary and self.ws_client:
@@ -1038,6 +1106,12 @@ class RaceServer:
                         )
                         self.weather_event_manager.update(1.0 / 30.0)
 
+                    # 8c. Highlight detection: capture ring buffer on highlight events
+                    self._check_highlight_events(player_telem, ai_telem, drift_event)
+
+                    # 8d. Cost tracker periodic update
+                    self.cost_tracker.update()
+
                     # 9. Send chase camera frame to browser
                     await self._send_frame()
 
@@ -1077,6 +1151,11 @@ class RaceServer:
                     await self._send_frame()
 
                 elif self.race_state.status == "finished":
+                    # Capture finish as a highlight
+                    self.highlight_buffer.capture_highlight('finish', metadata={
+                        'winner': self.race_state.winner,
+                    })
+
                     # Send AI trash talk for race finish (before race_finished message)
                     if self.trash_talk and self.ws_client:
                         trash_msg = self.trash_talk.check_events(self.race_state)
@@ -1090,6 +1169,7 @@ class RaceServer:
                     if self.ws_client:
                         paths = self.race_state.get_paths()
                         stats = self.race_state.get_stats()
+                        racing_line = self.race_state.get_racing_line()
                         await self.ws_client.send(json.dumps({
                             'type': 'race_finished',
                             'winner': self.race_state.winner,
@@ -1099,6 +1179,7 @@ class RaceServer:
                             'ai_laps': self.race_state.ai_lap_times,
                             'player_path': paths['player'],
                             'ai_path': paths['ai'],
+                            'racing_line': racing_line,
                             'player_max_speed': stats['player_max_speed'],
                             'ai_max_speed': stats['ai_max_speed'],
                             'player_distance': stats['player_distance'],
@@ -1107,6 +1188,8 @@ class RaceServer:
                             'total_drift_score': stats.get('total_drift_score', 0),
                             'best_single_drift': stats.get('best_single_drift', 0),
                             'drift_count': stats.get('drift_count', 0),
+                            'highlights': self.highlight_buffer.get_highlights(),
+                            'session_cost': self.cost_tracker.get_cost_summary(),
                         }))
 
                     # Report race completion for social presence feed
@@ -1124,6 +1207,9 @@ class RaceServer:
                         gap=gap,
                         difficulty=difficulty_label,
                     )
+
+                    # Log session cost at race end
+                    self.cost_tracker.log_session_cost("race finished")
 
                     self.running = False
                     break
@@ -1284,6 +1370,9 @@ class RaceServer:
             await self.ws_client.send(b'\x00' + jpeg_bytes)
             self.frame_count += 1
 
+            # Push frame to highlight ring buffer for replay capture
+            self.highlight_buffer.push_frame(jpeg_bytes)
+
             # Update frame skip tracking with current position
             if self.carla.player_car:
                 try:
@@ -1355,6 +1444,69 @@ class RaceServer:
         except Exception:
             pass
 
+    def _check_highlight_events(self, player_telem, ai_telem, drift_event):
+        """Check for highlight-worthy events and snapshot the ring buffer.
+
+        Detects:
+          - Overtakes: gap sign changes (player passes AI or vice versa)
+          - Collisions: significant impact from collision sensor
+          - Drifts: drift score exceeding 500 points
+          - Near-misses: cars within 2m at combined speed > 100 km/h
+
+        Args:
+            player_telem: Player telemetry dict (may be None).
+            ai_telem: AI telemetry dict (may be None).
+            drift_event: Drift event dict from race_state.update_drift() (may be None).
+        """
+        if not self.race_state or self.race_state.status != "racing":
+            return
+
+        # --- Overtake detection ---
+        gap = self.race_state.get_gap_seconds()
+        if gap is not None and self._prev_gap_seconds is not None:
+            # Gap sign change = overtake (positive = player ahead, negative = AI ahead)
+            if (self._prev_gap_seconds > 0.5 and gap < -0.1) or \
+               (self._prev_gap_seconds < -0.5 and gap > 0.1):
+                overtaker = 'player' if gap > 0 else 'ai'
+                self.highlight_buffer.capture_highlight('overtake', metadata={
+                    'overtaker': overtaker,
+                    'gap': round(abs(gap), 2),
+                })
+        self._prev_gap_seconds = gap
+
+        # --- Collision detection ---
+        collisions = self.carla.get_recent_collisions()
+        if collisions:
+            max_intensity = max(c['intensity'] for c in collisions)
+            if max_intensity > 500:  # Only capture significant collisions
+                self.highlight_buffer.capture_highlight('collision', metadata={
+                    'intensity': round(max_intensity, 0),
+                })
+            # Re-report collisions since we consumed them
+            for c in collisions:
+                self.race_state.report_player_collision()
+
+        # --- Drift detection (score > 500) ---
+        if drift_event and drift_event.get('event') == 'drift_end':
+            score = drift_event.get('score', 0)
+            if score > 500:
+                self.highlight_buffer.capture_highlight('drift', metadata={
+                    'score': round(score, 0),
+                    'combo': drift_event.get('combo', 1),
+                })
+
+        # --- Near-miss detection (cars within 2m at speed) ---
+        if player_telem and ai_telem:
+            dx = player_telem['x'] - ai_telem['x']
+            dy = player_telem['y'] - ai_telem['y']
+            distance = (dx * dx + dy * dy) ** 0.5
+            combined_speed = player_telem['speed_kmh'] + ai_telem['speed_kmh']
+            if distance < 2.0 and combined_speed > 100.0:
+                self.highlight_buffer.capture_highlight('near_miss', metadata={
+                    'distance': round(distance, 2),
+                    'combined_speed': round(combined_speed, 1),
+                })
+
     async def _telemetry_loop(self):
         """Send race telemetry JSON at ~30Hz, independent of the 30fps frame loop.
 
@@ -1408,6 +1560,9 @@ class RaceServer:
             # Track collision count in race stats
             for _ in recent_collisions:
                 self.race_state.report_player_collision()
+                # Feed collisions to skill matcher for adaptive AI
+                if self.skill_matcher:
+                    self.skill_matcher.record_collision()
 
         # Fill in telemetry from both vehicles
         if player_telem:

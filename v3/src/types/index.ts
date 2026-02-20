@@ -115,6 +115,8 @@ export interface RaceFinished {
   ai_laps: number[];
   player_path?: Array<[number, number]>;
   ai_path?: Array<[number, number]>;
+  /** Ideal racing line (checkpoint polyline) for post-race comparison */
+  racing_line?: Array<{ x: number; y: number }>;
   player_max_speed?: number;
   ai_max_speed?: number;
   player_distance?: number;

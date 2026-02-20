@@ -13,6 +13,12 @@ interface MinimapProps {
   raceState: RaceState | null;
   /** Optional challenge ghost from a shared URL */
   challengeGhost?: ChallengeGhostData | null;
+  /** Ideal racing line from checkpoint positions (shown during countdown + first lap) */
+  racingLine?: Array<{ x: number; y: number }> | null;
+  /** Recent player positions trail (green breadcrumb line) */
+  playerTrail?: Array<{ x: number; y: number }> | null;
+  /** Whether the race has finished (show trails in post-race mode) */
+  raceFinished?: boolean;
 }
 
 const MAP_SIZE = 200;
@@ -20,7 +26,7 @@ const PADDING = 16;
 const DRAW_AREA = MAP_SIZE - PADDING * 2;
 
 /** Canvas-based minimap showing car positions on the track. */
-export function Minimap({ raceState, challengeGhost }: MinimapProps) {
+export function Minimap({ raceState, challengeGhost, racingLine, playerTrail, raceFinished }: MinimapProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [pulsePhase, setPulsePhase] = useState(0);
 
@@ -71,6 +77,18 @@ export function Minimap({ raceState, challengeGhost }: MinimapProps) {
     if (challengeGhostPos) {
       points.push({ x: challengeGhostPos.x, y: challengeGhostPos.y });
     }
+    // Include racing line points in bounds
+    if (racingLine) {
+      for (const p of racingLine) {
+        points.push(p);
+      }
+    }
+    // Include player trail points in bounds
+    if (playerTrail) {
+      for (const p of playerTrail) {
+        points.push(p);
+      }
+    }
 
     if (points.length === 0) return null;
 
@@ -94,7 +112,7 @@ export function Minimap({ raceState, challengeGhost }: MinimapProps) {
       minY: minY - margin,
       maxY: maxY + margin,
     };
-  }, [raceState?.checkpoints, raceState?.player.x, raceState?.player.y, raceState?.ai.x, raceState?.ai.y, raceState?.ghost?.x, raceState?.ghost?.y, challengeGhostPos?.x, challengeGhostPos?.y]);
+  }, [raceState?.checkpoints, raceState?.player.x, raceState?.player.y, raceState?.ai.x, raceState?.ai.y, raceState?.ghost?.x, raceState?.ghost?.y, challengeGhostPos?.x, challengeGhostPos?.y, racingLine, playerTrail]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -234,6 +252,47 @@ export function Minimap({ raceState, challengeGhost }: MinimapProps) {
       ctx.shadowBlur = 0;
     }
 
+    // Determine if we should show the racing line:
+    // Show during countdown, first lap (lap === 1), or post-race
+    const playerLap = raceState.player.lap ?? 1;
+    const showRacingLine = racingLine && racingLine.length > 1 && (
+      raceState.race_status === 'countdown' ||
+      playerLap <= 1 ||
+      raceFinished
+    );
+
+    // Draw AI-suggested racing line (dashed blue-white, semi-transparent)
+    if (showRacingLine && racingLine) {
+      ctx.setLineDash([4, 3]);
+      ctx.strokeStyle = 'rgba(147, 197, 253, 0.5)'; // light blue-white
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      const [rlx0, rly0] = toCanvas(racingLine[0].x, racingLine[0].y);
+      ctx.moveTo(rlx0, rly0);
+      for (let i = 1; i < racingLine.length; i++) {
+        const [rlx, rly] = toCanvas(racingLine[i].x, racingLine[i].y);
+        ctx.lineTo(rlx, rly);
+      }
+      // Close the loop back to start
+      ctx.lineTo(rlx0, rly0);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // Draw player trail (thin green breadcrumb line showing recent positions)
+    if (playerTrail && playerTrail.length > 1) {
+      ctx.strokeStyle = 'rgba(34, 197, 94, 0.4)'; // green, semi-transparent
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      const [ptx0, pty0] = toCanvas(playerTrail[0].x, playerTrail[0].y);
+      ctx.moveTo(ptx0, pty0);
+      for (let i = 1; i < playerTrail.length; i++) {
+        const [ptx, pty] = toCanvas(playerTrail[i].x, playerTrail[i].y);
+        ctx.lineTo(ptx, pty);
+      }
+      ctx.stroke();
+    }
+
     // Draw AI car (blue, drawn first so player appears on top)
     if (raceState.ai.x != null && raceState.ai.y != null) {
       const [ax, ay] = toCanvas(raceState.ai.x, raceState.ai.y);
@@ -347,7 +406,7 @@ export function Minimap({ raceState, challengeGhost }: MinimapProps) {
       ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
       ctx.fillText('FRIEND', challengeLegendX + 6, legendY + 3);
     }
-  }, [raceState, bounds, pulsePhase, challengeGhostPos]);
+  }, [raceState, bounds, pulsePhase, challengeGhostPos, racingLine, playerTrail, raceFinished]);
 
   return (
     <canvas
