@@ -12,10 +12,13 @@
  * Speed-dependent: mirrors the server's steer limits so the visual
  * prediction matches the actual steering authority at each speed range.
  * At low speed (more lock), the rotation is larger; at high speed (less
- * lock), it's barely perceptible — matching driver expectations.
+ * lock), it's barely perceptible -- matching driver expectations.
  *
  * The effect is intentionally subtle: just enough to give instant visual
  * feedback without causing a jarring snap when the real server frame arrives.
+ *
+ * Optimized: only triggers React re-renders when the computed transform
+ * string actually changes, avoiding unnecessary setState at 60fps.
  */
 import { useRef, useEffect, useCallback, useState } from 'react';
 import type { KeyState } from '../types/index.ts';
@@ -90,6 +93,8 @@ export function useSteeringPrediction(
 
   // The transform string exposed to React
   const [transform, setTransform] = useState('none');
+  // Track last emitted transform to avoid redundant setState
+  const lastTransformRef = useRef('none');
 
   // Build the CSS transform string from current interpolated values
   const buildTransform = useCallback((yaw: number, pitch: number, speed: number): string => {
@@ -116,7 +121,10 @@ export function useSteeringPrediction(
       // Reset when disabled
       currentYawRef.current = 0;
       currentPitchRef.current = 0;
-      setTransform('none');
+      if (lastTransformRef.current !== 'none') {
+        lastTransformRef.current = 'none';
+        setTransform('none');
+      }
       return;
     }
 
@@ -159,8 +167,12 @@ export function useSteeringPrediction(
         currentPitchRef.current = targetPitch;
       }
 
-      // --- Update CSS transform (reading speed from ref to avoid effect deps) ---
-      setTransform(buildTransform(currentYawRef.current, currentPitchRef.current, speedRef.current));
+      // --- Update CSS transform only if it changed ---
+      const newTransform = buildTransform(currentYawRef.current, currentPitchRef.current, speedRef.current);
+      if (newTransform !== lastTransformRef.current) {
+        lastTransformRef.current = newTransform;
+        setTransform(newTransform);
+      }
 
       rafRef.current = requestAnimationFrame(tick);
     };

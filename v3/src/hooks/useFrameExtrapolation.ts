@@ -12,6 +12,9 @@
  *
  * The effect is intentionally very subtle (max +/-5px) to avoid any
  * jarring corrections when the real frame arrives.
+ *
+ * Optimized: only triggers React re-renders when the transform string
+ * actually changes, avoiding unnecessary setState calls at 60fps.
  */
 import { useRef, useEffect, useCallback, useState } from 'react';
 
@@ -93,6 +96,8 @@ export function useFrameExtrapolation(
 
   // The transform string exposed to React
   const [transform, setTransform] = useState<string>('none');
+  // Track last emitted transform to avoid redundant setState
+  const lastTransformRef = useRef<string>('none');
 
   // Detect new frame arrival and begin reset interpolation
   useEffect(() => {
@@ -117,12 +122,20 @@ export function useFrameExtrapolation(
     return `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
   }, []);
 
+  // Only update React state if the transform string actually changed
+  const updateTransform = useCallback((newTransform: string) => {
+    if (newTransform !== lastTransformRef.current) {
+      lastTransformRef.current = newTransform;
+      setTransform(newTransform);
+    }
+  }, []);
+
   useEffect(() => {
     if (!enabled) {
       currentXRef.current = 0;
       currentYRef.current = 0;
       resetStartRef.current = null;
-      setTransform('none');
+      updateTransform('none');
       return;
     }
 
@@ -142,7 +155,7 @@ export function useFrameExtrapolation(
           const t = resetElapsed / RESET_DURATION_MS;
           currentXRef.current = resetFromXRef.current * (1 - t);
           currentYRef.current = resetFromYRef.current * (1 - t);
-          setTransform(buildTransform(currentXRef.current, currentYRef.current));
+          updateTransform(buildTransform(currentXRef.current, currentYRef.current));
           rafRef.current = requestAnimationFrame(tick);
           return;
         }
@@ -157,7 +170,7 @@ export function useFrameExtrapolation(
         if (currentXRef.current !== 0 || currentYRef.current !== 0) {
           currentXRef.current = 0;
           currentYRef.current = 0;
-          setTransform('none');
+          updateTransform('none');
         }
         rafRef.current = requestAnimationFrame(tick);
         return;
@@ -171,7 +184,7 @@ export function useFrameExtrapolation(
         if (currentXRef.current !== 0 || currentYRef.current !== 0) {
           currentXRef.current = 0;
           currentYRef.current = 0;
-          setTransform('none');
+          updateTransform('none');
         }
         rafRef.current = requestAnimationFrame(tick);
         return;
@@ -195,7 +208,7 @@ export function useFrameExtrapolation(
       currentXRef.current = clampedX;
       currentYRef.current = clampedY;
 
-      setTransform(buildTransform(clampedX, clampedY));
+      updateTransform(buildTransform(clampedX, clampedY));
       rafRef.current = requestAnimationFrame(tick);
     };
 
@@ -204,7 +217,7 @@ export function useFrameExtrapolation(
     return () => {
       cancelAnimationFrame(rafRef.current);
     };
-  }, [enabled, buildTransform]);
+  }, [enabled, buildTransform, updateTransform]);
 
   return { transform };
 }

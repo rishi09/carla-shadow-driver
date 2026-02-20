@@ -5,7 +5,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type {
   GPUProvisioningState, WebSocketConnectionState, GPUInstanceData,
-  GPUError, KeyState, RaceState, RaceFinished, ServerMessage, DriftEndEvent,
+  GPUError, KeyState, GamepadControls, RaceState, RaceFinished, ServerMessage, DriftEndEvent, AIChatMessage,
 } from '../types/index.ts';
 
 // Constants
@@ -40,21 +40,27 @@ export interface UseGPUConnectionReturn {
   cameraMode: string;
   commentary: CommentaryMessage[];
   latestDriftEnd: DriftEndEvent | null;
+  aiChat: AIChatMessage | null;
   retryCount: number;
   maxRetries: number;
   startGPU: () => Promise<void>;
   stopGPU: () => Promise<void>;
-  sendControls: (keys: KeyState) => void;
+  sendControls: (keys: KeyState, gamepad?: GamepadControls) => void;
   sendStartRace: (track: string, laps: number, weather: string, model?: string, playerCar?: string, timeOfDay?: string) => void;
   sendSwitchModel: (model: string) => void;
   sendRespawn: () => void;
+  sendRestartRace: () => void;
   sendCameraMode: (mode: string) => void;
+  sendPause: () => void;
+  sendResume: () => void;
   connectDirect: (wsUrl: string) => void;
   clearError: () => void;
   isConnected: boolean;
   isProvisioningActive: boolean;
   // Expose frame handler registration for VideoCanvas
   onBinaryFrame: (handler: ((data: Blob) => void) | null) => void;
+  // Expose rear-view mirror frame handler registration
+  onRearFrame: (handler: ((data: Blob) => void) | null) => void;
   // WebRTC remote video stream (null until track arrives)
   remoteStream: MediaStream | null;
   // Timestamp (performance.now()) of the last received binary/video frame
@@ -79,6 +85,7 @@ export function useGPUConnection(): UseGPUConnectionReturn {
   const [cameraMode, setCameraMode] = useState<string>('chase');
   const [commentary, setCommentary] = useState<CommentaryMessage[]>([]);
   const [latestDriftEnd, setLatestDriftEnd] = useState<DriftEndEvent | null>(null);
+  const [aiChat, setAiChat] = useState<AIChatMessage | null>(null);
   const [lastFrameTime, setLastFrameTime] = useState<number>(0);
   const commentaryIdRef = useRef(0);
 
@@ -95,6 +102,7 @@ export function useGPUConnection(): UseGPUConnectionReturn {
   const tunnelUrlRef = useRef<string | null>(null);
   const retryCountRef = useRef(0);
   const binaryFrameHandlerRef = useRef<((data: Blob) => void) | null>(null);
+  const rearFrameHandlerRef = useRef<((data: Blob) => void) | null>(null);
 
   // Refs to avoid stale closures
   const stopGPUInternalRef = useRef<() => Promise<void>>(() => Promise.resolve());
@@ -162,11 +170,26 @@ export function useGPUConnection(): UseGPUConnectionReturn {
       ws.onmessage = async (event) => {
         if (!isMountedRef.current) return;
 
-        // Binary = JPEG frame
+        // Binary = typed camera frame (1-byte prefix + JPEG data)
+        // 0x00 = main camera, 0x01 = rear-view mirror
         if (event.data instanceof Blob) {
-          setLastFrameTime(performance.now());
-          if (binaryFrameHandlerRef.current) {
-            binaryFrameHandlerRef.current(event.data);
+          const blob = event.data as Blob;
+          // Read the first byte to determine frame type
+          const typeByte = await blob.slice(0, 1).arrayBuffer();
+          const frameType = new Uint8Array(typeByte)[0];
+          const jpegBlob = blob.slice(1);
+
+          if (frameType === 0x01) {
+            // Rear-view mirror frame
+            if (rearFrameHandlerRef.current) {
+              rearFrameHandlerRef.current(jpegBlob);
+            }
+          } else {
+            // Main camera frame (0x00 or legacy untyped)
+            setLastFrameTime(performance.now());
+            if (binaryFrameHandlerRef.current) {
+              binaryFrameHandlerRef.current(jpegBlob);
+            }
           }
           return;
         }
@@ -285,15 +308,19 @@ export function useGPUConnection(): UseGPUConnectionReturn {
           } else if (data.type === 'camera_mode_changed') {
             const camMsg = data as { mode: string };
             setCameraMode(camMsg.mode);
+          } else if (data.type === 'restart_ack') {
+            // Race restarted — clear finished state so we stay in racing view
+            setRaceFinished(null);
           } else if (data.type === 'no_change') {
             // Server says frame is unchanged -- keep displaying the last frame.
             // No action needed; the VideoCanvas retains the last rendered frame.
           } else if (data.type === 'perf_stats') {
             // Server performance stats for debug overlay
-            console.log(`[perf_stats] encode=${(data as any).avg_encode_ms}ms, ` +
-              `size=${(data as any).avg_frame_size_kb}KB, ` +
-              `q=${(data as any).quality}, res=${(data as any).resolution}, ` +
-              `fps=${(data as any).fps}`);
+            const perf = data as import('../types/index.ts').PerfStats;
+            console.log(`[perf_stats] encode=${perf.avg_encode_ms}ms, ` +
+              `size=${perf.avg_frame_size_kb}KB, ` +
+              `q=${perf.quality}, res=${perf.resolution}, ` +
+              `fps=${perf.fps}`);
           } else if (data.type === 'commentary') {
             const msg = data as { text: string; category: string };
             const id = ++commentaryIdRef.current;
@@ -306,8 +333,24 @@ export function useGPUConnection(): UseGPUConnectionReturn {
             }, 4000);
           } else if (data.type === 'drift_end') {
             setLatestDriftEnd(data as DriftEndEvent);
+          } else if (data.type === 'ai_chat') {
+            const chatMsg = data as AIChatMessage;
+            setAiChat(chatMsg);
+            // Auto-clear after 4 seconds so the bubble disappears
+            setTimeout(() => {
+              if (isMountedRef.current) {
+                setAiChat(prev => prev === chatMsg ? null : prev);
+              }
+            }, 4000);
           } else if (data.type === 'error') {
             setError({ message: (data as { message: string }).message, code: 'SERVER_ERROR' });
+          } else if (data.type === 'server_shutdown') {
+            const msg = data as { message: string };
+            console.warn('[v3] Server shutting down:', msg.message);
+            setError({ message: msg.message || 'Server shut down due to inactivity', code: 'SERVER_SHUTDOWN' });
+            closeWebSocket();
+          } else if (data.type === 'respawn_ack') {
+            // Server acknowledged respawn request — no UI action needed
           }
         } catch (e) {
           console.error('[v3] Error parsing message:', e);
@@ -474,11 +517,20 @@ export function useGPUConnection(): UseGPUConnectionReturn {
   const stopGPU = useCallback(async () => { await stopGPUInternal(); }, [stopGPUInternal]);
 
   // --- Game communication ---
-  const sendControls = useCallback((keys: KeyState) => {
+  const sendControls = useCallback((keys: KeyState, gamepad?: GamepadControls) => {
     if (wsRef.current?.readyState !== WebSocket.OPEN) return;
     const msg: Record<string, unknown> = { type: 'control', keys };
     if (latencyMsRef.current !== null) {
       msg.latency = latencyMsRef.current;
+    }
+    // Include analog gamepad controls when a gamepad is active
+    if (gamepad) {
+      msg.analog = {
+        steer: gamepad.steer,
+        throttle: gamepad.throttle,
+        brake: gamepad.brake,
+        handbrake: gamepad.handbrake,
+      };
     }
     wsRef.current.send(JSON.stringify(msg));
   }, []);
@@ -508,13 +560,32 @@ export function useGPUConnection(): UseGPUConnectionReturn {
     wsRef.current.send(JSON.stringify({ type: 'respawn' }));
   }, []);
 
+  const sendRestartRace = useCallback(() => {
+    if (wsRef.current?.readyState !== WebSocket.OPEN) return;
+    wsRef.current.send(JSON.stringify({ type: 'restart_race' }));
+  }, []);
+
   const sendCameraMode = useCallback((mode: string) => {
     if (wsRef.current?.readyState !== WebSocket.OPEN) return;
     wsRef.current.send(JSON.stringify({ type: 'camera_mode', mode }));
   }, []);
 
+  const sendPause = useCallback(() => {
+    if (wsRef.current?.readyState !== WebSocket.OPEN) return;
+    wsRef.current.send(JSON.stringify({ type: 'pause' }));
+  }, []);
+
+  const sendResume = useCallback(() => {
+    if (wsRef.current?.readyState !== WebSocket.OPEN) return;
+    wsRef.current.send(JSON.stringify({ type: 'resume' }));
+  }, []);
+
   const onBinaryFrame = useCallback((handler: ((data: Blob) => void) | null) => {
     binaryFrameHandlerRef.current = handler;
+  }, []);
+
+  const onRearFrame = useCallback((handler: ((data: Blob) => void) | null) => {
+    rearFrameHandlerRef.current = handler;
   }, []);
 
   const connectDirect = useCallback((wsUrl: string) => {
@@ -535,10 +606,10 @@ export function useGPUConnection(): UseGPUConnectionReturn {
 
   return {
     provisioningState, connectionState, instanceData, error,
-    raceState, raceFinished, availableModels, activeModel, latencyMs, cameraMode, commentary, latestDriftEnd,
+    raceState, raceFinished, availableModels, activeModel, latencyMs, cameraMode, commentary, latestDriftEnd, aiChat,
     retryCount, maxRetries: MAX_RETRIES, lastFrameTime,
-    startGPU, stopGPU, sendControls, sendStartRace, sendSwitchModel, sendRespawn, sendCameraMode,
-    connectDirect, clearError, onBinaryFrame, remoteStream,
+    startGPU, stopGPU, sendControls, sendStartRace, sendSwitchModel, sendRespawn, sendRestartRace, sendCameraMode, sendPause, sendResume,
+    connectDirect, clearError, onBinaryFrame, onRearFrame, remoteStream,
     isConnected: connectionState === 'connected',
     isProvisioningActive: provisioningState === 'starting' || provisioningState === 'running',
   };

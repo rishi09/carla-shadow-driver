@@ -5,6 +5,10 @@
  *
  * The interpolation interval is auto-detected from the actual time between
  * value updates, so it adapts to any server rate (30Hz, 60Hz, etc.).
+ *
+ * Optimized: only triggers React re-renders when the interpolated value
+ * changes by more than a small epsilon, avoiding unnecessary renders when
+ * the value has stabilized.
  */
 import { useState, useEffect, useRef } from 'react';
 
@@ -18,6 +22,9 @@ const DEFAULT_INTERVAL = 1000 / 30;
 /** Smoothing factor for the interval estimate (EMA) to avoid jitter */
 const INTERVAL_SMOOTHING = 0.3;
 
+/** Minimum change in value to trigger a React state update */
+const EPSILON = 0.01;
+
 export function useInterpolatedState(serverValue: number): number {
   const [interpolated, setInterpolated] = useState(serverValue);
 
@@ -27,6 +34,7 @@ export function useInterpolatedState(serverValue: number): number {
   const estimatedIntervalRef = useRef(DEFAULT_INTERVAL);
   const hasSecondUpdateRef = useRef(false);
   const rafRef = useRef<number | null>(null);
+  const lastRenderedRef = useRef(serverValue);
 
   // When the server value changes, shift current -> prev and record timestamp
   useEffect(() => {
@@ -59,7 +67,13 @@ export function useInterpolatedState(serverValue: number): number {
       const elapsed = performance.now() - lastUpdateTimeRef.current;
       const t = Math.min(1, elapsed / estimatedIntervalRef.current);
       const value = lerp(prevValueRef.current, currentValueRef.current, t);
-      setInterpolated(value);
+
+      // Only trigger a React re-render if the value changed meaningfully
+      if (Math.abs(value - lastRenderedRef.current) > EPSILON) {
+        lastRenderedRef.current = value;
+        setInterpolated(value);
+      }
+
       rafRef.current = requestAnimationFrame(tick);
     }
 
