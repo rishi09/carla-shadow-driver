@@ -1,18 +1,8 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import type { RaceFinished } from '../types/index.ts';
 import type { PersonalBestResult } from '../hooks/usePersonalBests.ts';
-import type { GhostFrame } from '../hooks/useGhostRecorder.ts';
-import { encodeGhostForUrl } from '../utils/ghostUrl.ts';
-import { createChallengeUrl, formatChallengeTime } from '../utils/challengeUrl.ts';
-import type { ChallengeData } from '../utils/challengeUrl.ts';
 import { RacingLineViz } from './RacingLineViz.tsx';
 import { RaceResultCard } from './RaceResultCard.tsx';
-import { HighlightReel } from './HighlightReel.tsx';
-import type { Highlight } from '../hooks/useHighlightDetector.ts';
-import { useCloudLeaderboard } from '../hooks/useCloudLeaderboard.ts';
-import type { CloudSubmitResult, CloudLeaderboardEntry } from '../hooks/useCloudLeaderboard.ts';
-import { CloudLeaderboard } from './CloudLeaderboard.tsx';
-import type { TournamentBadge } from '../hooks/useTournaments.ts';
 import { CoachingTips } from './CoachingTips.tsx';
 
 interface RaceResultsProps {
@@ -32,50 +22,9 @@ interface RaceResultsProps {
   onInstantReplay?: () => void;
   /** Personal best result info */
   personalBestResult?: PersonalBestResult | null;
-  /** Whether this was a daily challenge race */
-  isDailyChallenge?: boolean;
-  /** Daily challenge leaderboard position */
-  dailyChallengePosition?: { position: number; total: number; isNewBest: boolean } | null;
   /** Streak info after recording the race */
   streakResult?: { newStreak: number; isNewRecord: boolean } | null;
-  /** Ghost frames recorded during this race (for Challenge a Friend) */
-  ghostFrames?: GhostFrame[];
-  /** Dare challenge: time to beat (from ?dare=X query param), null if not a dare */
-  dareTime?: number | null;
-  /** Bet-Your-Laptime challenge data (from ?challenge= URL param) */
-  challengeData?: ChallengeData | null;
-  /** Cargo mode: final integrity percentage (0-100), undefined if not in cargo mode */
-  cargoIntegrity?: number;
-  /** Cargo mode: combined score (lower is better), undefined if not in cargo mode */
-  cargoScore?: number;
-  /** Blindfold mode: total seconds spent blind, undefined if not in blindfold mode */
-  blindfoldTotalTime?: number;
-  /** Tab penalty: number of tab switches and total time away, undefined if no switches */
-  tabPenalty?: { switchCount: number; totalSecondsAway: number };
-  /** Detected highlights from the race */
-  highlights?: Highlight[];
-  /** Whether this is a demo session (skip cloud leaderboard) */
-  isDemo?: boolean;
-  /** Called when user wants to race against a ghost from the leaderboard */
-  onRaceGhost?: (ghostId: string, entry: CloudLeaderboardEntry) => void;
-  /** Tournament progress info (if this race was part of a tournament) */
-  tournamentProgress?: {
-    tournamentName: string;
-    tournamentIcon: string;
-    tracksCompleted: number;
-    totalTracks: number;
-    badge: TournamentBadge;
-    nextTrack: string | null;
-  } | null;
-  /** Navigate to next tournament track */
-  onNextTournamentTrack?: () => void;
 }
-
-const MEDAL_ICONS: Record<string, string> = {
-  gold: '\uD83E\uDD47',
-  silver: '\uD83E\uDD48',
-  bronze: '\uD83E\uDD49',
-};
 
 /** Max number of historical times to keep per track/lap combo */
 const MAX_HISTORY = 5;
@@ -127,7 +76,7 @@ function formatGap(seconds: number): string {
   return abs.toFixed(1);
 }
 
-export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onInstantReplay, personalBestResult, isDailyChallenge, dailyChallengePosition, streakResult, ghostFrames, dareTime, challengeData, cargoIntegrity, cargoScore, blindfoldTotalTime, tabPenalty, highlights, isDemo, onRaceGhost, tournamentProgress, onNextTournamentTrack }: RaceResultsProps) {
+export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onInstantReplay, personalBestResult, streakResult }: RaceResultsProps) {
   const playerWon = result.winner === 'player';
 
   // Staggered reveal animation state
@@ -137,103 +86,8 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
   // Share link copied state
   const [shareCopied, setShareCopied] = useState(false);
 
-  // Dare a friend: generate challenge URL with time + settings
-  const [dareCopied, setDareCopied] = useState(false);
-
-  const handleDare = useCallback(() => {
-    if (!raceSettings || result.player_time == null) return;
-    const params = new URLSearchParams();
-    // Dare time in seconds (3 decimal places)
-    params.set('dare', result.player_time.toFixed(3));
-    params.set('track', raceSettings.track);
-    params.set('laps', String(raceSettings.laps));
-    params.set('weather', raceSettings.weather);
-    if (raceSettings.model) params.set('model', raceSettings.model);
-    if (raceSettings.timeOfDay) params.set('timeOfDay', raceSettings.timeOfDay);
-    // Include ws param if currently in the URL (for dev/testing)
-    const currentParams = new URLSearchParams(window.location.search);
-    const wsUrl = currentParams.get('ws');
-    if (wsUrl) params.set('ws', wsUrl);
-
-    const baseUrl = window.location.origin + '/race';
-    const dareUrl = `${baseUrl}?${params.toString()}`;
-    navigator.clipboard.writeText(dareUrl).then(() => {
-      setDareCopied(true);
-      setTimeout(() => setDareCopied(false), 2500);
-    }).catch(() => {});
-  }, [raceSettings, result.player_time]);
-
-  // Bet-Your-Laptime challenge: generate challenge URL with time + name + settings
-  const [betChallengeCopied, setBetChallengeCopied] = useState(false);
-
-  const handleBetChallenge = useCallback(() => {
-    if (!raceSettings || result.player_time == null) return;
-    let playerName = 'Anonymous';
-    try {
-      playerName = localStorage.getItem('shadow_driver_player_name')?.trim() || 'Anonymous';
-    } catch { /* ignore */ }
-
-    const url = createChallengeUrl({
-      track: raceSettings.track,
-      laps: raceSettings.laps,
-      time: result.player_time,
-      playerName,
-      weather: raceSettings.weather,
-      model: raceSettings.model,
-      timeOfDay: raceSettings.timeOfDay,
-    });
-
-    navigator.clipboard.writeText(url).then(() => {
-      setBetChallengeCopied(true);
-      setTimeout(() => setBetChallengeCopied(false), 3000);
-    }).catch(() => {});
-  }, [raceSettings, result.player_time]);
-
   // Copy results text state
   const [resultsCopied, setResultsCopied] = useState(false);
-
-  // Challenge a friend: ghost encoding state
-  const [challengeCopied, setChallengeCopied] = useState(false);
-  const [challengeEncoding, setChallengeEncoding] = useState(false);
-
-  // Cloud leaderboard state
-  const cloudLeaderboard = useCloudLeaderboard();
-  const [cloudRank, setCloudRank] = useState<CloudSubmitResult | null>(null);
-  const [showLeaderboard, setShowLeaderboard] = useState(false);
-  const cloudSubmittedRef = useRef(false);
-
-  // Auto-submit to cloud leaderboard on mount (if not demo mode)
-  useEffect(() => {
-    if (isDemo || cloudSubmittedRef.current) return;
-    if (!raceSettings || result.player_time == null || result.player_time <= 0) return;
-    cloudSubmittedRef.current = true;
-
-    const bestLap = result.player_laps.length > 0
-      ? Math.min(...result.player_laps)
-      : result.player_time;
-
-    // Get player name from localStorage
-    let playerName = 'Anonymous';
-    try {
-      playerName = localStorage.getItem('shadow_driver_player_name')?.trim() || 'Anonymous';
-    } catch { /* ignore */ }
-
-    cloudLeaderboard.submitResult(
-      {
-        track: raceSettings.track,
-        laps: raceSettings.laps,
-        time: result.player_time,
-        bestLap,
-        playerName,
-        difficulty: raceSettings.model || 'carla_pilotnet',
-      },
-      ghostFrames,
-    ).then((submitResult) => {
-      if (submitResult) {
-        setCloudRank(submitResult);
-      }
-    });
-  }, [raceSettings, result.player_time, result.player_laps, isDemo, ghostFrames]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Race history: load previous attempts and save current one on mount
   const [raceHistory, setRaceHistory] = useState<RaceHistoryEntry[]>([]);
@@ -274,7 +128,7 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
   }, [firstRaceTime, result.player_time]);
 
   useEffect(() => {
-    // Stagger reveal: increment step every 150ms up to 10 steps
+    // Stagger reveal: increment step every 150ms up to 13 steps
     let step = 0;
     const advance = () => {
       step++;
@@ -362,39 +216,6 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
     }).catch(() => {});
   }, [result, raceSettings, playerWon]);
 
-  // Challenge a Friend: encode ghost and copy challenge URL to clipboard
-  const handleChallenge = useCallback(async () => {
-    if (!ghostFrames || ghostFrames.length === 0 || !raceSettings) return;
-    setChallengeEncoding(true);
-    try {
-      const encoded = await encodeGhostForUrl(ghostFrames);
-      if (!encoded) {
-        setChallengeEncoding(false);
-        return;
-      }
-      // Build challenge URL with ghost data and race settings
-      const params = new URLSearchParams();
-      params.set('ghost', encoded);
-      params.set('track', raceSettings.track);
-      params.set('laps', String(raceSettings.laps));
-      params.set('weather', raceSettings.weather);
-      if (raceSettings.model) params.set('model', raceSettings.model);
-      if (raceSettings.timeOfDay) params.set('timeOfDay', raceSettings.timeOfDay);
-      // Include ws param if currently in the URL (for dev/testing)
-      const currentParams = new URLSearchParams(window.location.search);
-      const wsUrl = currentParams.get('ws');
-      if (wsUrl) params.set('ws', wsUrl);
-
-      const url = `${window.location.origin}/race?${params.toString()}`;
-      await navigator.clipboard.writeText(url);
-      setChallengeCopied(true);
-      setTimeout(() => setChallengeCopied(false), 3000);
-    } catch {
-      // Clipboard write failed
-    }
-    setChallengeEncoding(false);
-  }, [ghostFrames, raceSettings]);
-
   // Reveal helper: returns style for staggered animation
   const revealStyle = (step: number): React.CSSProperties => ({
     opacity: revealStep >= step ? 1 : 0,
@@ -471,133 +292,6 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
             {playerWon ? 'You beat the AI!' : 'The AI was faster this time.'}
           </p>
         </div>
-
-        {/* Dare / Bet-Your-Laptime Challenge result banner */}
-        {dareTime != null && dareTime > 0 && revealStep >= 1 && (
-          <div className="mb-4" style={revealStyle(1)}>
-            {result.player_time != null && result.player_time <= dareTime ? (
-              <div className="rounded-lg border border-green-500/40 bg-green-500/10 px-5 py-3">
-                <div
-                  className="text-green-400 text-xl font-black tracking-wide uppercase"
-                  style={{
-                    textShadow: '0 0 20px rgba(74, 222, 128, 0.5)',
-                    animation: 'victory-glow 2s ease-in-out infinite',
-                  }}
-                >
-                  {challengeData ? `YOU BEAT ${challengeData.playerName.toUpperCase()}!` : 'CHALLENGE BEATEN!'}
-                </div>
-                <div className="text-green-400/70 text-xs font-mono mt-1">
-                  {challengeData
-                    ? `${challengeData.playerName}'s time: ${formatChallengeTime(dareTime)}`
-                    : `Target: ${formatRaceTime(dareTime)}`}
-                  <span className="text-green-300 ml-2">
-                    You were {formatGap(dareTime - result.player_time)}s faster!
-                  </span>
-                </div>
-              </div>
-            ) : (
-              <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-5 py-3">
-                <div
-                  className="text-red-400 text-xl font-black tracking-wide uppercase"
-                  style={{
-                    textShadow: '0 0 15px rgba(239, 68, 68, 0.4)',
-                  }}
-                >
-                  {challengeData ? `${challengeData.playerName.toUpperCase()} WINS...` : 'NOT THIS TIME...'}
-                </div>
-                <div className="text-red-400/60 text-xs font-mono mt-1">
-                  {challengeData
-                    ? `${challengeData.playerName}'s time: ${formatChallengeTime(dareTime)}`
-                    : `Target: ${formatRaceTime(dareTime)}`}
-                  {result.player_time != null && (
-                    <span className="text-red-300/70 ml-2">
-                      +{formatGap(result.player_time - dareTime)}s behind
-                    </span>
-                  )}
-                </div>
-                <button
-                  onClick={onInstantReplay ?? onPlayAgain}
-                  className="mt-2 text-red-400/80 hover:text-red-300 text-xs font-bold uppercase tracking-wider transition-colors"
-                >
-                  Try Again?
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Daily Challenge badge */}
-        {isDailyChallenge && revealStep >= 1 && (
-          <div className="mb-4" style={revealStyle(1)}>
-            <div className="inline-flex items-center gap-2 rounded-full px-4 py-1.5 border border-amber-500/30 bg-amber-500/10">
-              <span className="text-amber-400 text-xs font-bold uppercase tracking-wider">Daily Challenge</span>
-              {dailyChallengePosition && (
-                <span className="text-amber-400/60 text-xs font-mono">
-                  #{dailyChallengePosition.position} of {dailyChallengePosition.total}
-                  {dailyChallengePosition.isNewBest && (
-                    <span className="text-amber-300 ml-1">-- New Best!</span>
-                  )}
-                </span>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Tournament progress banner */}
-        {tournamentProgress && revealStep >= 1 && (
-          <div className="mb-4" style={revealStyle(1)}>
-            <div className="rounded-lg border border-indigo-500/30 bg-indigo-500/[0.08] px-4 py-3">
-              <div className="flex items-center gap-2 mb-2">
-                <span className="text-lg">{tournamentProgress.tournamentIcon}</span>
-                <span className="text-indigo-400 text-xs font-bold uppercase tracking-wider">
-                  {tournamentProgress.tournamentName}
-                </span>
-                {tournamentProgress.badge && (
-                  <span className="text-sm">{MEDAL_ICONS[tournamentProgress.badge]}</span>
-                )}
-              </div>
-              <div className="flex items-center gap-3">
-                {/* Progress bar */}
-                <div className="flex-1">
-                  <div className="w-full h-1.5 rounded-full bg-white/[0.08] overflow-hidden">
-                    <div
-                      className="h-full rounded-full transition-all duration-700"
-                      style={{
-                        width: `${(tournamentProgress.tracksCompleted / tournamentProgress.totalTracks) * 100}%`,
-                        background: tournamentProgress.badge === 'gold'
-                          ? 'linear-gradient(90deg, #ffd700, #ffed4a)'
-                          : 'linear-gradient(90deg, #6366f1, #818cf8)',
-                      }}
-                    />
-                  </div>
-                </div>
-                <span className="text-indigo-300/70 text-xs font-mono whitespace-nowrap">
-                  {tournamentProgress.tracksCompleted}/{tournamentProgress.totalTracks} tracks
-                </span>
-              </div>
-              {/* Progress message */}
-              <div className="mt-2 text-indigo-300/60 text-xs">
-                {tournamentProgress.tracksCompleted >= tournamentProgress.totalTracks ? (
-                  tournamentProgress.badge === 'gold'
-                    ? 'All tracks completed under par! Gold badge earned!'
-                    : 'All tracks completed! Retry tracks to beat par times for Gold.'
-                ) : tournamentProgress.nextTrack ? (
-                  <span>
-                    {tournamentProgress.totalTracks - tournamentProgress.tracksCompleted} more to go!{' '}
-                    {onNextTournamentTrack && (
-                      <button
-                        onClick={onNextTournamentTrack}
-                        className="text-indigo-400 hover:text-indigo-300 font-bold transition-colors"
-                      >
-                        Race {tournamentProgress.nextTrack} next
-                      </button>
-                    )}
-                  </span>
-                ) : null}
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* Times comparison -- big cards */}
         <div className="grid grid-cols-2 gap-4 mb-6" style={revealStyle(2)}>
@@ -798,74 +492,6 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
                 <div className="text-white/30">pts</div>
               </div>
             )}
-
-            {/* Cargo Integrity (Fragile Cargo mode) */}
-            {cargoIntegrity != null && (
-              <div className="contents" style={revealStyle(7)}>
-                <div className="text-white/50 flex items-center gap-1">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-amber-400/60">
-                    <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
-                    <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
-                    <line x1="12" y1="22.08" x2="12" y2="12" />
-                  </svg>
-                  Cargo
-                </div>
-                <div className={`font-bold ${
-                  cargoIntegrity > 60 ? 'text-green-400' :
-                  cargoIntegrity > 30 ? 'text-amber-400' :
-                  cargoIntegrity > 0 ? 'text-orange-400' :
-                  'text-red-400'
-                }`}>
-                  {Math.round(cargoIntegrity)}%
-                </div>
-                <div className="text-white/30">integrity</div>
-              </div>
-            )}
-            {cargoScore != null && (
-              <div className="contents" style={revealStyle(7)}>
-                <div className="text-white/50">Cargo Score</div>
-                <div className="text-amber-400 font-bold">
-                  {cargoScore.toLocaleString()}
-                </div>
-                <div className="text-white/30">pts</div>
-              </div>
-            )}
-
-            {/* Blindfold Mode stats */}
-            {blindfoldTotalTime != null && (
-              <div className="contents" style={revealStyle(7)}>
-                <div className="text-white/50 flex items-center gap-1">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-red-400/60">
-                    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
-                    <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
-                    <line x1="1" y1="1" x2="23" y2="23" />
-                  </svg>
-                  Blind Time
-                </div>
-                <div className="text-red-400 font-bold">
-                  {blindfoldTotalTime.toFixed(1)}s
-                </div>
-                <div className="text-white/30">driving blind</div>
-              </div>
-            )}
-
-            {/* Tab Penalty stats (fourth-wall meta feature) */}
-            {tabPenalty != null && tabPenalty.switchCount > 0 && (
-              <div className="contents" style={revealStyle(7)}>
-                <div className="text-white/50 flex items-center gap-1">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-red-400/60">
-                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                    <circle cx="12" cy="12" r="3" />
-                    <line x1="1" y1="1" x2="23" y2="23" />
-                  </svg>
-                  Tab Away
-                </div>
-                <div className="text-red-400 font-bold">
-                  {tabPenalty.switchCount}x
-                </div>
-                <div className="text-white/30">{tabPenalty.totalSecondsAway.toFixed(1)}s away</div>
-              </div>
-            )}
           </div>
         </div>
 
@@ -912,66 +538,6 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
           </div>
         )}
 
-        {/* Cloud Leaderboard rank + toggle */}
-        {!isDemo && raceSettings && (
-          <div style={revealStyle(9)}>
-            {/* Rank banner (shown after cloud submit completes) */}
-            {cloudRank && (
-              <div className="mb-4">
-                <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-4 py-3 text-center">
-                  <div className="text-cyan-400 text-sm font-bold">
-                    {cloudRank.isTop50 ? (
-                      <>You placed <span className="text-cyan-300 text-lg font-black">#{cloudRank.rank}</span> out of {cloudRank.totalEntries} {cloudRank.totalEntries === 1 ? 'racer' : 'racers'}!</>
-                    ) : (
-                      <>Rank #{cloudRank.rank} of {cloudRank.totalEntries} {cloudRank.totalEntries === 1 ? 'racer' : 'racers'}</>
-                    )}
-                  </div>
-                  {cloudRank.rank <= 3 && (
-                    <div className="text-cyan-300/60 text-xs font-mono mt-1">
-                      {cloudRank.rank === 1 ? 'You hold the record!' : `Only ${cloudRank.rank - 1} ${cloudRank.rank - 1 === 1 ? 'racer is' : 'racers are'} faster`}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Leaderboard toggle button */}
-            <div className="mb-4 text-center">
-              <button
-                onClick={() => setShowLeaderboard(!showLeaderboard)}
-                className="text-cyan-400/60 hover:text-cyan-400 text-xs font-mono transition-colors inline-flex items-center gap-1.5"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M8 21h8" />
-                  <path d="M12 17V21" />
-                  <path d="M7 4h10" />
-                  <path d="M5 8h14" />
-                  <path d="M4 12h16" />
-                  <rect x="2" y="4" width="20" height="12" rx="2" />
-                </svg>
-                {showLeaderboard ? 'Hide Leaderboard' : 'View Global Leaderboard'}
-              </button>
-            </div>
-
-            {/* Inline leaderboard */}
-            {showLeaderboard && (
-              <div className="mb-6">
-                <CloudLeaderboard
-                  track={raceSettings.track}
-                  laps={raceSettings.laps}
-                  playerName={(() => {
-                    try { return localStorage.getItem('shadow_driver_player_name')?.trim() || 'Anonymous'; }
-                    catch { return 'Anonymous'; }
-                  })()}
-                  onRaceGhost={onRaceGhost}
-                  visible={showLeaderboard}
-                  onClose={() => setShowLeaderboard(false)}
-                />
-              </div>
-            )}
-          </div>
-        )}
-
         {/* Racing line visualization */}
         {(result.player_path || result.ai_path) && (
           <div className="mb-6" style={revealStyle(10)}>
@@ -1002,13 +568,6 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
             raceSettings={raceSettings}
           />
         </div>
-
-        {/* Race highlights reel */}
-        {highlights && highlights.length > 0 && (
-          <div className="mb-6" style={revealStyle(11)}>
-            <HighlightReel highlights={highlights} />
-          </div>
-        )}
 
         {/* Training data info card (teaser for AI clone feature) */}
         {result.training_frames != null && result.training_frames > 0 && (
@@ -1083,48 +642,6 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
               </svg>
               {shareCopied ? 'Link copied!' : 'Share race link'}
             </button>
-            {ghostFrames && ghostFrames.length > 0 && (
-              <button
-                onClick={handleChallenge}
-                disabled={challengeEncoding}
-                className="text-cyan-400/60 hover:text-cyan-400 text-xs font-mono transition-colors inline-flex items-center gap-1.5 disabled:opacity-40"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                  <circle cx="9" cy="7" r="4" />
-                  <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-                  <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-                </svg>
-                {challengeEncoding ? 'Encoding...' : challengeCopied ? 'Challenge link copied!' : 'Challenge a Friend'}
-              </button>
-            )}
-            {result.player_time != null && (
-              <button
-                onClick={handleBetChallenge}
-                className="text-purple-400/60 hover:text-purple-400 text-xs font-mono transition-colors inline-flex items-center gap-1.5"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6" /><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18" />
-                  <path d="M4 22h16" /><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22" />
-                  <path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22" />
-                  <path d="M18 2H6v7a6 6 0 0 0 12 0V2Z" />
-                </svg>
-                {betChallengeCopied ? 'Challenge link copied!' : 'Bet Your Laptime'}
-              </button>
-            )}
-            {result.player_time != null && (
-              <button
-                onClick={handleDare}
-                className="text-white/30 hover:text-white/50 text-xs font-mono transition-colors inline-flex items-center gap-1.5"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 2L2 7l10 5 10-5-10-5z" />
-                  <path d="M2 17l10 5 10-5" />
-                  <path d="M2 12l10 5 10-5" />
-                </svg>
-                {dareCopied ? 'Dare link copied!' : 'Dare a Friend'}
-              </button>
-            )}
           </div>
         )}
 
@@ -1136,6 +653,12 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
     </div>
   );
 }
+
+const MEDAL_ICONS: Record<string, string> = {
+  gold: '\uD83E\uDD47',
+  silver: '\uD83E\uDD48',
+  bronze: '\uD83E\uDD49',
+};
 
 /** Victory particle burst effect */
 function ParticleBurst() {
@@ -1182,7 +705,6 @@ function TimeProgressionChart({ history }: { history: RaceHistoryEntry[] }) {
   const range = maxTime - minTime;
 
   // Chart dimensions
-  const chartWidth = 100; // percentage-based
   const chartHeight = 40; // px
   const padding = 4;
 

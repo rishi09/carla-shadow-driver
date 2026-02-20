@@ -403,7 +403,7 @@ export function useRaceCommentary(): UseRaceCommentaryReturn {
   const update = useCallback((raceState: RaceState | null) => {
     if (!enabledRef.current || !raceState) return;
 
-    const { player, ai, race_status, winner, drift } = raceState;
+    const { player, ai: _ai, race_status, winner, drift } = raceState;
     if (!player) return;
 
     // --- Race start detection ---
@@ -503,33 +503,6 @@ export function useRaceCommentary(): UseRaceCommentaryReturn {
       }
     }
   }, [enqueue]);
-
-  // Reset state when component is reused across races
-  const resetRefs = useCallback(() => {
-    prevGapSignRef.current = 0;
-    prevSpeedMilestoneRef.current = 0;
-    prevCheckpointRef.current = 0;
-    prevLapRef.current = 0;
-    raceStartFiredRef.current = false;
-    raceEndFiredRef.current = false;
-    prevRaceStatusRef.current = null;
-    prevDriftActiveRef.current = false;
-    cooldownsRef.current.clear();
-    lineIndexRef.current.clear();
-    queueRef.current = [];
-    if (typeof window !== 'undefined' && window.speechSynthesis) {
-      window.speechSynthesis.cancel();
-    }
-    isSpeakingRef.current = false;
-    setCurrentText(null);
-  }, []);
-
-  // Reset when race status goes back to countdown (new race)
-  const prevResetStatusRef = useRef<string | null>(null);
-  useEffect(() => {
-    // We check inside update, but also do a passive reset here
-    // when the race status transitions from finished/racing -> countdown
-  }, []);
 
   // The update function handles reset detection inline via prevRaceStatusRef
 

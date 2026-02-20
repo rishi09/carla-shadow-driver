@@ -1099,3 +1099,42 @@ Every player's ghost stays on the track permanently. The first player ever sees 
 | 10 | 42 | Stock Market Weather | 9 | 7 | 8 | 72 |
 
 See `LEARNINGS.md` for detailed implementation plans for these top 10.
+
+---
+
+## POST-CLEANUP PRIORITY (Feb 20, 2026)
+
+**Context:** 62 of 74 hooks were removed from Race.tsx on Feb 20 after the overbuilding disaster (see LEARNINGS.md postmortem). The codebase is now back to 12 core hooks. The following is the ACTUAL priority list — fix the foundation before adding frosting.
+
+### P0: Fix the streaming (the only thing that matters)
+Current: ~18 FPS, ~271ms latency over JPEG-over-WebSocket through Cloudflare tunnels.
+Target: 60 FPS, <50ms additional latency.
+
+1. [ ] **NVENC H.264 encoding on server** — Replace JPEG-per-frame with hardware H.264 encoding via NVENC. Use GStreamer or FFmpeg with `nvenc` + `zerolatency` tune. Single biggest latency win.
+2. [ ] **WebRTC transport** — Replace WebSocket (TCP, head-of-line blocking) with WebRTC (UDP, jitter-buffered). Requires direct IP or TURN server, NOT Cloudflare tunnels.
+3. [ ] **Frame capture via NvFBC** — Replace OpenCV camera read with NVIDIA Frame Buffer Capture for <1ms GPU-side frame grab.
+4. [ ] **Kill Cloudflare tunnels** — Use ngrok TCP tunnels, Tailscale, or direct Vast.ai IP. Cloudflare adds 40-80ms and doesn't support UDP.
+5. [ ] **Client-side hardware decode** — Browser's MediaSource Extensions or WebRTC built-in H.264 decode (hardware accelerated, no rAF sync needed).
+
+### P1: Polish the core loop
+The 60-second experience of: connect → setup → countdown → race → results → share.
+
+6. [ ] **Fix Vercel auto-deploy** — Add GitHub secrets (VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID) and test the deploy workflow.
+7. [ ] **Test full provisioning flow** — Verify the "Play Game" button → Vast.ai provision → tunnel → connect flow works end-to-end.
+8. [ ] **Reduce bundle size further** — Code-split RaceResults, PhotoMode, Minimap. Target <300KB initial load.
+9. [ ] **Mobile-responsive layout** — The game should at minimum display correctly on mobile (even if controls don't work).
+
+### P2: Add features (ONE AT A TIME, TESTED)
+Only after P0 and P1 are solid. Each feature must be:
+- Tested against a live CARLA instance
+- Verified with `tsc -b && vite build`
+- Under the 500KB bundle budget (or code-split)
+
+10. [ ] **AI personality + trash talk** — Re-enable useAIPersonality (it was Tier 2, well-built, just needs testing)
+11. [ ] **Adaptive difficulty** — Re-enable useAdaptiveDifficulty (hidden rubber-banding, proven mechanic)
+12. [ ] **Daily challenge** — Re-enable useDailyChallenge (deterministic daily config, good retention hook)
+13. [ ] **Ghost recording** — Re-enable useGhostRecorder (replay value, shareable)
+14. [ ] **Cloud leaderboard** — Re-enable useCloudLeaderboard (competitive motivation)
+
+### NOT NOW (park these)
+All 50 "wild ideas" hook files still exist in `src/hooks/`. They can be re-enabled individually after P0-P2 are solid. Do not batch-enable them. Do not build new novelty features until the streaming problem is solved.

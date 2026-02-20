@@ -170,11 +170,11 @@ const MAX_HISTORY = 20;
 export function useAINarration(options: UseAINarrationOptions): UseAINarrationReturn {
   const {
     enabled,
-    aiSpeed,
-    aiPosition,
-    playerCollisions,
-    currentLap,
-    totalLaps,
+    aiSpeed: _aiSpeed,
+    aiPosition: _aiPosition,
+    playerCollisions: _playerCollisions,
+    currentLap: _currentLap,
+    totalLaps: _totalLaps,
     raceTimeMs,
     useVoice = false,
   } = options;
@@ -213,52 +213,52 @@ export function useAINarration(options: UseAINarrationOptions): UseAINarrationRe
 
     // Player just crashed
     if (hadCollision) {
-      return { text: pickRandom(REACTION_PLAYER_CRASH, lastThoughtRef.current), category: 'reaction' };
+      return { text: pickRandom(REACTION_PLAYER_CRASH, lastThoughtRef.current ?? undefined), category: 'reaction' };
     }
 
     // AI position just changed
     if (positionChanged) {
       if (opts.aiPosition === 'behind') {
-        return { text: pickRandom(REACTION_AI_BEHIND, lastThoughtRef.current), category: 'reaction' };
+        return { text: pickRandom(REACTION_AI_BEHIND, lastThoughtRef.current ?? undefined), category: 'reaction' };
       }
       if (opts.aiPosition === 'neck-and-neck') {
-        return { text: pickRandom(REACTION_CLOSE_GAP, lastThoughtRef.current), category: 'reaction' };
+        return { text: pickRandom(REACTION_CLOSE_GAP, lastThoughtRef.current ?? undefined), category: 'reaction' };
       }
     }
 
     // AI going fast
     if (opts.aiSpeed > HIGH_SPEED_THRESHOLD && Math.random() < 0.3) {
-      return { text: pickRandom(REACTION_AI_SPEEDING, lastThoughtRef.current), category: 'reaction' };
+      return { text: pickRandom(REACTION_AI_SPEEDING, lastThoughtRef.current ?? undefined), category: 'reaction' };
     }
 
     // --- Priority 2: Competitive thoughts (gap-dependent) ---
 
     // Near the end of the race
     if (isNearEnd && isFinalLap) {
-      return { text: pickRandom(COMPETITIVE_NEAR_FINISH, lastThoughtRef.current), category: 'competitive' };
+      return { text: pickRandom(COMPETITIVE_NEAR_FINISH, lastThoughtRef.current ?? undefined), category: 'competitive' };
     }
 
     // Final lap
     if (isFinalLap) {
-      return { text: pickRandom(COMPETITIVE_FINAL_LAP, lastThoughtRef.current), category: 'competitive' };
+      return { text: pickRandom(COMPETITIVE_FINAL_LAP, lastThoughtRef.current ?? undefined), category: 'competitive' };
     }
 
     // Winning or losing significantly
     if (opts.aiPosition === 'ahead' && Math.random() < 0.5) {
-      return { text: pickRandom(COMPETITIVE_WINNING_BIG, lastThoughtRef.current), category: 'competitive' };
+      return { text: pickRandom(COMPETITIVE_WINNING_BIG, lastThoughtRef.current ?? undefined), category: 'competitive' };
     }
     if (opts.aiPosition === 'behind' && Math.random() < 0.5) {
-      return { text: pickRandom(COMPETITIVE_LOSING, lastThoughtRef.current), category: 'competitive' };
+      return { text: pickRandom(COMPETITIVE_LOSING, lastThoughtRef.current ?? undefined), category: 'competitive' };
     }
 
     // --- Priority 3: Philosophical (near race end, rare) ---
     if (raceProgress > 0.75 && Math.random() < 0.15) {
-      return { text: pickRandom(PHILOSOPHICAL_END, lastThoughtRef.current), category: 'philosophical' };
+      return { text: pickRandom(PHILOSOPHICAL_END, lastThoughtRef.current ?? undefined), category: 'philosophical' };
     }
 
     // --- Priority 4: Existential (random, rare — 10% chance) ---
     if (Math.random() < EXISTENTIAL_CHANCE) {
-      return { text: pickRandom(EXISTENTIAL_THOUGHTS, lastThoughtRef.current), category: 'existential' };
+      return { text: pickRandom(EXISTENTIAL_THOUGHTS, lastThoughtRef.current ?? undefined), category: 'existential' };
     }
 
     // --- Default: Strategy thoughts ---
@@ -270,7 +270,7 @@ export function useAINarration(options: UseAINarrationOptions): UseAINarrationRe
         `According to my calculations, I should be winning. *checks notes* I ${winning ? 'am' : 'am not'}.`
       );
     }
-    return { text: pickRandom(strategyPool, lastThoughtRef.current), category: 'strategy' };
+    return { text: pickRandom(strategyPool, lastThoughtRef.current ?? undefined), category: 'strategy' };
   }, []);
 
   /** Show a thought (display + optional voice) */

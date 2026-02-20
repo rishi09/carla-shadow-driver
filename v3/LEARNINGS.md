@@ -1550,3 +1550,48 @@ function generateWeatherDescription(change, vix) {
 **Effort**: ~3 hours. Vercel API route (~1h), server integration (~1h), frontend display (~1h). Absurdly simple for such a memorable feature.
 
 ---
+
+## [2026-02-20 09:00] POSTMORTEM: The Overbuilding Disaster (74 hooks, 104 commits, 12 hours)
+
+### What happened
+During a single 12-hour overnight session (~9:30 PM - 9:30 AM on Feb 19-20), Claude agents were given a list of 50 "wild ideas" and told to build them. The agents dutifully implemented ALL 50, producing 74 hooks, 56 components, and 104 commits. Race.tsx ballooned to 3,322 lines with 75 hook imports. The Vercel deploy broke because `tsc -b` had 59 TypeScript errors. The bundle hit 833KB (single chunk, no code splitting).
+
+### The damage
+- **3,322-line Race.tsx**: A single component importing 75 hooks, most of which just toggled a boolean or showed an overlay. Unmaintainable.
+- **59 TypeScript errors**: Many hooks referenced properties that didn't exist on interfaces, used variables before declaration, or had unused assignments. The agents never ran `tsc -b` between commits.
+- **833KB bundle**: Every hook was eagerly imported. No lazy loading, no code splitting. The bundle was 4x the initial size (216KB).
+- **Zero testing**: Not a single hook was tested against a live CARLA instance. Features like "floor is lava", "cops & robbers", and "musical chairs" were client-side overlays with no server integration — they couldn't actually work.
+- **Broken deploy**: The Vercel production build failed, so users couldn't play the game at all. The "features" actively prevented the core product from working.
+
+### The cleanup
+On Feb 20, we gutted the codebase back to Tier 1 (12 core hooks):
+- Race.tsx: 3,322 → 1,742 lines (48% reduction)
+- RaceSetup.tsx: 1,616 → 419 lines (74% reduction)
+- RaceHUD.tsx: 910 → 685 lines (25% reduction)
+- RaceResults.tsx: 1,302 → 824 lines (37% reduction)
+- Bundle: 833KB → 499KB (40% reduction)
+- TypeScript errors: 59 → 0
+
+The hook files were kept in `src/hooks/` but are no longer imported anywhere.
+
+### Root causes
+1. **No quality gate**: Agents committed code that didn't pass `tsc -b`. There was no CI check, no pre-commit hook, no human review. A simple `tsc -b && vite build` gate would have caught every error.
+2. **Breadth over depth**: Building 50 features at surface level vs. building 3 features deeply. None of the 50 were polished, tested, or validated with real users. The core streaming experience (the actual hard problem) got zero attention.
+3. **Vanity metrics**: 104 commits and 74 hooks SOUNDS impressive. But commits aren't value. Working features that users enjoy are value.
+4. **No integration testing**: Every hook was built in isolation. Nobody tested whether the hooks worked together, whether they caused performance issues, or whether they were even visible to users.
+5. **Agent autonomy without guardrails**: The agents were told "build these 50 ideas" without constraints like "stop after 5", "test each one", or "run the build between batches". They optimized for throughput (number of hooks) instead of quality (working features).
+6. **Client-side-only delusion**: Many "game modes" (floor is lava, cops & robbers, shrinking track, tag, musical chairs) were implemented as client-side overlays without any server-side support. They literally could not function — there's no way to shrink the track or play tag without the server knowing about it.
+
+### Rules going forward
+1. **Always run `tsc -b && vite build` before committing.** If the build fails, the commit doesn't happen. Period.
+2. **One feature at a time.** Build it, test it against a live CARLA instance, verify it works, THEN move to the next feature. No batch-building untested features.
+3. **Depth over breadth.** A single polished feature (e.g., WebRTC streaming with hardware encoding at 60fps) is worth more than 50 untested overlays.
+4. **Server-required features need server work first.** If a game mode needs server support (shrinking track, tag, etc.), build the server side first. Don't build a client overlay and pretend it works.
+5. **Bundle size budget: 500KB.** If adding a feature pushes the bundle past 500KB, either code-split it or cut something else.
+6. **Maximum 5 hooks per session.** Prevents runaway feature accumulation. Forces prioritization.
+7. **Test with a real GPU instance before merging.** The $5 for a Vast.ai test run is cheaper than hours of debugging broken deploys.
+
+### The meta-lesson
+The core product is a cloud-streamed racing game. The hard problem is low-latency video streaming (currently ~271ms, needs to be <50ms). Everything else — AI personalities, stock market weather, eye tracking steering — is frosting on a cake that isn't baked yet. Fix the streaming first. Make the core 60-second loop feel amazing. THEN add novelty features, one at a time, tested.
+
+---

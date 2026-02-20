@@ -23,8 +23,6 @@ import { useEffect, useRef, useCallback, useState } from 'react';
 // E minor scale: E F# G A B C D
 // Frequencies (Hz): E2=82.41, F#2=92.50, G2=98.00, A2=110, B2=123.47, C3=130.81, D3=146.83, E3=164.81
 const E2 = 82.41;
-const G2 = 98.00;
-const A2 = 110.00;
 const B2 = 123.47;
 const E3 = 164.81;
 const G3 = 196.00;
@@ -273,7 +271,7 @@ export function useDynamicSoundtrack(): UseDynamicSoundtrackReturn {
     // BASS STEM
     // ====================================================================
     const bassDistortion = ctx.createWaveShaper();
-    bassDistortion.curve = makeDistortionCurve(8);
+    bassDistortion.curve = makeDistortionCurve(8) as unknown as Float32Array<ArrayBuffer>;
     bassDistortion.oversample = '4x';
 
     const bassGain = ctx.createGain();

@@ -7,7 +7,7 @@
  *
  * Wild Idea #28 from TODO.md
  */
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 
 // --- Constants ---
 const INITIAL_RADIUS = 300;

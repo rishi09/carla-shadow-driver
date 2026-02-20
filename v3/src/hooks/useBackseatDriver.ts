@@ -146,7 +146,7 @@ function pickCollisionComment(count: number): CommentEntry {
 }
 
 export function useBackseatDriver(options: UseBackseatDriverOptions): UseBackseatDriverReturn {
-  const { enabled, speed, isReversing, collisionCount, isOffRoad: _isOffRoad, gapToAI, steeringInput } = options;
+  const { enabled, speed: _speed, isReversing: _isReversing, collisionCount, isOffRoad: _isOffRoad, gapToAI: _gapToAI, steeringInput: _steeringInput } = options;
 
   // --- State ---
   const [currentComment, setCurrentComment] = useState<string | null>(null);

@@ -277,7 +277,7 @@ export function useTournaments(): UseTournamentsReturn {
     ? progress.trackResults.reduce((sum, r) => sum + r.bestTime, 0)
     : null;
 
-  const isCurrentTournamentRace = useCallback((track: string, laps: number, weather: string, model?: string): boolean => {
+  const isCurrentTournamentRace = useCallback((track: string, laps: number, _weather: string, model?: string): boolean => {
     if (!current.tracks.includes(track)) return false;
     if (laps !== current.laps) return false;
     // Weather can differ slightly (e.g. storm vs rain) -- be lenient

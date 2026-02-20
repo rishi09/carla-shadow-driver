@@ -1,124 +1,33 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useGPUConnection } from '../hooks/useGPUConnection.ts';
 import { getLastWsUrl } from '../hooks/useGPUConnection.ts';
 import { useEngineSound } from '../hooks/useEngineSound.ts';
-import { useRaceCommentary } from '../hooks/useRaceCommentary.ts';
-import { useCommentary } from '../hooks/useCommentary.ts';
-import { useAIEngineSound } from '../hooks/useAIEngineSound.ts';
-import { useDynamicSoundtrack } from '../hooks/useDynamicSoundtrack.ts';
-import type { IntensityLevel } from '../hooks/useDynamicSoundtrack.ts';
-import { useMusicStems } from '../hooks/useMusicStems.ts';
 import { useSteeringPrediction } from '../hooks/useSteeringPrediction.ts';
 import { useFrameExtrapolation } from '../hooks/useFrameExtrapolation.ts';
 import { useLeaderboard } from '../hooks/useLeaderboard.ts';
 import { usePersonalBests } from '../hooks/usePersonalBests.ts';
-import { useTournaments } from '../hooks/useTournaments.ts';
-import { useGamepad } from '../hooks/useGamepad.ts';
-import { usePhoneSteering } from '../hooks/usePhoneSteering.ts';
-import { useStreak } from '../hooks/useStreak.ts';
-import { useAdaptiveDifficulty } from '../hooks/useAdaptiveDifficulty.ts';
-import { useCrowdAmbiance } from '../hooks/useCrowdAmbiance.ts';
-import { getDailyChallenge, saveDailyChallengeResult } from '../hooks/useDailyChallenge.ts';
 import type { PersonalBestResult } from '../hooks/usePersonalBests.ts';
+import { useGamepad } from '../hooks/useGamepad.ts';
+import { useStreak } from '../hooks/useStreak.ts';
+import { useCrowdAmbiance } from '../hooks/useCrowdAmbiance.ts';
 import { VideoCanvas } from '../components/VideoCanvas.tsx';
 import { WebGLCanvas, supportsWebGL2 } from '../components/WebGLCanvas.tsx';
 import { WebRTCVideo } from '../components/WebRTCVideo.tsx';
 import { RaceHUD } from '../components/RaceHUD.tsx';
 import { SpeedEffects } from '../components/SpeedEffects.tsx';
 import { SpeedLines } from '../components/SpeedLines.tsx';
-import { SlipstreamEffect } from '../components/SlipstreamEffect.tsx';
 import { ParticleOverlay } from '../components/ParticleOverlay.tsx';
 import { DriftScore } from '../components/DriftScore.tsx';
-import { CommentaryOverlay } from '../components/CommentaryOverlay.tsx';
-import { CommentarySubtitle } from '../components/CommentarySubtitle.tsx';
-import { AIChatBubble } from '../components/AIChatBubble.tsx';
-import { AIChat } from '../components/AIChat.tsx';
-import { useAIPersonality } from '../hooks/useAIPersonality.ts';
 import { GPUConnectionModal } from '../components/GPUConnectionModal.tsx';
 import { RaceResults } from '../components/RaceResults.tsx';
 import { RaceSetup } from '../components/RaceSetup.tsx';
 import { Minimap } from '../components/Minimap.tsx';
 import { ControlsHint } from '../components/ControlsHint.tsx';
-import { WeatherOverlay } from '../components/WeatherOverlay.tsx';
-import { WeatherEffects } from '../components/WeatherEffects.tsx';
-import { useWeatherEffects } from '../hooks/useWeatherEffects.ts';
 import { FirstTimeOverlay } from '../components/FirstTimeOverlay.tsx';
 import { PhotoMode } from '../components/PhotoMode.tsx';
-import { AsciiOverlay } from '../components/AsciiOverlay.tsx';
-import { ClipPreview } from '../components/ClipPreview.tsx';
 import { RearMirror } from '../components/RearMirror.tsx';
-import { AIBrainHUD } from '../components/AIBrainHUD.tsx';
-import { RecordingControls } from '../components/RecordingControls.tsx';
 import { SplitTimeDelta } from '../components/SplitTimeDelta.tsx';
-import { VoiceBoostOverlay } from '../components/VoiceBoostOverlay.tsx';
-import { VoiceCommandHUD } from '../components/VoiceCommandHUD.tsx';
-import { PhoneSteeringOverlay } from '../components/PhoneSteeringOverlay.tsx';
-import { useGhostRecorder } from '../hooks/useGhostRecorder.ts';
-import type { GhostFrame } from '../hooks/useGhostRecorder.ts';
-import { useHighlightDetector } from '../hooks/useHighlightDetector.ts';
-import type { Highlight } from '../hooks/useHighlightDetector.ts';
-import { useReplayRecorder } from '../hooks/useReplayRecorder.ts';
-import { useScreenRecorder } from '../hooks/useScreenRecorder.ts';
-import { useVoiceBoost } from '../hooks/useVoiceBoost.ts';
-import { useVoiceCommands } from '../hooks/useVoiceCommands.ts';
-import { useGifExport } from '../hooks/useGifExport.ts';
-import { useCargoMode } from '../hooks/useCargoMode.ts';
-import { useBlindfoldMode } from '../hooks/useBlindfoldMode.ts';
-import { useAmbientLight, zoneToWeatherParams } from '../hooks/useAmbientLight.ts';
-import { useTwitchChat } from '../hooks/useTwitchChat.ts';
-import type { TwitchCommand } from '../hooks/useTwitchChat.ts';
-import { useHeadTracking } from '../hooks/useHeadTracking.ts';
-import { CargoMeter } from '../components/CargoMeter.tsx';
-import { BlindfoldOverlay } from '../components/BlindfoldOverlay.tsx';
-import { AmbientLightIndicator } from '../components/AmbientLightIndicator.tsx';
-import { HeadTrackingIndicator } from '../components/HeadTrackingIndicator.tsx';
-import { TwitchOverlay } from '../components/TwitchOverlay.tsx';
-import { useSynthwaveMode } from '../hooks/useSynthwaveMode.ts';
-import { SynthwaveOverlay } from '../components/SynthwaveOverlay.tsx';
-import { decodeGhostFromUrl } from '../utils/ghostUrl.ts';
-import { decodeChallenge, formatChallengeTime } from '../utils/challengeUrl.ts';
-import type { ChallengeData } from '../utils/challengeUrl.ts';
 import type { KeyState } from '../types/index.ts';
-import { getBrowserQuip, getBatteryQuip } from '../utils/browserQuips.ts';
-import { useTabPenalty } from '../hooks/useTabPenalty.ts';
-import { useBatteryDifficulty } from '../hooks/useBatteryDifficulty.ts';
-import { useTimeZoneRacing } from '../hooks/useTimeZoneRacing.ts';
-import { useEarthquakeCamera } from '../hooks/useEarthquakeCamera.ts';
-import { useAIGrudge } from '../hooks/useAIGrudge.ts';
-import { useDrunkAI } from '../hooks/useDrunkAI.ts';
-import { DrunkAIOverlay } from '../components/DrunkAIOverlay.tsx';
-import { useBinauralAudio } from '../hooks/useBinauralAudio.ts';
-import { useAINemesis } from '../hooks/useAINemesis.ts';
-import { CursorTrail } from '../components/CursorTrail.tsx';
-import { useStockMarketWeather } from '../hooks/useStockMarketWeather.ts';
-import { useHeartbeatAudio } from '../hooks/useHeartbeatAudio.ts';
-import { useAICopycat } from '../hooks/useAICopycat.ts';
-import { useImpactReplay } from '../hooks/useImpactReplay.ts';
-import { useBackseatDriver } from '../hooks/useBackseatDriver.ts';
-import { useAINarration } from '../hooks/useAINarration.ts';
-import { useNPCSpectators } from '../hooks/useNPCSpectators.ts';
-import { useRaceMemory } from '../hooks/useRaceMemory.ts';
-import { useAIDiary } from '../hooks/useAIDiary.ts';
-import { useReverseRace } from '../hooks/useReverseRace.ts';
-import { useAIEvolution } from '../hooks/useAIEvolution.ts';
-import { useFloorIsLava } from '../hooks/useFloorIsLava.ts';
-import { useWrongWayChicken } from '../hooks/useWrongWayChicken.ts';
-import { useShrinkingTrack } from '../hooks/useShrinkingTrack.ts';
-import { useTagMode } from '../hooks/useTagMode.ts';
-import { useCopsAndRobbers } from '../hooks/useCopsAndRobbers.ts';
-import { useMusicalChairs } from '../hooks/useMusicalChairs.ts';
-import { usePhotographyRally } from '../hooks/usePhotographyRally.ts';
-import { useWebcamReactions } from '../hooks/useWebcamReactions.ts';
-import { useSpeedrunInternet } from '../hooks/useSpeedrunInternet.ts';
-import { useInfiniteHighway } from '../hooks/useInfiniteHighway.ts';
-import { useEyeTracking } from '../hooks/useEyeTracking.ts';
-import { useTabRearview } from '../hooks/useTabRearview.ts';
-import { useCommentarySoundboard } from '../hooks/useCommentarySoundboard.ts';
-import { useDailyTimelapse } from '../hooks/useDailyTimelapse.ts';
-import { useSplitScreen } from '../hooks/useSplitScreen.ts';
-import { useRaceRoulette } from '../hooks/useRaceRoulette.ts';
-import { useSaddestLeaderboard } from '../hooks/useSaddestLeaderboard.ts';
-import { useEffect, useRef } from 'react';
 
 type RaceView = 'setup' | 'pre_race' | 'racing' | 'results';
 
@@ -129,70 +38,26 @@ export function Race() {
   const isDemo = params.get('demo') === 'true';
   const directWsUrl = params.get('ws') || getLastWsUrl();
   const isQuickstart = params.get('quickstart') === 'true';
-  const twitchChannelParam = params.get('twitch') || null;
 
-  // Deep linking: parse race settings from URL (e.g. shared challenge links)
-  // Challenge URLs override individual query params
+  // Deep linking: parse race settings from URL
   const urlSettings = useMemo(() => {
-    const challengeParam = params.get('challenge');
-    const challenge = challengeParam ? decodeChallenge(challengeParam) : null;
-
     return {
-      track: challenge?.track || params.get('track') || undefined,
-      laps: challenge?.laps || (params.get('laps') ? parseInt(params.get('laps')!, 10) : undefined),
-      weather: challenge?.weather || params.get('weather') || undefined,
-      model: challenge?.model || params.get('model') || undefined,
+      track: params.get('track') || undefined,
+      laps: params.get('laps') ? parseInt(params.get('laps')!, 10) : undefined,
+      weather: params.get('weather') || undefined,
+      model: params.get('model') || undefined,
       playerCar: params.get('playerCar') || undefined,
-      timeOfDay: challenge?.timeOfDay || params.get('timeOfDay') || undefined,
+      timeOfDay: params.get('timeOfDay') || undefined,
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Challenge ghost: decode ghost data from URL parameter
-  const ghostParam = useMemo(() => params.get('ghost') || null, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Dare challenge: parse ?dare=X.XXX param (time to beat in seconds)
-  const dareTime = useMemo(() => {
-    const dareParam = params.get('dare');
-    if (!dareParam) return null;
-    const parsed = parseFloat(dareParam);
-    return isNaN(parsed) || parsed <= 0 ? null : parsed;
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Bet-Your-Laptime Challenge: parse ?challenge=<base64url> param
-  const challengeData = useMemo<ChallengeData | null>(() => {
-    const challengeParam = params.get('challenge');
-    if (!challengeParam) return null;
-    return decodeChallenge(challengeParam);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Effective dare time: either from ?dare= or from ?challenge= (challenge takes priority)
-  const effectiveDareTime = challengeData?.time ?? dareTime;
-
-  const [challengeGhostFrames, setChallengeGhostFrames] = useState<GhostFrame[] | null>(null);
-  const challengeGhostDecodedRef = useRef(false);
-
-  useEffect(() => {
-    if (!ghostParam || challengeGhostDecodedRef.current) return;
-    challengeGhostDecodedRef.current = true;
-    decodeGhostFromUrl(ghostParam).then((frames) => {
-      if (frames && frames.length > 0) {
-        setChallengeGhostFrames(frames);
-      }
-    });
-  }, [ghostParam]);
 
   const [view, setView] = useState<RaceView>(isDemo || directWsUrl || isQuickstart ? 'pre_race' : 'setup');
   const [showRespawning, setShowRespawning] = useState(false);
   const [raceWeather, setRaceWeather] = useState('clear');
 
-  // Challenge ghost: track race start time for interpolation
-  const challengeGhostStartRef = useRef<number>(0);
-  const [showChallengeGhostBanner, setShowChallengeGhostBanner] = useState(!!ghostParam);
-
   const keysRef = useRef<KeyState>({ w: false, a: false, s: false, d: false, space: false });
   const keyIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const respawnTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const voiceCommandEffectsRef = useRef(voiceCommands.activeEffects);
   const cameraIndexRef = useRef(0);
   const CAMERA_MODES = ['chase', 'hood', 'bumper'] as const;
   const [cameraMode, setCameraMode] = useState<typeof CAMERA_MODES[number]>('chase');
@@ -205,218 +70,12 @@ export function Race() {
 
   const gpu = useGPUConnection();
   const engineSound = useEngineSound();
-  const aiEngineSound = useAIEngineSound();
-  const bgMusic = useDynamicSoundtrack();
-  const musicStems = useMusicStems();
   const crowd = useCrowdAmbiance();
   const leaderboard = useLeaderboard();
   const personalBests = usePersonalBests();
-  const tournaments = useTournaments();
   const gamepad = useGamepad();
-  const phoneSteering = usePhoneSteering();
   const streak = useStreak();
-  const adaptiveDifficulty = useAdaptiveDifficulty();
-  const voiceBoost = useVoiceBoost();
-  const voiceCommands = useVoiceCommands(
-    () => {
-      gpu.sendRespawn();
-      setShowRespawning(true);
-      if (respawnTimeoutRef.current) clearTimeout(respawnTimeoutRef.current);
-      respawnTimeoutRef.current = setTimeout(() => setShowRespawning(false), 1500);
-    },
-    () => {
-      if (!photoModeActive) {
-        setPhotoModeActive(true);
-        gpu.sendPause();
-        keysRef.current = { w: false, a: false, s: false, d: false, space: false };
-        gpu.sendControls({ w: false, a: false, s: false, d: false, space: false });
-      }
-    },
-  );
-  const cargoMode = useCargoMode();
-  const blindfoldMode = useBlindfoldMode(gpu.raceState?.race_status ?? null);
-  const ambientLight = useAmbientLight();
-  const headTracking = useHeadTracking();
-  const synthwave = useSynthwaveMode();
-  const weatherFx = useWeatherEffects(raceWeather, gpu.raceState?.weather_mood);
-  // Fourth-wall breaking meta features
-  const browserQuip = useMemo(() => getBrowserQuip(), []);
-  const batteryDifficulty = useBatteryDifficulty();
-  const batteryQuip = useMemo(() => {
-    if (!batteryDifficulty.battery.isAvailable || batteryDifficulty.battery.level === null) return '';
-    return getBatteryQuip(batteryDifficulty.battery.level, batteryDifficulty.battery.charging);
-  }, [batteryDifficulty.battery.level, batteryDifficulty.battery.charging, batteryDifficulty.battery.isAvailable]);
-  const isRacing = view === 'racing' && (gpu.raceState?.race_status === 'racing' || gpu.raceState?.race_status === 'finishing');
-  const tabPenalty = useTabPenalty(isRacing);
-  const timeZoneRacing = useTimeZoneRacing();
-  const earthquakeCamera = useEarthquakeCamera(
-    gpu.raceState?.player?.gap_seconds ?? null,
-    isRacing,
-  );
-  const aiGrudge = useAIGrudge();
-  const [drunkAIEnabled, setDrunkAIEnabled] = useState(false);
-  const drunkAI = useDrunkAI({
-    enabled: drunkAIEnabled,
-    currentLap: gpu.raceState?.player?.lap ?? 1,
-    totalLaps: gpu.raceState?.player?.total_laps ?? 3,
-  });
-
-  // Batch 6: Binaural 3D audio, AI Nemesis, Stock Market Weather, Heartbeat, AI Copycat
-  const playerPos = gpu.raceState?.player ? { x: gpu.raceState.player.x ?? 0, y: gpu.raceState.player.y ?? 0, z: 0 } : null;
-  const aiPos = gpu.raceState?.ai ? { x: gpu.raceState.ai.x ?? 0, y: gpu.raceState.ai.y ?? 0, z: 0 } : null;
-  const [binauralEnabled, setBinauralEnabled] = useState(false);
-  const binauralAudio = useBinauralAudio({
-    enabled: binauralEnabled && isRacing,
-    playerPosition: playerPos,
-    aiPosition: aiPos,
-    playerHeading: gpu.raceState?.player?.yaw ?? null,
-    aiSpeed: gpu.raceState?.ai?.speed_kmh ?? null,
-    playerSpeed: gpu.raceState?.player?.speed_kmh ?? null,
-  });
-  const aiNemesis = useAINemesis();
-  const stockWeather = useStockMarketWeather();
-  const heartbeat = useHeartbeatAudio({
-    enabled: isRacing,
-    speed: gpu.raceState?.player?.speed_kmh ?? 0,
-  });
-  const [copycatEnabled, setCopycatEnabled] = useState(false);
-  const aiCopycat = useAICopycat({
-    enabled: copycatEnabled && isRacing,
-    playerPosition: playerPos,
-    playerSpeed: gpu.raceState?.player?.speed_kmh ?? 0,
-    aiPosition: aiPos,
-    isColliding: (gpu.raceState?.collisions?.length ?? 0) > 0,
-  });
-
-  // Batch 7: Impact Replay, Backseat Driver, AI Narration, NPC Spectators, Race Memory, AI Diary, Reverse Race, AI Evolution
-  const impactReplay = useImpactReplay({ enabled: isRacing });
-  const [backseatEnabled, setBackseatEnabled] = useState(false);
-  const backseatDriver = useBackseatDriver({
-    enabled: backseatEnabled && isRacing,
-    speed: gpu.raceState?.player?.speed_kmh ?? 0,
-    isReversing: false,
-    collisionCount: gpu.raceState?.collisions?.length ?? 0,
-    isOffRoad: false,
-    gapToAI: gpu.raceState?.player?.gap_seconds ?? 0,
-    steeringInput: gpu.raceState?.player?.steer ?? 0,
-  });
-  const [narrationEnabled, setNarrationEnabled] = useState(false);
-  const aiNarration = useAINarration({
-    enabled: narrationEnabled && isRacing,
-    aiSpeed: gpu.raceState?.ai?.speed_kmh ?? 0,
-    aiPosition: (() => {
-      const gap = gpu.raceState?.player?.gap_seconds;
-      if (gap == null) return 'neck-and-neck' as const;
-      if (gap > 1) return 'behind' as const;
-      if (gap < -1) return 'ahead' as const;
-      return 'neck-and-neck' as const;
-    })(),
-    playerCollisions: gpu.raceState?.collisions?.length ?? 0,
-    currentLap: gpu.raceState?.player?.lap ?? 1,
-    totalLaps: gpu.raceState?.player?.total_laps ?? 3,
-    raceTimeMs: (gpu.raceState?.player?.race_time ?? 0) * 1000,
-  });
-  const [spectatorsEnabled, setSpectatorsEnabled] = useState(false);
-  const npcSpectators = useNPCSpectators({
-    enabled: spectatorsEnabled && isRacing,
-    speed: gpu.raceState?.player?.speed_kmh ?? 0,
-    collisionCount: gpu.raceState?.collisions?.length ?? 0,
-    gapToAI: gpu.raceState?.player?.gap_seconds ?? 0,
-    isLeading: (gpu.raceState?.player?.gap_seconds ?? 0) < 0,
-    currentLap: gpu.raceState?.player?.lap ?? 1,
-    isDrifting: (gpu.raceState?.drift?.isActive ?? false),
-  });
-  const raceMemory = useRaceMemory();
-  const aiDiary = useAIDiary();
-  const reverseRace = useReverseRace();
-  const [evolutionEnabled, setEvolutionEnabled] = useState(false);
-  const aiEvolution = useAIEvolution(evolutionEnabled);
-
-  // Batch 8: Game mode hooks + eye tracking + tab rearview + soundboard + timelapse
-  const [floorIsLavaEnabled, setFloorIsLavaEnabled] = useState(false);
-  const floorIsLava = useFloorIsLava({
-    enabled: floorIsLavaEnabled && isRacing,
-    playerPosition: playerPos ? { x: playerPos.x, y: playerPos.y } : null,
-    isRacing,
-  });
-  const [wrongWayChickenEnabled, setWrongWayChickenEnabled] = useState(false);
-  const wrongWayChicken = useWrongWayChicken({
-    enabled: wrongWayChickenEnabled && isRacing,
-    playerPosition: playerPos ? { x: playerPos.x, y: playerPos.y } : null,
-    aiPosition: aiPos ? { x: aiPos.x, y: aiPos.y } : null,
-    playerHeading: gpu.raceState?.player?.yaw ?? 0,
-    aiHeading: gpu.raceState?.ai?.yaw ?? 0,
-    playerSpeed: gpu.raceState?.player?.speed_kmh ?? 0,
-    aiSpeed: gpu.raceState?.ai?.speed_kmh ?? 0,
-    playerSteering: gpu.raceState?.player?.steer ?? 0,
-  });
-  const [shrinkingTrackEnabled, setShrinkingTrackEnabled] = useState(false);
-  const shrinkingTrack = useShrinkingTrack({
-    enabled: shrinkingTrackEnabled && isRacing,
-    playerPosition: playerPos ? { x: playerPos.x, y: playerPos.y } : null,
-    raceTimeMs: (gpu.raceState?.player?.race_time ?? 0) * 1000,
-    isRacing,
-    totalLaps: gpu.raceState?.player?.total_laps ?? 3,
-  });
-  const [tagModeEnabled, setTagModeEnabled] = useState(false);
-  const tagMode = useTagMode({
-    enabled: tagModeEnabled && isRacing,
-    playerPosition: playerPos ? { x: playerPos.x, y: playerPos.y } : null,
-    aiPosition: aiPos ? { x: aiPos.x, y: aiPos.y } : null,
-    isRacing,
-  });
-  const [copsEnabled, setCopsEnabled] = useState(false);
-  const copsAndRobbers = useCopsAndRobbers({
-    enabled: copsEnabled && isRacing,
-    playerPosition: playerPos,
-    aiPosition: aiPos,
-    isRacing,
-  });
-  const [musicalChairsEnabled, setMusicalChairsEnabled] = useState(false);
-  const musicalChairs = useMusicalChairs({
-    enabled: musicalChairsEnabled && isRacing,
-    playerPosition: playerPos ? { x: playerPos.x, y: playerPos.y } : null,
-    isRacing,
-  });
-  const [photoRallyEnabled, setPhotoRallyEnabled] = useState(false);
-  const photographyRally = usePhotographyRally({
-    enabled: photoRallyEnabled && isRacing,
-    playerPosition: playerPos ? { x: playerPos.x, y: playerPos.y } : null,
-    isRacing,
-  });
-  const [webcamReactionsEnabled, setWebcamReactionsEnabled] = useState(false);
-  const webcamReactions = useWebcamReactions({ enabled: webcamReactionsEnabled && isRacing });
-  const [speedrunEnabled, setSpeedrunEnabled] = useState(false);
-  const speedrunInternet = useSpeedrunInternet({
-    enabled: speedrunEnabled && isRacing,
-    playerPosition: playerPos ? { x: playerPos.x, y: playerPos.y } : null,
-    isRacing,
-  });
-  const [infiniteEnabled, setInfiniteEnabled] = useState(false);
-  const infiniteHighway = useInfiniteHighway({
-    enabled: infiniteEnabled && isRacing,
-    speed: gpu.raceState?.player?.speed_kmh ?? 0,
-    collisionCount: gpu.raceState?.collisions?.length ?? 0,
-    isRacing,
-  });
-  const [eyeTrackingEnabled, setEyeTrackingEnabled] = useState(false);
-  const eyeTracking = useEyeTracking({ enabled: eyeTrackingEnabled && isRacing });
-  const tabRearview = useTabRearview({ enabled: false, role: 'sender' as const });
-  const commentarySoundboard = useCommentarySoundboard();
-  const dailyTimelapse = useDailyTimelapse();
-  const splitScreen = useSplitScreen(false);
-  const raceRoulette = useRaceRoulette();
-  const saddestLeaderboard = useSaddestLeaderboard();
-
-  const [twitchChannel, setTwitchChannel] = useState<string | null>(twitchChannelParam);
-  const twitchChat = useTwitchChat(twitchChannel);
-  const twitchCommandRef = useRef<TwitchCommand | ''>('');
-  const aiPersonality = useAIPersonality();
-  const commentary = useRaceCommentary();
-  const subtitleCommentary = useCommentary();
   const steeringPrediction = useSteeringPrediction(keysRef, view === 'racing', gpu.raceState?.player?.speed_kmh ?? 0);
-  const ghostRecorder = useGhostRecorder();
-  const highlightDetector = useHighlightDetector();
   const frameExtrapolation = useFrameExtrapolation(
     gpu.raceState?.player?.speed_kmh ?? 0,
     gpu.raceState?.player?.steer ?? 0,
@@ -430,20 +89,6 @@ export function Race() {
   // Personal best result for the most recent finished race
   const [pbResult, setPbResult] = useState<PersonalBestResult | null>(null);
 
-  // Daily challenge state
-  const [isDailyChallenge, setIsDailyChallenge] = useState(false);
-  const [dailyChallengePosition, setDailyChallengePosition] = useState<{ position: number; total: number; isNewBest: boolean } | null>(null);
-
-  // Tournament state
-  const [tournamentProgressResult, setTournamentProgressResult] = useState<{
-    tournamentName: string;
-    tournamentIcon: string;
-    tracksCompleted: number;
-    totalTracks: number;
-    badge: import('../hooks/useTournaments.ts').TournamentBadge;
-    nextTrack: string | null;
-  } | null>(null);
-
   // First-time player detection
   const [showFirstTimeOverlay, setShowFirstTimeOverlay] = useState(false);
   const hasPlayedBeforeRef = useRef(() => {
@@ -452,9 +97,6 @@ export function Race() {
 
   // Streak result for the most recent finished race
   const [streakResult, setStreakResult] = useState<{ newStreak: number; isNewRecord: boolean } | null>(null);
-
-  // Highlight reel for the most recent finished race
-  const [raceHighlights, setRaceHighlights] = useState<Highlight[]>([]);
 
   // Track previous race_status for countdown detection
   const prevRaceStatusRef = useRef<string | null>(null);
@@ -475,22 +117,8 @@ export function Race() {
   // --- Photo Mode state ---
   const [photoModeActive, setPhotoModeActive] = useState(false);
 
-  // --- ASCII Art Mode state (toggled with backtick key) ---
-  const [asciiMode, setAsciiMode] = useState(false);
-
-  // --- AI Brain HUD state (toggled with B key) ---
-  const [showAIBrain, setShowAIBrain] = useState(false);
-
-  // --- Replay clip recording ---
+  // --- Canvas ref for replay/photo ---
   const replayCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const replayRecorder = useReplayRecorder(replayCanvasRef, gpu.raceState);
-  const [showClipPreview, setShowClipPreview] = useState(false);
-
-  // --- Screen recorder (manual start/stop, full race recording) ---
-  const screenRecorder = useScreenRecorder(replayCanvasRef, gpu.raceState?.race_status);
-
-  // --- GIF export (ring buffer capture + Web Worker encoding) ---
-  const gifExport = useGifExport(replayCanvasRef, view === 'racing');
 
   // --- Screen shake state ---
   const [shakeX, setShakeX] = useState(0);
@@ -503,11 +131,6 @@ export function Race() {
   const [lastLapOvertake, setLastLapOvertake] = useState(false);
   const [niceSave, setNiceSave] = useState(false);
   const speedHistoryRef = useRef<number[]>([]);
-
-  // --- Commentary cooldown refs ---
-  const highSpeedCommentaryCooldownRef = useRef(0);
-  const bigLeadCommentaryCooldownRef = useRef(0);
-  const checkpointCommentaryCooldownRef = useRef(0);
 
   // --- Photo Finish detection state ---
   const [photoFinish, setPhotoFinish] = useState(false);
@@ -531,11 +154,8 @@ export function Race() {
   const lastDriftBoostEventRef = useRef<unknown>(null);
 
   // --- Split time delta tracking ---
-  // Stores lap_time at each checkpoint crossing during the current lap
   const checkpointTimesRef = useRef<number[]>([]);
-  // The current lap number being tracked (to detect lap resets)
   const splitLapRef = useRef(0);
-  // State to drive the SplitTimeDelta popup
   const [splitDelta, setSplitDelta] = useState<number | null>(null);
   const [splitRawTime, setSplitRawTime] = useState<number>(0);
   const [splitTrigger, setSplitTrigger] = useState(0);
@@ -544,7 +164,6 @@ export function Race() {
   const goShakeTriggeredRef = useRef(false);
 
   // --- Player trail for minimap racing line comparison ---
-  // Records player positions at ~10Hz (every 100ms), max 1000 entries
   const playerTrailRef = useRef<Array<{ x: number; y: number }>>([]);
   const lastTrailTimeRef = useRef(0);
   const [playerTrail, setPlayerTrail] = useState<Array<{ x: number; y: number }>>([]);
@@ -553,18 +172,7 @@ export function Race() {
   const racingLineRef = useRef<Array<{ x: number; y: number }> | null>(null);
   const [racingLine, setRacingLine] = useState<Array<{ x: number; y: number }> | null>(null);
 
-  // --- Keep voice command effects ref in sync (so the 30Hz control interval reads latest values) ---
-  useEffect(() => {
-    voiceCommandEffectsRef.current = voiceCommands.activeEffects;
-  }, [voiceCommands.activeEffects]);
-
-  // --- Keep Twitch command ref in sync (so the 30Hz control interval reads latest values) ---
-  useEffect(() => {
-    twitchCommandRef.current = twitchChat.currentCommand;
-  }, [twitchChat.currentCommand]);
-
   // --- Camera countdown zoom state ---
-  // During countdown: scale(0.95) translateY(-10px), on GO: scale(1.0) translateY(0)
   const isCountdown = gpu.raceState?.race_status === 'countdown';
   const countdownZoomStyle = useMemo(() => {
     if (isCountdown) {
@@ -579,14 +187,13 @@ export function Race() {
     };
   }, [isCountdown]);
 
-  // --- Engine sound + background music update loop ---
+  // --- Engine sound update loop ---
   useEffect(() => {
     if (view !== 'racing') return;
 
     let rafId: number;
     const tick = () => {
       const player = gpu.raceState?.player;
-      const ai = gpu.raceState?.ai;
       const raceStatus = gpu.raceState?.race_status;
 
       if (raceStatus === 'countdown') {
@@ -602,82 +209,20 @@ export function Race() {
           player.steer ?? 0,
         );
 
-        // Record ghost frame (internally throttled to 10Hz)
+        // Record player trail for minimap (throttled to ~10Hz, max 1000 entries)
         if (player.x != null && player.y != null) {
-          ghostRecorder.recordFrame(player.x, player.y, player.yaw ?? 0, player.speed_kmh);
-
-          // Record player trail for minimap (throttled to ~10Hz, max 1000 entries)
           const now = performance.now();
           if (now - lastTrailTimeRef.current >= 100) {
             lastTrailTimeRef.current = now;
             playerTrailRef.current.push({ x: player.x, y: player.y });
-            // Cap at 1000 entries (remove oldest)
             if (playerTrailRef.current.length > 1000) {
               playerTrailRef.current = playerTrailRef.current.slice(-1000);
             }
-            // Update state every 10th recording (~1Hz) to avoid excessive re-renders
             if (playerTrailRef.current.length % 10 === 0) {
               setPlayerTrail([...playerTrailRef.current]);
             }
           }
         }
-
-        // Feed telemetry to highlight detector
-        if (gpu.raceState) {
-          highlightDetector.update(gpu.raceState);
-        }
-
-        // Update dynamic soundtrack intensity based on race state
-        {
-          const absGap = player.gap_seconds != null ? Math.abs(player.gap_seconds) : 99;
-          const isFinalLap = player.total_laps > 1 && player.lap === player.total_laps;
-          const checkpointProgress = player.total_checkpoints && player.total_checkpoints > 0
-            ? player.checkpoint / player.total_checkpoints
-            : 0;
-
-          let level: IntensityLevel = 'cruise';
-          if (isFinalLap && absGap < 1.0 && checkpointProgress > 0.9) {
-            level = 'climax';
-          } else if (absGap < 2.0 || isFinalLap) {
-            level = 'intense';
-          } else if (absGap < 5.0) {
-            level = 'chase';
-          }
-          bgMusic.setIntensity(level);
-        }
-
-        // Update music stems system with race state
-        {
-          const gap = player.gap_seconds ?? 0;
-          const absGap = Math.abs(gap);
-          const isFinalLap = player.total_laps > 1 && player.lap === player.total_laps;
-          const isCloseRacing = absGap < 2.0;
-
-          musicStems.updateRaceState({
-            speed: player.speed_kmh,
-            maxSpeed: 200,
-            gap,
-            lapNumber: player.lap,
-            totalLaps: player.total_laps,
-            isCloseRacing,
-            isFinalLap,
-            justOvertook: false, // overtakes are detected separately in the gap effect
-            raceFinished: false,
-            won: false,
-          });
-        }
-      }
-
-      // Update AI engine sound (spatial Doppler) when positions are available
-      if (ai && player && ai.x != null && ai.y != null && player.x != null && player.y != null) {
-        aiEngineSound.update(
-          ai.x,
-          ai.y,
-          ai.speed_kmh,
-          player.x,
-          player.y,
-          player.yaw ?? 0,
-        );
       }
 
       rafId = requestAnimationFrame(tick);
@@ -685,101 +230,7 @@ export function Race() {
     rafId = requestAnimationFrame(tick);
 
     return () => { cancelAnimationFrame(rafId); };
-  }, [view, gpu.raceState, engineSound.update, bgMusic.setIntensity, musicStems.updateRaceState, aiEngineSound.update, ghostRecorder.recordFrame, highlightDetector.update]);
-
-  // --- Cargo mode: update integrity each frame ---
-  useEffect(() => {
-    if (view !== 'racing' || !cargoMode.isCargoMode) return;
-    cargoMode.update(gpu.raceState ?? null);
-  }, [view, cargoMode.isCargoMode, cargoMode.update, gpu.raceState]);
-
-  // --- Ambient Light: send weather override to server when brightness zone changes ---
-  const prevAmbientZoneRef = useRef(ambientLight.weatherZone);
-  useEffect(() => {
-    if (view !== 'racing' || !ambientLight.isActive) return;
-    if (ambientLight.weatherZone === prevAmbientZoneRef.current) return;
-    prevAmbientZoneRef.current = ambientLight.weatherZone;
-    const weatherParams = zoneToWeatherParams(ambientLight.weatherZone);
-    gpu.sendAmbientWeather(weatherParams.sun_altitude, weatherParams.cloudiness, weatherParams.precipitation);
-  }, [view, ambientLight.isActive, ambientLight.weatherZone, gpu.sendAmbientWeather]);
-
-  // --- Synthwave mode: force nighttime (sun_altitude = -30) for maximum neon effect ---
-  const synthwaveNightSentRef = useRef(false);
-  useEffect(() => {
-    if (view !== 'racing' || !synthwave.enabled) {
-      synthwaveNightSentRef.current = false;
-      return;
-    }
-    if (synthwaveNightSentRef.current) return;
-    synthwaveNightSentRef.current = true;
-    // sun_altitude -30 = deep night, minimal cloudiness, no precipitation
-    gpu.sendAmbientWeather(-30, 0, 0);
-  }, [view, synthwave.enabled, gpu.sendAmbientWeather]);
-
-  // --- Time-zone racing: match CARLA time of day to player's local time ---
-  const timeZoneSentRef = useRef(false);
-  useEffect(() => {
-    if (view !== 'racing' || !timeZoneRacing.enabled || synthwave.enabled || ambientLight.isActive) {
-      timeZoneSentRef.current = false;
-      return;
-    }
-    if (timeZoneSentRef.current) return;
-    timeZoneSentRef.current = true;
-    gpu.sendAmbientWeather(timeZoneRacing.sunAltitude, timeZoneRacing.cloudiness, 0);
-  }, [view, timeZoneRacing.enabled, timeZoneRacing.sunAltitude, timeZoneRacing.cloudiness, synthwave.enabled, ambientLight.isActive, gpu.sendAmbientWeather]);
-
-  // --- Stock market weather: market data drives CARLA weather ---
-  const stockSentRef = useRef(false);
-  useEffect(() => {
-    if (view !== 'racing' || !stockWeather.enabled || synthwave.enabled || ambientLight.isActive || timeZoneRacing.enabled) {
-      stockSentRef.current = false;
-      return;
-    }
-    if (stockSentRef.current) return;
-    stockSentRef.current = true;
-    gpu.sendAmbientWeather(stockWeather.weather.sunAltitude, stockWeather.weather.cloudiness, stockWeather.weather.rain);
-  }, [view, stockWeather.enabled, stockWeather.weather, synthwave.enabled, ambientLight.isActive, timeZoneRacing.enabled, gpu.sendAmbientWeather]);
-
-  // --- Race commentary updates ---
-  useEffect(() => {
-    if (view !== 'racing') return;
-    commentary.update(gpu.raceState ?? null);
-  }, [view, gpu.raceState, commentary.update]);
-
-  // --- Subtitle commentary: high speed, close gap, big lead, checkpoint triggers ---
-  useEffect(() => {
-    if (view !== 'racing') return;
-    const player = gpu.raceState?.player;
-    if (!player) return;
-    const now = performance.now();
-
-    // High speed commentary (>200 km/h, 10s cooldown)
-    if (player.speed_kmh > 200 && now - highSpeedCommentaryCooldownRef.current > 10000) {
-      highSpeedCommentaryCooldownRef.current = now;
-      subtitleCommentary.triggerCommentary('high_speed');
-    }
-
-    // Close gap commentary (|gap| < 1.0s)
-    const gap = player.gap_seconds;
-    if (gap != null && Math.abs(gap) < 1.0 && Math.abs(gap) > 0) {
-      subtitleCommentary.triggerCommentary('close_gap');
-    }
-
-    // Big lead commentary (gap > 5s in player's favor, 15s cooldown)
-    if (gap != null && gap < -5.0 && now - bigLeadCommentaryCooldownRef.current > 15000) {
-      bigLeadCommentaryCooldownRef.current = now;
-      subtitleCommentary.triggerCommentary('big_lead');
-    }
-
-    // Checkpoint commentary (on checkpoint advance, 12s cooldown)
-    const cp = player.checkpoint ?? 0;
-    if (cp > 0 && cp !== prevCheckpointRef.current && prevCheckpointRef.current > 0) {
-      if (now - checkpointCommentaryCooldownRef.current > 12000) {
-        checkpointCommentaryCooldownRef.current = now;
-        subtitleCommentary.triggerCommentary('checkpoint');
-      }
-    }
-  }, [view, gpu.raceState?.player?.speed_kmh, gpu.raceState?.player?.gap_seconds, gpu.raceState?.player?.checkpoint, subtitleCommentary.triggerCommentary]);
+  }, [view, gpu.raceState, engineSound.update]);
 
   // --- Countdown beeps + GO screen shake ---
   useEffect(() => {
@@ -790,20 +241,6 @@ export function Race() {
     }
     // Show controls hint when transitioning from countdown to racing
     if (status === 'racing' && prevRaceStatusRef.current === 'countdown') {
-      // Start ghost recorder when race begins
-      ghostRecorder.start();
-      // Start highlight detector when race begins
-      highlightDetector.start();
-      // Race start commentary subtitle
-      subtitleCommentary.triggerCommentary('race_start');
-      // AI personality: race start trash talk
-      aiPersonality.triggerTrashTalk('race_start');
-      // Start challenge ghost timer for interpolation
-      challengeGhostStartRef.current = performance.now();
-      // Auto-dismiss the challenge ghost banner after 5 seconds
-      if (showChallengeGhostBanner) {
-        setTimeout(() => setShowChallengeGhostBanner(false), 5000);
-      }
       // First-time players get the full controls overlay; returning players get the brief hint
       if (!hasPlayedBeforeRef.current()) {
         setShowFirstTimeOverlay(true);
@@ -821,7 +258,7 @@ export function Race() {
     }
 
     prevRaceStatusRef.current = status;
-  }, [gpu.raceState?.race_status, gpu.raceState?.countdown, engineSound.playCountdownBeeps, ghostRecorder.start, highlightDetector.start]);
+  }, [gpu.raceState?.race_status, gpu.raceState?.countdown, engineSound.playCountdownBeeps]);
 
   // --- Capture racing line from checkpoints (once, on first telemetry) ---
   useEffect(() => {
@@ -833,9 +270,6 @@ export function Race() {
   }, [gpu.raceState?.checkpoints]);
 
   // --- Screen shake helper ---
-  // dirX/dirY: optional directional bias for the initial impulse (normalized direction vector).
-  // Head-on collision: dirY > 0 jolts camera back; side collision: dirX != 0 jolts laterally.
-  // The initial frame uses the direction vector scaled by magnitude; subsequent frames decay with random jitter.
   const triggerScreenShake = useCallback((magnitude: number, duration: number, dirX?: number, dirY?: number) => {
     const hasDirection = dirX != null && dirY != null;
     shakeRef.current = {
@@ -849,7 +283,6 @@ export function Race() {
     }
 
     const shakeStart = performance.now();
-    // Set the initial directional impulse immediately
     setShakeX(shakeRef.current.x);
     setShakeY(shakeRef.current.y);
 
@@ -863,7 +296,6 @@ export function Race() {
       }
       const decayFactor = 1 - elapsed / duration;
       const currentMag = magnitude * decayFactor;
-      // Early frames: blend directional bias with random jitter (bias fades over first 40% of duration)
       const dirBlend = hasDirection ? Math.max(0, 1 - elapsed / (duration * 0.4)) : 0;
       const randomX = (Math.random() - 0.5) * 2 * currentMag;
       const randomY = (Math.random() - 0.5) * 2 * currentMag;
@@ -888,14 +320,9 @@ export function Race() {
     }
 
     // Use the strongest collision for shake intensity
-    // sqrt scaling so even moderate collisions (200-500) produce noticeable shake
     const maxIntensity = Math.max(...collisions.map(c => c.intensity));
 
-    // Trigger slow-mo impact replay on big collisions
-    impactReplay.triggerImpact(maxIntensity);
-
     const magnitude = Math.min(15, Math.sqrt(maxIntensity) * 0.5);
-    // Duration scales with magnitude: 200ms for light taps, up to 500ms for heavy impacts
     const shakeDuration = 200 + Math.min(300, magnitude * 20);
 
     // Directional shake: compute direction from player to AI for collision impulse
@@ -908,7 +335,6 @@ export function Race() {
       const dy = ai.y - player.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
       if (dist > 0.01) {
-        // Normalize: camera jolts away from the collision source (opposite to impact direction)
         collDirX = -(dx / dist);
         collDirY = -(dy / dist);
       }
@@ -926,18 +352,6 @@ export function Race() {
       setTimeout(() => setCrashDesaturate(false), 250);
     }
 
-    // Collision commentary (only for significant impacts)
-    if (maxIntensity > 500) {
-      subtitleCommentary.triggerCommentary('collision');
-    }
-
-    // AI trash talk on collision: big hits trigger 'player_crash', lighter hits trigger 'collision'
-    if (maxIntensity > 2000) {
-      aiPersonality.triggerTrashTalk('player_crash');
-    } else if (maxIntensity > 300) {
-      aiPersonality.triggerTrashTalk('collision');
-    }
-
     return () => {
       if (shakeRafRef.current !== null) {
         cancelAnimationFrame(shakeRafRef.current);
@@ -950,7 +364,7 @@ export function Race() {
   const prevThrottleRef = useRef(0);
   const prevBrakeRef = useRef(0);
   const prevSpeedForShakeRef = useRef(0);
-  const impactPreClickCooldownRef = useRef(0); // timestamp of last pre-click
+  const impactPreClickCooldownRef = useRef(0);
 
   useEffect(() => {
     if (view !== 'racing') return;
@@ -962,31 +376,28 @@ export function Race() {
     const speed = player.speed_kmh ?? 0;
     const prevSpeed = prevSpeedForShakeRef.current;
 
-    // Hard acceleration onset: throttle jumps up significantly while moving
+    // Hard acceleration onset
     const throttleDelta = throttle - prevThrottleRef.current;
     if (throttleDelta > 0.4 && speed > 5) {
-      // Subtle backward jolt (dirY = 1 pushes camera down/back) scaled by speed
       const mag = Math.min(3, 1 + speed / 80);
       triggerScreenShake(mag, 120, 0, 1);
     }
 
-    // Hard braking onset: brake jumps up while at speed
+    // Hard braking onset
     const brakeDelta = brake - prevBrakeRef.current;
     if (brakeDelta > 0.4 && speed > 20) {
-      // Forward jolt (dirY = -1 pushes camera up/forward)
       const mag = Math.min(4, 1.5 + speed / 60);
       triggerScreenShake(mag, 180, 0, -1);
     }
 
-    // Speed loss jolt: sudden deceleration (not from braking) e.g. scraping wall
+    // Speed loss jolt
     const speedDrop = prevSpeedForShakeRef.current - speed;
     if (speedDrop > 30 && brake < 0.3) {
       const mag = Math.min(5, speedDrop / 15);
       triggerScreenShake(mag, 150);
     }
 
-    // Client-side impact pre-trigger: detect sudden speed change (likely collision)
-    // Plays a short click BEFORE the server collision event arrives for instant feedback
+    // Client-side impact pre-trigger
     if (Math.abs(speed - prevSpeed) > 20 && brake < 0.3) {
       const now = performance.now();
       if (now - impactPreClickCooldownRef.current > 500) {
@@ -1001,8 +412,7 @@ export function Race() {
   }, [view, gpu.raceState?.player?.throttle, gpu.raceState?.player?.brake, gpu.raceState?.player?.speed_kmh, triggerScreenShake, engineSound.playImpactPreClick]);
 
   // --- Adaptive music event triggers ---
-  // Track previous gap sign for overtake detection and previous lap for final lap
-  const prevGapSignRef = useRef<number>(0); // positive = player behind, negative = player ahead
+  const prevGapSignRef = useRef<number>(0);
   const prevLapRef = useRef<number>(0);
   const closeGapTriggeredRef = useRef(false);
 
@@ -1013,7 +423,7 @@ export function Race() {
 
     const gap = player.gap_seconds;
 
-    // Overtake detection: gap crosses from positive (behind) to negative (ahead)
+    // Overtake detection
     if (gap != null) {
       const currentSign = gap > 0 ? 1 : gap < 0 ? -1 : 0;
       if (prevGapSignRef.current > 0 && currentSign < 0) {
@@ -1021,38 +431,19 @@ export function Race() {
         engineSound.triggerEvent('overtake');
         engineSound.playPassingWhoosh();
         crowd.cheer();
-        aiPersonality.triggerTrashTalk('player_overtakes');
-        subtitleCommentary.triggerCommentary('overtake_player');
-        // Spike music stems intensity on overtake
-        musicStems.updateRaceState({
-          speed: player.speed_kmh,
-          maxSpeed: 200,
-          gap: gap,
-          lapNumber: player.lap,
-          totalLaps: player.total_laps,
-          isCloseRacing: Math.abs(gap) < 2.0,
-          isFinalLap: player.total_laps > 1 && player.lap === player.total_laps,
-          justOvertook: true,
-          raceFinished: false,
-          won: false,
-        });
       }
       if (prevGapSignRef.current < 0 && currentSign > 0) {
         // AI just overtook the player
         engineSound.playPassingWhoosh();
-        aiPersonality.triggerTrashTalk('ai_overtakes');
-        subtitleCommentary.triggerCommentary('overtake_ai');
       }
       prevGapSignRef.current = currentSign;
 
-      // Close gap tension: activate when |gap| < 1s, deactivate when |gap| >= 1s
+      // Close gap tension
       if (Math.abs(gap) < 1.0) {
         if (!closeGapTriggeredRef.current) {
           closeGapTriggeredRef.current = true;
           engineSound.triggerEvent('close_gap');
-          aiPersonality.triggerTrashTalk('close_gap');
         }
-        // Crowd anticipation scales with proximity (0.5s gap = max tension)
         crowd.setAnticipation(1 - Math.abs(gap));
       } else {
         if (closeGapTriggeredRef.current) {
@@ -1064,23 +455,16 @@ export function Race() {
 
       // Comeback mechanic: show slipstream boost visual when player is >3s behind
       setSlipstreamBoost(gap > 3.0);
-
-      // AI big lead trash talk: trigger when AI is >5s ahead
-      if (gap > 5.0) {
-        aiPersonality.triggerTrashTalk('big_lead');
-      }
     }
 
     // Final lap detection
     if (player.total_laps > 1 && player.lap === player.total_laps && prevLapRef.current !== player.total_laps) {
       engineSound.triggerEvent('final_lap');
-      subtitleCommentary.triggerCommentary('final_lap');
-      aiPersonality.triggerTrashTalk('final_lap');
     }
     prevLapRef.current = player.lap;
   }, [view, gpu.raceState?.player?.gap_seconds, gpu.raceState?.player?.lap, gpu.raceState?.player?.total_laps, gpu.raceState?.player?.checkpoint, gpu.raceState?.player?.total_checkpoints, engineSound.triggerEvent, engineSound.stopCloseGapTension, engineSound.playPassingWhoosh, crowd.cheer, crowd.setAnticipation]);
 
-  // Collision hit sound (percussive white noise burst, layered on top of existing impact)
+  // Collision hit sound (percussive white noise burst)
   useEffect(() => {
     const collisions = gpu.raceState?.collisions;
     if (!collisions || collisions.length === 0) return;
@@ -1123,11 +507,9 @@ export function Race() {
 
     // Detect lap change: reset checkpoint times for the new lap
     if (lap !== splitLapRef.current) {
-      // If completing a lap (lap increased), save splits for the completed lap
       if (lap > splitLapRef.current && splitLapRef.current > 0 && config) {
         const completedLapSplits = [...checkpointTimesRef.current];
-        const completedLapTime = player.best_lap ?? lapTime; // best_lap just got updated with the completed lap
-        // Save splits if this lap was a PB
+        const completedLapTime = player.best_lap ?? lapTime;
         if (completedLapSplits.length > 0) {
           personalBests.saveSplits(config.track, config.laps, completedLapTime, completedLapSplits);
         }
@@ -1140,14 +522,11 @@ export function Race() {
     // Detect checkpoint advance within the same lap
     const expectedIdx = checkpointTimesRef.current.length;
     if (cp === expectedIdx + 1 || (cp > 0 && cp > expectedIdx)) {
-      // Fill any skipped checkpoints (unlikely but defensive)
       while (checkpointTimesRef.current.length < cp - 1) {
         checkpointTimesRef.current.push(lapTime);
       }
-      // Record the current lap_time for this checkpoint
       checkpointTimesRef.current.push(lapTime);
 
-      // Compute delta against PB splits
       const cpIndex = checkpointTimesRef.current.length - 1;
       if (config) {
         const pbSplits = personalBests.getSplits(config.track, config.laps);
@@ -1156,7 +535,6 @@ export function Race() {
           setSplitDelta(delta);
           setSplitRawTime(lapTime);
         } else {
-          // No PB splits for this checkpoint -- show raw time
           setSplitDelta(null);
           setSplitRawTime(lapTime);
         }
@@ -1175,12 +553,12 @@ export function Race() {
     if (!player) return;
     const gap = player.gap_seconds;
     if (
-      gap != null && gap < 0 && // player ahead
+      gap != null && gap < 0 &&
       player.total_laps > 1 &&
       player.lap === player.total_laps &&
       player.total_checkpoints &&
-      player.checkpoint >= player.total_checkpoints * 0.8 && // last 20% of final lap
-      prevGapSignRef.current > 0 // just overtook
+      player.checkpoint >= player.total_checkpoints * 0.8 &&
+      prevGapSignRef.current > 0
     ) {
       setLastLapOvertake(true);
       setTimeout(() => setLastLapOvertake(false), 3000);
@@ -1193,28 +571,24 @@ export function Race() {
     const speed = gpu.raceState?.player?.speed_kmh ?? 0;
     const history = speedHistoryRef.current;
     history.push(speed);
-    // Keep last ~60 frames (2 seconds at 30fps)
     if (history.length > 60) history.shift();
 
     if (history.length >= 30) {
       const recentMax = Math.max(...history.slice(-30));
       const recentMin = Math.min(...history.slice(-30));
-      // Speed dropped >50% then recovered to >70% of peak
       if (recentMin < recentMax * 0.5 && speed > recentMax * 0.7 && recentMax > 60) {
-        // Only trigger once per recovery
         const midIdx = history.length - 15;
         const midSpeed = history[midIdx] ?? speed;
         if (midSpeed < recentMax * 0.5) {
           setNiceSave(true);
-          speedHistoryRef.current = [speed]; // Reset to prevent re-trigger
+          speedHistoryRef.current = [speed];
           setTimeout(() => setNiceSave(false), 2000);
-          subtitleCommentary.triggerCommentary('nice_save');
         }
       }
     }
   }, [view, gpu.raceState?.player?.speed_kmh]);
 
-  // --- Photo Finish tension detection: golden glow builds when approaching finish with gap < 1.0s ---
+  // --- Photo Finish tension detection ---
   useEffect(() => {
     if (view !== 'racing') return;
     const player = gpu.raceState?.player;
@@ -1222,7 +596,6 @@ export function Race() {
     const gap = player.gap_seconds;
     const raceStatus = gpu.raceState?.race_status;
 
-    // Detect approaching photo finish: final lap (or finishing), last ~10% checkpoints, gap < 1.0s
     const isFinalLap = player.lap === player.total_laps;
     const isFinishing = raceStatus === 'finishing';
     const totalCp = player.total_checkpoints ?? 0;
@@ -1232,7 +605,6 @@ export function Race() {
     if (gap != null && Math.abs(gap) < 1.0 && (isFinishing || (isFinalLap && isNearEnd))) {
       if (!photoFinishTension) {
         setPhotoFinishTension(true);
-        subtitleCommentary.triggerCommentary('photo_finish');
       }
     } else {
       if (photoFinishTension) {
@@ -1241,7 +613,7 @@ export function Race() {
     }
   }, [view, gpu.raceState?.player?.gap_seconds, gpu.raceState?.player?.lap, gpu.raceState?.player?.total_laps, gpu.raceState?.player?.checkpoint, gpu.raceState?.player?.total_checkpoints, gpu.raceState?.race_status, photoFinishTension]);
 
-  // --- Near-miss detection: "CLOSE CALL!" when player and AI pass within 3m at relative speed > 30 km/h ---
+  // --- Near-miss detection ---
   useEffect(() => {
     if (view !== 'racing') return;
     const player = gpu.raceState?.player;
@@ -1257,9 +629,7 @@ export function Race() {
     if (distance < 3 && relativeSpeed > 30 && !nearMissCooldownRef.current) {
       nearMissCooldownRef.current = true;
       setNearMiss(true);
-      // Animation: scale in + hold 0.8s + fade out 0.5s = ~1.3s total
       const hideTimeout = setTimeout(() => setNearMiss(false), 1300);
-      // 3-second cooldown before next trigger
       const cooldownTimeout = setTimeout(() => { nearMissCooldownRef.current = false; }, 3000);
       return () => {
         clearTimeout(hideTimeout);
@@ -1268,65 +638,37 @@ export function Race() {
     }
   }, [view, gpu.raceState?.player?.x, gpu.raceState?.player?.y, gpu.raceState?.ai?.x, gpu.raceState?.ai?.y, gpu.raceState?.player?.speed_kmh, gpu.raceState?.ai?.speed_kmh]);
 
-  // --- Drift boost: detect drift end with score > 200, trigger visual/audio effects ---
+  // --- Drift boost: detect drift end with score > 200 ---
   useEffect(() => {
     if (view !== 'racing') return;
     const driftEnd = gpu.latestDriftEnd;
     if (!driftEnd) return;
-    // Avoid re-triggering for the same event
     if (lastDriftBoostEventRef.current === driftEnd) return;
     lastDriftBoostEventRef.current = driftEnd;
 
     if (driftEnd.score > 200) {
-      // Show "DRIFT BOOST!" popup (1.5s total: scale-in + hold + fade)
       setDriftBoostActive(true);
       setTimeout(() => setDriftBoostActive(false), 1500);
 
-      // Orange edge glow (1.5s)
       setDriftBoostGlow(true);
       setTimeout(() => setDriftBoostGlow(false), 1500);
 
-      // Speed line intensification (1.5s)
       setDriftBoostSpeedLines(true);
       setTimeout(() => setDriftBoostSpeedLines(false), 1500);
 
-      // Boost sound effect
       engineSound.playDriftBoost();
-
-      // AI trash talk reacting to player's drift
-      aiPersonality.triggerTrashTalk('drift');
-      subtitleCommentary.triggerCommentary('drift');
     }
-  }, [view, gpu.latestDriftEnd, engineSound.playDriftBoost, aiPersonality.triggerTrashTalk]);
+  }, [view, gpu.latestDriftEnd, engineSound.playDriftBoost]);
 
-  // --- Voice boost: screen shake at max boost ---
-  const voiceBoostMaxRef = useRef(false);
-  useEffect(() => {
-    if (view !== 'racing') return;
-    if (voiceBoost.boostLevel > 0.8 && !voiceBoostMaxRef.current) {
-      voiceBoostMaxRef.current = true;
-      triggerScreenShake(4, 200);
-    }
-    if (voiceBoost.boostLevel < 0.5) {
-      voiceBoostMaxRef.current = false;
-    }
-  }, [view, voiceBoost.boostLevel, triggerScreenShake]);
-
-  // --- Background music + music stems + crowd ambiance + AI engine sound lifecycle ---
+  // --- Crowd ambiance lifecycle ---
   useEffect(() => {
     const status = gpu.raceState?.race_status;
     if (view === 'racing' && (status === 'racing' || status === 'finishing' || status === 'countdown')) {
-      bgMusic.start();
-      musicStems.start();
       crowd.start();
-      aiEngineSound.start();
     } else {
-      bgMusic.stop();
-      musicStems.stop();
       crowd.stop();
-      aiEngineSound.stop();
     }
-  }, [view, gpu.raceState?.race_status, bgMusic.start, bgMusic.stop, musicStems.start, musicStems.stop, crowd.start, crowd.stop, aiEngineSound.start, aiEngineSound.stop]);
+  }, [view, gpu.raceState?.race_status, crowd.start, crowd.stop]);
 
   // --- Wake Lock: prevent screen from sleeping during race ---
   useEffect(() => {
@@ -1344,7 +686,6 @@ export function Race() {
 
     requestWakeLock();
 
-    // Re-acquire wake lock when tab becomes visible again (released on visibility change)
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         requestWakeLock();
@@ -1371,7 +712,7 @@ export function Race() {
         if (key === 'w') {
           countdownRevRef.current = true;
         }
-        return; // Don't process other keys during countdown
+        return;
       }
 
       // Photo mode toggle: P key (only during racing, not during countdown)
@@ -1379,23 +720,16 @@ export function Race() {
         if (!photoModeActive) {
           setPhotoModeActive(true);
           gpu.sendPause();
-          // Release all keys so car stops
           keysRef.current = { w: false, a: false, s: false, d: false, space: false };
           gpu.sendControls({ w: false, a: false, s: false, d: false, space: false });
         }
         return;
       }
 
-      // ASCII Art Mode toggle: backtick/tilde key
-      if (key === '`' || key === '~') {
-        setAsciiMode(prev => !prev);
-        return;
-      }
-
       // Don't process driving keys while in photo mode
       if (photoModeActive) return;
 
-      if (key === 'r') {        // Respawn: teleport player back to last checkpoint
+      if (key === 'r') {
         gpu.sendRespawn();
         setShowRespawning(true);
         if (respawnTimeoutRef.current) clearTimeout(respawnTimeoutRef.current);
@@ -1403,12 +737,10 @@ export function Race() {
         return;
       }
       if (key === 'backspace') {
-        // Full race restart (like Trackmania)
         gpu.sendRestartRace();
         return;
       }
       if (key === 'f') {
-        // Toggle fullscreen
         if (document.fullscreenElement) {
           document.exitFullscreen().catch(() => {});
         } else {
@@ -1424,39 +756,7 @@ export function Race() {
         return;
       }
       if (key === 'm') {
-        // Toggle rear-view mirror
         setShowRearMirror(prev => !prev);
-        return;
-      }
-      if (key === 'v') {
-        // Save replay clip (last 15 seconds)
-        replayRecorder.saveClip().then(url => {
-          if (url) setShowClipPreview(true);
-        });
-        return;
-      }
-      if (key === 'g') {
-        // Export last 5 seconds as GIF
-        if (!gifExport.isEncoding) {
-          gifExport.exportGif().then(blob => {
-            if (blob) {
-              // Auto-download the GIF
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement('a');
-              a.href = url;
-              a.download = `shadow-driver-${Date.now()}.gif`;
-              document.body.appendChild(a);
-              a.click();
-              document.body.removeChild(a);
-              setTimeout(() => URL.revokeObjectURL(url), 10000);
-            }
-          });
-        }
-        return;
-      }
-      if (key === 'b') {
-        // Toggle AI Brain HUD
-        setShowAIBrain(prev => !prev);
         return;
       }
       if (key === ' ') {
@@ -1483,7 +783,6 @@ export function Race() {
     const resetAllKeys = () => {
       keysRef.current = { w: false, a: false, s: false, d: false, space: false };
       countdownRevRef.current = false;
-      // Send a "release all" control message to the server so the car stops moving
       gpu.sendControls({ w: false, a: false, s: false, d: false, space: false });
     };
 
@@ -1505,7 +804,7 @@ export function Race() {
     // Expose keysRef for browser console debugging
     (window as unknown as Record<string, unknown>).__keysRef = keysRef;
 
-    // Send controls at 30Hz, merging keyboard + gamepad + phone steering + voice commands
+    // Send controls at 30Hz, merging keyboard + gamepad
     keyIntervalRef.current = setInterval(() => {
       // E2E testing override: if window.__e2eKeys is set, use those keys
       const e2eKeys = (window as unknown as Record<string, unknown>).__e2eKeys as KeyState | undefined;
@@ -1513,45 +812,8 @@ export function Race() {
         keysRef.current = e2eKeys;
       }
 
-      // Voice command effects: overlay onto key state (read from ref for latest values)
-      const vc = voiceCommandEffectsRef.current;
-
-      // Twitch chat commands: overlay onto key state (read from ref for latest values)
-      const tc = twitchCommandRef.current;
-      const twitchKeys = {
-        w: tc === 'gas' || tc === 'boost',
-        a: tc === 'left',
-        s: tc === 'brake',
-        d: tc === 'right',
-        space: tc === 'drift',
-      };
-
-      if (phoneSteering.isActive) {
-        // Phone steering active: use gyroscope for analog controls
-        const phoneKeys: KeyState = {
-          w: phoneSteering.throttle > 0.05,
-          a: phoneSteering.steer < -0.05,
-          s: phoneSteering.brake > 0.05,
-          d: phoneSteering.steer > 0.05,
-          space: false,
-        };
-        // Merge: phone steering takes priority, also keep keyboard keys active
-        const mergedKeys: KeyState = {
-          w: keysRef.current.w || phoneKeys.w || vc.throttleBoost,
-          a: keysRef.current.a || phoneKeys.a || vc.steerLeft,
-          s: keysRef.current.s || phoneKeys.s || vc.brakeAssist,
-          d: keysRef.current.d || phoneKeys.d || vc.steerRight,
-          space: keysRef.current.space,
-        };
-        gpu.sendControls(mergedKeys, {
-          steer: phoneSteering.steer + (vc.steerLeft ? -0.3 : 0) + (vc.steerRight ? 0.3 : 0),
-          throttle: Math.min(1.0, phoneSteering.throttle + (vc.throttleBoost ? 0.5 : 0)),
-          brake: Math.min(1.0, phoneSteering.brake + (vc.brakeAssist ? 0.7 : 0)),
-          handbrake: false,
-        });
-      } else if (gamepad.connected) {
+      if (gamepad.connected) {
         // Gamepad connected: send analog controls
-        // Also set keyboard keys based on gamepad for server compatibility
         const gpKeys: KeyState = {
           w: gamepad.throttle > 0.05,
           a: gamepad.steering < -0.05,
@@ -1559,41 +821,22 @@ export function Race() {
           d: gamepad.steering > 0.05,
           space: gamepad.handbrake,
         };
-        // Merge: gamepad takes priority, but also keep keyboard keys active
-        // Voice commands also contribute to the merged state
         const mergedKeys: KeyState = {
-          w: keysRef.current.w || gpKeys.w || vc.throttleBoost,
-          a: keysRef.current.a || gpKeys.a || vc.steerLeft,
-          s: keysRef.current.s || gpKeys.s || vc.brakeAssist,
-          d: keysRef.current.d || gpKeys.d || vc.steerRight,
+          w: keysRef.current.w || gpKeys.w,
+          a: keysRef.current.a || gpKeys.a,
+          s: keysRef.current.s || gpKeys.s,
+          d: keysRef.current.d || gpKeys.d,
           space: keysRef.current.space || gpKeys.space,
         };
         gpu.sendControls(mergedKeys, {
-          steer: gamepad.steering + (vc.steerLeft ? -0.3 : 0) + (vc.steerRight ? 0.3 : 0),
-          throttle: Math.min(1.0, gamepad.throttle + (vc.throttleBoost ? 0.5 : 0)),
-          brake: Math.min(1.0, gamepad.brake + (vc.brakeAssist ? 0.7 : 0)),
+          steer: gamepad.steering,
+          throttle: gamepad.throttle,
+          brake: gamepad.brake,
           handbrake: gamepad.handbrake,
         });
       } else {
-        // Keyboard-only: merge voice command effects + Twitch chat into keys
-        const mergedKeys: KeyState = {
-          w: keysRef.current.w || vc.throttleBoost || twitchKeys.w,
-          a: keysRef.current.a || vc.steerLeft || twitchKeys.a,
-          s: keysRef.current.s || vc.brakeAssist || twitchKeys.s,
-          d: keysRef.current.d || vc.steerRight || twitchKeys.d,
-          space: keysRef.current.space || twitchKeys.space,
-        };
-        // When Twitch has analog-level commands, send analog controls for smoother steering
-        if (tc === 'left' || tc === 'right') {
-          gpu.sendControls(mergedKeys, {
-            steer: (tc === 'left' ? -0.5 : 0.5) + (vc.steerLeft ? -0.3 : 0) + (vc.steerRight ? 0.3 : 0),
-            throttle: twitchKeys.w ? 1.0 : (vc.throttleBoost ? 0.5 : 0),
-            brake: twitchKeys.s ? 1.0 : (vc.brakeAssist ? 0.7 : 0),
-            handbrake: twitchKeys.space,
-          });
-        } else {
-          gpu.sendControls(mergedKeys);
-        }
+        // Keyboard-only
+        gpu.sendControls(keysRef.current);
       }
     }, 33);
 
@@ -1614,25 +857,12 @@ export function Race() {
         clearTimeout(controlsHintTimeoutRef.current);
         controlsHintTimeoutRef.current = null;
       }
-      // Reset key state so stale keys don't persist across view changes
       keysRef.current = { w: false, a: false, s: false, d: false, space: false };
       countdownRevRef.current = false;
     };
-  }, [view, gpu.sendControls, gpu.sendRespawn, gpu.sendRestartRace, gpu.sendCameraMode, gpu.sendPause, gpu.raceState?.race_status, photoModeActive, gamepad.connected, gamepad.steering, gamepad.throttle, gamepad.brake, gamepad.handbrake, phoneSteering.isActive, phoneSteering.steer, phoneSteering.throttle, phoneSteering.brake, gifExport.isEncoding, gifExport.exportGif]);
+  }, [view, gpu.sendControls, gpu.sendRespawn, gpu.sendRestartRace, gpu.sendCameraMode, gpu.sendPause, gpu.raceState?.race_status, photoModeActive, gamepad.connected, gamepad.steering, gamepad.throttle, gamepad.brake, gamepad.handbrake]);
 
-
-  // --- Phone steering: vibrate on collisions ---
-  useEffect(() => {
-    if (!phoneSteering.isActive) return;
-    const collisions = gpu.raceState?.collisions;
-    if (!collisions || collisions.length === 0) return;
-    const maxIntensity = Math.max(...collisions.map(c => c.intensity));
-    // Scale vibration duration: light taps ~50ms, heavy impacts up to 200ms
-    const vibrationMs = Math.min(200, Math.round(Math.sqrt(maxIntensity) * 3));
-    phoneSteering.vibrate(vibrationMs);
-  }, [phoneSteering.isActive, gpu.raceState?.collisions, phoneSteering.vibrate]);
-
-  // --- Dismiss first-time overlay (stable ref to avoid re-render thrashing) ---
+  // --- Dismiss first-time overlay ---
   const dismissFirstTimeOverlay = useCallback(() => {
     setShowFirstTimeOverlay(false);
   }, []);
@@ -1674,45 +904,15 @@ export function Race() {
       setView('results');
       crowd.roar();
 
-      // Record race outcome in AI grudge system
-      aiGrudge.recordRaceEnd(gpu.raceFinished.winner === 'player');
-
-      // Record race outcome in AI Nemesis system
-      if (aiNemesis.currentNemesis && gpu.raceFinished.player_time != null && gpu.raceFinished.ai_time != null) {
-        const margin = Math.abs(gpu.raceFinished.player_time - gpu.raceFinished.ai_time) / 1000;
-        aiNemesis.recordResult(gpu.raceFinished.winner === 'player', margin);
-      }
-
-      // Signal music stems that race is finished (triggers victory/defeat fade)
-      musicStems.updateRaceState({
-        speed: 0,
-        maxSpeed: 200,
-        gap: 0,
-        lapNumber: 0,
-        totalLaps: 0,
-        isCloseRacing: false,
-        isFinalLap: false,
-        justOvertook: false,
-        raceFinished: true,
-        won: gpu.raceFinished.winner === 'player',
-      });
-
-      // Stop ghost recording
-      ghostRecorder.stop();
-
       // Snapshot final player trail for post-race display
       setPlayerTrail([...playerTrailRef.current]);
-
-      // Finalize highlight detection and store highlights for results screen
-      highlightDetector.onRaceFinished(gpu.raceFinished);
-      setRaceHighlights(highlightDetector.getHighlights());
 
       // --- Photo Finish detection: gap < 1.0s between player and AI ---
       const pTime = gpu.raceFinished.player_time;
       const aTime = gpu.raceFinished.ai_time;
       if (pTime != null && aTime != null && Math.abs(pTime - aTime) < 1.0) {
         setPhotoFinish(true);
-        setPhotoFinishTension(false); // clear tension, show the finish overlay
+        setPhotoFinishTension(false);
 
         // Play dramatic audio swell (rising chord + cymbal wash)
         try {
@@ -1720,7 +920,6 @@ export function Race() {
           const nodes: AudioNode[] = [];
           const now = ctx.currentTime;
 
-          // Master gain for the swell
           const master = ctx.createGain();
           master.gain.setValueAtTime(0, now);
           master.gain.linearRampToValueAtTime(0.25, now + 0.8);
@@ -1729,7 +928,6 @@ export function Race() {
           master.connect(ctx.destination);
           nodes.push(master);
 
-          // Rising chord: D major (D4=294, F#4=370, A4=440) with upward pitch bend
           const chordFreqs = [294, 370, 440];
           for (const freq of chordFreqs) {
             const osc = ctx.createOscillator();
@@ -1746,7 +944,6 @@ export function Race() {
             nodes.push(osc, oscGain);
           }
 
-          // Shimmering high pad (octave above, sawtooth for brightness)
           const shimmer = ctx.createOscillator();
           shimmer.type = 'sawtooth';
           shimmer.frequency.setValueAtTime(880, now);
@@ -1765,7 +962,6 @@ export function Race() {
           shimmer.stop(now + 3.0);
           nodes.push(shimmer, shimmerFilter, shimmerGain);
 
-          // Cymbal wash: filtered white noise burst
           const noiseLen = 3.0 * ctx.sampleRate;
           const noiseBuffer = ctx.createBuffer(1, noiseLen, ctx.sampleRate);
           const noiseData = noiseBuffer.getChannelData(0);
@@ -1791,16 +987,14 @@ export function Race() {
 
           photoFinishAudioRef.current = { ctx, nodes };
 
-          // Clean up audio context after swell finishes
           setTimeout(() => {
             ctx.close().catch(() => {});
             photoFinishAudioRef.current = null;
           }, 3500);
         } catch {
-          // Web Audio API not available -- visual-only fallback
+          // Web Audio API not available
         }
 
-        // Auto-dismiss after 3 seconds
         if (photoFinishTimeoutRef.current) clearTimeout(photoFinishTimeoutRef.current);
         photoFinishTimeoutRef.current = setTimeout(() => {
           setPhotoFinish(false);
@@ -1810,82 +1004,9 @@ export function Race() {
         setPhotoFinishTension(false);
       }
 
-      // Record streak (consecutive days played)
+      // Record streak
       const streakRes = streak.recordRace();
       setStreakResult(streakRes);
-
-      // Record adaptive difficulty (hidden win/loss tracking)
-      const playerWon = gpu.raceFinished.winner === 'player';
-      adaptiveDifficulty.recordResult(playerWon);
-
-      // Record AI grudge (persistent cross-session grudge tracking)
-      aiGrudge.recordRaceEnd(playerWon);
-
-      // AI personality: win/loss trash talk + grudge recording
-      aiPersonality.triggerTrashTalk(playerWon ? 'lose' : 'win');
-      aiPersonality.recordRaceResult(playerWon);
-
-      // Record race memory (persistent race history)
-      if (raceConfigRef.current && gpu.raceFinished.player_time != null) {
-        const memConfig = raceConfigRef.current;
-        const memSettings = lastRaceSettingsRef.current;
-        raceMemory.addMemory({
-          track: memConfig.track,
-          winner: playerWon ? 'player' : 'ai',
-          playerTime: gpu.raceFinished.player_time,
-          aiTime: gpu.raceFinished.ai_time ?? 0,
-          gap: Math.abs((gpu.raceFinished.player_time ?? 0) - (gpu.raceFinished.ai_time ?? 0)),
-          weather: memSettings?.weather ?? 'clear',
-          laps: memConfig.laps,
-          collisions: 0,
-          topSpeed: gpu.raceFinished.player_max_speed ?? 0,
-        });
-      }
-
-      // AI diary entry (AI writes about the race)
-      if (raceConfigRef.current) {
-        aiDiary.addRaceEntry({
-          track: raceConfigRef.current.track,
-          playerWon,
-          raceTimeMs: (gpu.raceFinished.player_time ?? 0) * 1000,
-          collisions: 0,
-          wasClose: gpu.raceFinished.ai_time != null && gpu.raceFinished.player_time != null
-            ? Math.abs(gpu.raceFinished.player_time - gpu.raceFinished.ai_time) < 2000
-            : false,
-          playerCrashed: false,
-          laps: raceConfigRef.current.laps,
-        });
-      }
-
-      // Evolve AI population (if evolution mode is enabled)
-      if (aiEvolution.autoEvolve) {
-        aiEvolution.evolve();
-      }
-
-      // Record daily timelapse frame
-      if (raceConfigRef.current) {
-        dailyTimelapse.addFrame({
-          type: 'finish',
-          description: `${playerWon ? 'Won' : 'Lost'} on ${raceConfigRef.current.track}`,
-          speed: gpu.raceFinished.player_max_speed ?? 0,
-          track: raceConfigRef.current.track,
-          raceId: `race-${Date.now()}`,
-        });
-      }
-
-      // Record to saddest leaderboard (tracks worst performances)
-      if (raceConfigRef.current && gpu.raceFinished.player_time != null) {
-        saddestLeaderboard.recordResult(
-          raceConfigRef.current.track,
-          gpu.raceFinished.player_time,
-          0, // collisions
-          0, // reverseTime
-          gpu.raceFinished.player_max_speed ?? 0,
-        );
-      }
-
-      // Win/loss commentary subtitle
-      subtitleCommentary.triggerCommentary(playerWon ? 'win' : 'loss');
 
       // Mark player as having played before (for first-time overlay)
       try { localStorage.setItem('shadow_driver_has_played', 'true'); } catch { /* ignore */ }
@@ -1909,19 +1030,12 @@ export function Race() {
           aiTime: gpu.raceFinished.ai_time,
         });
 
-        // Compute personal best result BEFORE saving (so we compare against the old best)
-        const settings = lastRaceSettingsRef.current;
+        // Compute personal best result BEFORE saving
         const pbResultData = personalBests.getResult(config.track, config.laps, gpu.raceFinished.player_time);
         setPbResult(pbResultData);
 
-        // PB commentary
-        if (pbResultData && pbResultData.isNewBest) {
-          subtitleCommentary.triggerCommentary('pb');
-        }
-
         // Save final lap's checkpoint splits if they exist
         if (checkpointTimesRef.current.length > 0) {
-          // Use the last lap time from server data, or fall back to estimating from total
           const lastLapTime = gpu.raceFinished.player_laps.length > 0
             ? gpu.raceFinished.player_laps[gpu.raceFinished.player_laps.length - 1]
             : gpu.raceFinished.player_time;
@@ -1931,6 +1045,7 @@ export function Race() {
         }
 
         // Save personal best
+        const settings = lastRaceSettingsRef.current;
         personalBests.saveBest({
           time: gpu.raceFinished.player_time,
           date: new Date().toISOString(),
@@ -1941,61 +1056,17 @@ export function Race() {
           topSpeed: gpu.raceFinished.player_max_speed ?? 0,
           driftScore: gpu.raceFinished.total_drift_score,
         });
-
-        // Save ghost replay data if this was a personal best
-        ghostRecorder.saveAsPersonalBest(config.track, config.laps, gpu.raceFinished.player_time);
-
-        // Save daily challenge result if applicable
-        if (isDailyChallenge) {
-          const daily = getDailyChallenge();
-          const dcResult = saveDailyChallengeResult(gpu.raceFinished.player_time, daily.daySeed);
-          setDailyChallengePosition(dcResult);
-        }
-
-        // Record tournament result if applicable
-        if (settings && tournaments.isCurrentTournamentRace(config.track, config.laps, settings.weather ?? 'clear', settings.model)) {
-          tournaments.recordResult(config.track, gpu.raceFinished.player_time);
-          // Compute tournament progress for the results screen
-          // Re-read progress after recording (state update is async, so compute eagerly)
-          const completedTracks = tournaments.current.tracks.filter(t => {
-            if (t === config.track) return true; // This track was just completed
-            return tournaments.getTrackBestTime(t) !== null;
-          });
-          const nextIncomplete = tournaments.current.tracks.find(t => {
-            if (t === config.track) return false; // We just raced this one
-            return tournaments.getTrackBestTime(t) === null;
-          });
-          setTournamentProgressResult({
-            tournamentName: tournaments.current.name,
-            tournamentIcon: tournaments.current.icon,
-            tracksCompleted: completedTracks.length,
-            totalTracks: tournaments.current.tracks.length,
-            badge: tournaments.badge, // Will update on next render
-            nextTrack: nextIncomplete ?? null,
-          });
-        } else {
-          setTournamentProgressResult(null);
-        }
       } else {
         setPbResult(null);
       }
     }
   }, [gpu.raceFinished]);
 
-  // --- Show clip preview when auto-highlight saves a clip ---
-  useEffect(() => {
-    if (replayRecorder.lastClipUrl) {
-      setShowClipPreview(true);
-    }
-  }, [replayRecorder.lastClipUrl]);
-
   const handleProceedToRace = useCallback(() => {
     setView('pre_race');
   }, []);
 
   // --- Speed-based FOV zoom ---
-  // Exponential scale: subtle at low speed, ramps aggressively above 150 km/h
-  // Hood/bumper cam: more aggressive curve for immersive first-person feel
   const isFirstPersonCam = cameraMode === 'hood' || cameraMode === 'bumper';
   const speedFovScale = useMemo(() => {
     const speed = gpu.raceState?.player?.speed_kmh ?? 0;
@@ -2007,8 +1078,6 @@ export function Race() {
   }, [gpu.raceState?.player?.speed_kmh, isFirstPersonCam]);
 
   // --- Camera G-force shift + brake/accel tilt ---
-  // Hard throttle: pushed back (translateY +2px, slight lean back)
-  // Hard brake: thrown forward (translateY -2px, slight lean forward)
   const gForceTransform = useMemo(() => {
     const throttle = gpu.raceState?.player?.throttle ?? 0;
     const brake = gpu.raceState?.player?.brake ?? 0;
@@ -2021,7 +1090,6 @@ export function Race() {
   }, [gpu.raceState?.player?.throttle, gpu.raceState?.player?.brake, gpu.raceState?.player?.speed_kmh]);
 
   // --- Speed-based motion blur ---
-  // Subtle CSS blur: 0px at rest, max 1.5px at 200+ km/h
   const motionBlurPx = useMemo(() => {
     const speed = gpu.raceState?.player?.speed_kmh ?? 0;
     const t = Math.min(1, speed / 200);
@@ -2055,22 +1123,12 @@ export function Race() {
     // Reset split time tracking for the new race
     checkpointTimesRef.current = [];
     splitLapRef.current = 0;
-    // Reset ghost recorder for the new race
-    ghostRecorder.reset();
     // Reset player trail and racing line for the new race
     playerTrailRef.current = [];
     lastTrailTimeRef.current = 0;
     setPlayerTrail([]);
     racingLineRef.current = null;
     setRacingLine(null);
-    // Initialize AI personality for trash talk
-    aiPersonality.initPersonality(model);
-    // Reset cargo integrity for the new race
-    cargoMode.reset();
-    // Reset blindfold mode timing for the new race
-    blindfoldMode.reset();
-    // Reset tab penalty tracking for the new race
-    tabPenalty.reset();
     if (isDemo || directWsUrl) {
       pendingDemoRaceRef.current = { track, laps, weather, model, player_car: playerCar, time_of_day: timeOfDay };
       const wsUrl = directWsUrl || DEMO_WS_URL;
@@ -2080,18 +1138,7 @@ export function Race() {
     }
   }, [gpu, isDemo, directWsUrl]);
 
-  // --- Daily Challenge handler ---
-  const handleStartDailyChallenge = useCallback(() => {
-    const daily = getDailyChallenge();
-    setIsDailyChallenge(true);
-    setDailyChallengePosition(null);
-    handleStartRace(daily.track, daily.laps, daily.weather, daily.model, undefined, daily.timeOfDay);
-  }, [handleStartRace]);
-
   const handlePlayAgain = useCallback(() => {
-    setIsDailyChallenge(false);
-    setDailyChallengePosition(null);
-    setTournamentProgressResult(null);
     setView('pre_race');
   }, []);
 
@@ -2101,7 +1148,6 @@ export function Race() {
     if (settings) {
       handleStartRace(settings.track, settings.laps, settings.weather, settings.model, settings.playerCar, settings.timeOfDay);
     } else {
-      // Fallback to setup if no saved settings
       setView('pre_race');
     }
   }, [handleStartRace]);
@@ -2165,93 +1211,19 @@ export function Race() {
         <RaceSetup
           onStartRace={handleStartRace}
           onBack={() => (isDemo || isQuickstart) ? (window.location.href = '/') : setView('setup')}
-          onStartDailyChallenge={handleStartDailyChallenge}
           quickstart={isQuickstart}
           isConnected={gpu.isConnected}
           urlSettings={urlSettings}
-          isCargoMode={cargoMode.isCargoMode}
-          onToggleCargoMode={cargoMode.setCargoMode}
-          isBlindfoldMode={blindfoldMode.isBlindfoldMode}
-          onToggleBlindfoldMode={blindfoldMode.setBlindfoldMode}
-          dareTime={effectiveDareTime}
-          challengeData={challengeData}
-          voiceCommandsSupported={voiceCommands.isSupported}
-          voiceCommandsEnabled={voiceCommands.isListening}
-          onToggleVoiceCommands={(on) => on ? voiceCommands.start() : voiceCommands.stop()}
-          phoneSteeringSupported={phoneSteering.isSupported}
-          phoneSteeringEnabled={phoneSteering.isActive}
-          onTogglePhoneSteering={(on) => on ? phoneSteering.enable() : phoneSteering.disable()}
-          ambientLightSupported={ambientLight.isSupported}
-          ambientLightEnabled={ambientLight.isActive}
-          onToggleAmbientLight={(on) => on ? ambientLight.enable() : ambientLight.disable()}
-          headTrackingSupported={headTracking.isSupported}
-          headTrackingEnabled={headTracking.enabled}
-          onToggleHeadTracking={(on) => on ? headTracking.enable() : headTracking.disable()}
-          twitchChannel={twitchChannel}
-          onSetTwitchChannel={setTwitchChannel}
-          synthwaveEnabled={synthwave.enabled}
-          onToggleSynthwave={synthwave.toggle}
-          timeZoneEnabled={timeZoneRacing.enabled}
-          timeZoneLabel={timeZoneRacing.timeOfDay}
-          onToggleTimeZone={timeZoneRacing.setEnabled}
-          drunkAIEnabled={drunkAIEnabled}
-          onToggleDrunkAI={setDrunkAIEnabled}
-          aiGrudgeMood={aiGrudge.mood}
-          aiGrudgeMessage={aiGrudge.moodMessage}
-          binauralEnabled={binauralEnabled}
-          onToggleBinaural={setBinauralEnabled}
-          aiNemesisName={aiNemesis.currentNemesis?.name}
-          aiNemesisTaunt={aiNemesis.currentNemesis ? aiNemesis.getPreRaceTaunt() : undefined}
-          stockWeatherEnabled={stockWeather.enabled}
-          onToggleStockWeather={stockWeather.setEnabled}
-          stockMarketMood={stockWeather.marketMood}
-          copycatEnabled={copycatEnabled}
-          onToggleCopycat={setCopycatEnabled}
-          backseatEnabled={backseatEnabled}
-          onToggleBackseat={setBackseatEnabled}
-          narrationEnabled={narrationEnabled}
-          onToggleNarration={setNarrationEnabled}
-          spectatorsEnabled={spectatorsEnabled}
-          onToggleSpectators={setSpectatorsEnabled}
-          reverseRaceEnabled={reverseRace.enabled}
-          onToggleReverseRace={reverseRace.setEnabled}
-          aiEvolutionGen={aiEvolution.currentGeneration}
-          evolutionEnabled={evolutionEnabled}
-          onToggleEvolution={setEvolutionEnabled}
-          totalRaces={raceMemory.totalRaces}
-          floorIsLavaEnabled={floorIsLavaEnabled}
-          onToggleFloorIsLava={setFloorIsLavaEnabled}
-          wrongWayChickenEnabled={wrongWayChickenEnabled}
-          onToggleWrongWayChicken={setWrongWayChickenEnabled}
-          shrinkingTrackEnabled={shrinkingTrackEnabled}
-          onToggleShrinkingTrack={setShrinkingTrackEnabled}
-          tagModeEnabled={tagModeEnabled}
-          onToggleTagMode={setTagModeEnabled}
-          copsEnabled={copsEnabled}
-          onToggleCops={setCopsEnabled}
-          musicalChairsEnabled={musicalChairsEnabled}
-          onToggleMusicalChairs={setMusicalChairsEnabled}
-          photoRallyEnabled={photoRallyEnabled}
-          onTogglePhotoRally={setPhotoRallyEnabled}
-          webcamReactionsEnabled={webcamReactionsEnabled}
-          onToggleWebcamReactions={setWebcamReactionsEnabled}
-          speedrunEnabled={speedrunEnabled}
-          onToggleSpeedrun={setSpeedrunEnabled}
-          infiniteEnabled={infiniteEnabled}
-          onToggleInfinite={setInfiniteEnabled}
-          eyeTrackingEnabled={eyeTrackingEnabled}
-          onToggleEyeTracking={setEyeTrackingEnabled}
         />
       )}
 
       {/* Racing view */}
       {view === 'racing' && (
         <div
-          className={`relative w-full h-screen overflow-hidden${synthwave.containerClass ? ` ${synthwave.containerClass}` : ''}`}
-          style={{ transform: `translate(${shakeX + earthquakeCamera.shakeX}px, ${shakeY + earthquakeCamera.shakeY}px) rotate(${earthquakeCamera.shakeRotation}deg)` }}
+          className="relative w-full h-screen overflow-hidden"
+          style={{ transform: `translate(${shakeX}px, ${shakeY}px)` }}
         >
           {/* Video feed: prefer WebRTC, fall back to JPEG canvas */}
-          {/* Speed-based FOV scale + client-side steering prediction + frame extrapolation + motion blur + countdown zoom + head tracking */}
           <div
             className="absolute inset-0"
             style={{
@@ -2259,19 +1231,14 @@ export function Race() {
               transform: isCountdown
                 ? countdownZoomStyle.transform
                 : [
-                    `scale(${speedFovScale + (headTracking.enabled ? headTracking.fovAdjust : 0)})`,
+                    `scale(${speedFovScale})`,
                     steeringPrediction.transform !== 'none' ? steeringPrediction.transform : '',
                     frameExtrapolation.transform !== 'none' ? frameExtrapolation.transform : '',
                     gForceTransform,
-                    headTracking.enabled && (headTracking.offsetX !== 0 || headTracking.offsetY !== 0)
-                      ? `translate(${headTracking.offsetX}px, ${headTracking.offsetY}px)`
-                      : '',
                   ].filter(Boolean).join(' '),
               filter: [
-                // Skip CSS blur when WebGL2 is active (radial blur shader handles it)
                 !useWebGL2 && motionBlurPx > 0.05 ? `blur(${motionBlurPx.toFixed(2)}px)` : '',
                 crashDesaturate ? 'grayscale(50%)' : '',
-                synthwave.videoFilter || '',
               ].filter(Boolean).join(' ') || 'none',
               transition: 'filter 100ms ease-out',
             }}
@@ -2299,16 +1266,7 @@ export function Race() {
           </div>
 
           {/* Speed lines overlay (anime-style radial lines at high speed) */}
-          <SpeedLines speedKmh={gpu.raceState?.player.speed_kmh ?? 0} intensityMultiplier={(isFirstPersonCam ? 1.5 : 1.0) * (driftBoostSpeedLines ? 2.0 : 1.0) * (voiceBoost.isActive ? 1.0 + voiceBoost.boostLevel * 1.5 : 1.0)} />
-
-          {/* Slipstream / drafting visual: converging blue-white streaks when behind AI */}
-          <SlipstreamEffect
-            playerX={gpu.raceState?.player?.x ?? 0}
-            playerY={gpu.raceState?.player?.y ?? 0}
-            aiX={gpu.raceState?.ai?.x ?? 0}
-            aiY={gpu.raceState?.ai?.y ?? 0}
-            speedKmh={gpu.raceState?.player?.speed_kmh ?? 0}
-          />
+          <SpeedLines speedKmh={gpu.raceState?.player.speed_kmh ?? 0} intensityMultiplier={(isFirstPersonCam ? 1.5 : 1.0) * (driftBoostSpeedLines ? 2.0 : 1.0)} />
 
           {/* Speed effects overlay (vignette + warp + collision flash + gear flash) */}
           <SpeedEffects
@@ -2317,69 +1275,12 @@ export function Race() {
             gear={gpu.raceState?.player.gear}
           />
 
-          {/* Voice-Powered Turbo Boost overlay (screen glow + TURBO text + volume bar + mic button) */}
-          <VoiceBoostOverlay
-            boostLevel={voiceBoost.boostLevel}
-            isActive={voiceBoost.isActive}
-            isListening={voiceBoost.isListening}
-            rawVolume={voiceBoost.rawVolume}
-            onToggle={voiceBoost.toggleVoiceBoost}
-          />
-
-          {/* Voice Command HUD (speech recognition: say go/brake/left/right) */}
-          {voiceCommands.isSupported && (
-            <VoiceCommandHUD
-              isListening={voiceCommands.isListening}
-              transcript={voiceCommands.transcript}
-              lastCommand={voiceCommands.lastCommand}
-              activeEffects={voiceCommands.activeEffects}
-              onToggle={() => {
-                if (voiceCommands.isListening) {
-                  voiceCommands.stop();
-                } else {
-                  voiceCommands.start();
-                }
-              }}
-            />
-          )}
-
-          {/* Twitch Plays overlay (vote bars, chat log, winning command) */}
-          {twitchChat.isConnected && (
-            <TwitchOverlay
-              isConnected={twitchChat.isConnected}
-              viewerCount={twitchChat.viewerCount}
-              currentCommand={twitchChat.currentCommand}
-              votes={twitchChat.votes}
-              chatLog={twitchChat.chatLog}
-              channel={twitchChat.channel}
-            />
-          )}
-
           {/* Particle effects overlay (sparks, tire smoke, rain) */}
           <ParticleOverlay
             collisions={gpu.raceState?.collisions}
             handbrake={keysRef.current.space}
             speedKmh={gpu.raceState?.player.speed_kmh ?? 0}
             weather={raceWeather}
-          />
-
-          {/* Dynamic weather overlay (rain streaks, fog, lightning, wind) */}
-          <WeatherOverlay
-            weatherMood={gpu.raceState?.weather_mood}
-            speedKmh={gpu.raceState?.player.speed_kmh ?? 0}
-          />
-
-          {/* Synthwave / Outrun aesthetic overlay (CRT scanlines, neon grid, VHS glitch) */}
-          <SynthwaveOverlay
-            enabled={synthwave.enabled}
-            speedKmh={gpu.raceState?.player.speed_kmh ?? 0}
-          />
-
-          {/* Canvas-based weather visual effects (rain particles, snow, thunder, fog blur) */}
-          <WeatherEffects
-            effects={weatherFx.effectState}
-            onLightningFlash={weatherFx.playThunder}
-            speedKmh={gpu.raceState?.player.speed_kmh ?? 0}
           />
 
           {/* Checkpoint celebration: brief green edge flash */}
@@ -2480,7 +1381,7 @@ export function Race() {
             </div>
           )}
 
-          {/* CLOSE CALL! near-miss popup: white streak flash + text when cars pass within 3m at speed */}
+          {/* CLOSE CALL! near-miss popup */}
           {nearMiss && (
             <>
               <div
@@ -2509,7 +1410,7 @@ export function Race() {
             </>
           )}
 
-          {/* Photo Finish approaching tension: pulsing golden edge glow during final stretch */}
+          {/* Photo Finish approaching tension: pulsing golden edge glow */}
           <div
             className="absolute inset-0 pointer-events-none z-20"
             style={{
@@ -2524,7 +1425,6 @@ export function Race() {
           {/* PHOTO FINISH! text overlay (on race results transition) */}
           {photoFinish && (
             <>
-              {/* Golden edge glow (stronger than tension, non-pulsing) */}
               <div
                 className="absolute inset-0 pointer-events-none z-30"
                 style={{
@@ -2532,7 +1432,6 @@ export function Race() {
                   animation: 'photoFinishGlow 3s ease-out forwards',
                 }}
               />
-              {/* Dramatic text */}
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-40">
                 <div
                   className="text-center"
@@ -2625,230 +1524,7 @@ export function Race() {
           `}</style>
 
           {/* HUD overlay */}
-          <RaceHUD raceState={gpu.raceState} latencyMs={gpu.latencyMs} gamepadConnected={gamepad.connected} localKeys={keysRef} browserQuip={browserQuip} batteryQuip={batteryQuip} batteryState={batteryDifficulty.battery} tabPenaltyMessage={tabPenalty.message} timeSyncActive={timeZoneRacing.enabled} />
-
-          {/* Cargo integrity meter (Fragile Cargo mode) */}
-          {cargoMode.isCargoMode && (gpu.raceState?.race_status === 'racing' || gpu.raceState?.race_status === 'finishing') && (
-            <CargoMeter
-              integrity={cargoMode.integrity}
-              isDamaged={cargoMode.isDamaged}
-              lastDamageType={cargoMode.lastDamageType}
-              raceFinished={gpu.raceState?.race_status === 'finishing'}
-            />
-          )}
-
-          {/* Blindfold Mode overlay (screen goes black every 3 seconds) */}
-          {blindfoldMode.isBlindfoldMode && (gpu.raceState?.race_status === 'racing' || gpu.raceState?.race_status === 'finishing') && (
-            <BlindfoldOverlay
-              isBlind={blindfoldMode.isBlind}
-              blindTimeLeft={blindfoldMode.blindTimeLeft}
-              visibleTimeLeft={blindfoldMode.visibleTimeLeft}
-            />
-          )}
-
-          {/* Drunk AI overlay (shows AI drunkenness level as it increases per lap) */}
-          <DrunkAIOverlay
-            drunkLevel={drunkAI.drunkLevel}
-            drunkLabel={drunkAI.drunkLabel}
-            enabled={drunkAI.enabled}
-          />
-
-          {/* AI Copycat message (when AI copies your crash) */}
-          {aiCopycat.copyMessage && (
-            <div className="absolute bottom-32 left-1/2 -translate-x-1/2 z-40 pointer-events-none">
-              <div className="bg-black/70 backdrop-blur-sm rounded-lg px-4 py-2 border border-yellow-500/30">
-                <p className="text-sm text-yellow-300 italic text-center">{aiCopycat.copyMessage}</p>
-              </div>
-            </div>
-          )}
-
-          {/* Cursor trail (post-race fun) */}
-          <CursorTrail enabled={view === 'results'} />
-
-          {/* Impact replay slow-motion overlay */}
-          {impactReplay.isReplaying && (
-            <div className="absolute inset-0 pointer-events-none z-30" style={impactReplay.replayStyle} />
-          )}
-          {impactReplay.impactText && (
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-35">
-              <div style={impactReplay.impactTextStyle}>
-                <span className="text-3xl sm:text-5xl font-black tracking-wider">{impactReplay.impactText}</span>
-              </div>
-            </div>
-          )}
-
-          {/* Backseat driver commentary */}
-          {backseatDriver.currentComment && (
-            <div className="absolute bottom-40 left-1/2 -translate-x-1/2 z-40 pointer-events-none">
-              <div className="bg-black/70 backdrop-blur-sm rounded-lg px-4 py-2 border border-orange-500/30 max-w-sm">
-                <p className="text-sm text-orange-300 italic text-center">{backseatDriver.currentComment}</p>
-              </div>
-            </div>
-          )}
-
-          {/* AI inner monologue */}
-          {aiNarration.currentThought && (
-            <div className="absolute top-24 right-4 z-40 pointer-events-none max-w-xs">
-              <div className="bg-black/70 backdrop-blur-sm rounded-lg px-3 py-2 border border-purple-500/30">
-                <div className="text-[10px] text-purple-400/70 font-mono uppercase tracking-wider mb-0.5">AI Thinking...</div>
-                <p className="text-xs text-purple-300 italic">{aiNarration.currentThought}</p>
-              </div>
-            </div>
-          )}
-
-          {/* NPC Spectator crowd chant */}
-          {npcSpectators.chantText && (
-            <div className="absolute bottom-48 left-1/2 -translate-x-1/2 z-35 pointer-events-none">
-              <div className="bg-black/50 backdrop-blur-sm rounded-full px-4 py-1.5 border border-white/20">
-                <p className="text-xs text-white/70 font-bold uppercase tracking-widest text-center">{npcSpectators.chantText}</p>
-              </div>
-            </div>
-          )}
-
-          {/* Game mode overlays */}
-          {floorIsLava.isInDangerZone && (
-            <div className="absolute top-20 left-1/2 -translate-x-1/2 z-40 pointer-events-none">
-              <div className="bg-red-900/80 backdrop-blur-sm rounded-lg px-4 py-2 border border-red-500/50" style={{ animation: 'pulse 0.5s ease-in-out infinite' }}>
-                <p className="text-sm text-red-300 font-bold uppercase tracking-wider">THE FLOOR IS LAVA!</p>
-              </div>
-            </div>
-          )}
-          {shrinkingTrack.warningText && (
-            <div className="absolute top-20 left-1/2 -translate-x-1/2 z-40 pointer-events-none">
-              <div className="bg-amber-900/70 backdrop-blur-sm rounded-lg px-4 py-2 border border-amber-500/40">
-                <p className="text-xs text-amber-300 font-bold uppercase tracking-wider">{shrinkingTrack.warningText}</p>
-              </div>
-            </div>
-          )}
-          {tagModeEnabled && tagMode.statusText && (
-            <div className="absolute top-20 right-4 z-40 pointer-events-none">
-              <div className="bg-black/70 backdrop-blur-sm rounded-lg px-3 py-2 border border-cyan-500/30">
-                <p className="text-xs text-cyan-300 font-mono">{tagMode.statusText}</p>
-              </div>
-            </div>
-          )}
-          {copsEnabled && copsAndRobbers.statusText && (
-            <div className="absolute top-20 right-4 z-40 pointer-events-none">
-              <div className={`bg-black/70 backdrop-blur-sm rounded-lg px-3 py-2 border ${copsAndRobbers.role === 'robber' ? 'border-red-500/30' : 'border-blue-500/30'}`}>
-                <p className={`text-xs font-mono ${copsAndRobbers.role === 'robber' ? 'text-red-300' : 'text-blue-300'}`}>{copsAndRobbers.statusText}</p>
-              </div>
-            </div>
-          )}
-          {musicalChairsEnabled && musicalChairs.statusText && (
-            <div className="absolute top-28 left-1/2 -translate-x-1/2 z-40 pointer-events-none">
-              <div className="bg-black/70 backdrop-blur-sm rounded-lg px-3 py-2 border border-pink-500/30">
-                <p className="text-xs text-pink-300 font-mono">{musicalChairs.statusText}</p>
-                {musicalChairs.timeUntilStop != null && (
-                  <div className="mt-1 h-1 bg-pink-900 rounded-full overflow-hidden">
-                    <div className="h-full bg-pink-400 transition-all" style={{ width: `${musicalChairs.urgency * 100}%` }} />
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-          {wrongWayChicken.lastResult && (
-            <div className="absolute top-20 left-1/2 -translate-x-1/2 z-40 pointer-events-none">
-              <div className="bg-black/70 backdrop-blur-sm rounded-lg px-4 py-2 border border-yellow-500/40">
-                <p className="text-sm text-yellow-300 font-bold">{wrongWayChicken.lastResult}</p>
-              </div>
-            </div>
-          )}
-          {photoRallyEnabled && photographyRally.isNearSpot && (
-            <div className="absolute bottom-56 left-1/2 -translate-x-1/2 z-40 pointer-events-none">
-              <div className="bg-black/70 backdrop-blur-sm rounded-lg px-4 py-2 border border-green-500/30">
-                <p className="text-xs text-green-300 font-mono">PHOTO SPOT! Press P to capture ({photographyRally.capturedCount}/{photographyRally.totalSpots})</p>
-              </div>
-            </div>
-          )}
-          {webcamReactions.aiComment && (
-            <div className="absolute bottom-56 right-4 z-40 pointer-events-none max-w-xs">
-              <div className="bg-black/70 backdrop-blur-sm rounded-lg px-3 py-2 border border-indigo-500/30">
-                <p className="text-xs text-indigo-300 italic">{webcamReactions.aiComment}</p>
-              </div>
-            </div>
-          )}
-          {infiniteEnabled && infiniteHighway.phaseMessage && (
-            <div className="absolute top-28 right-4 z-40 pointer-events-none">
-              <div className="bg-black/70 backdrop-blur-sm rounded-lg px-3 py-2 border border-emerald-500/30">
-                <p className="text-[10px] text-emerald-400/70 font-mono uppercase">Endless Mode</p>
-                <p className="text-xs text-emerald-300 font-mono">{infiniteHighway.phaseMessage}</p>
-                <p className="text-[10px] text-white/40 font-mono mt-0.5">{Math.round(infiniteHighway.distance)}m | x{infiniteHighway.multiplier.toFixed(1)}</p>
-              </div>
-            </div>
-          )}
-
-          {/* Ambient Light indicator (room brightness -> weather) */}
-          {ambientLight.isActive && (gpu.raceState?.race_status === 'racing' || gpu.raceState?.race_status === 'countdown') && (
-            <div className="absolute top-4 left-4 z-30 pointer-events-none">
-              <AmbientLightIndicator
-                brightness={ambientLight.brightness}
-                weatherZone={ambientLight.weatherZone}
-                zoneLabel={ambientLight.zoneLabel}
-              />
-            </div>
-          )}
-
-          {/* Head Tracking indicator (face tracking status + webcam preview) */}
-          {headTracking.enabled && (gpu.raceState?.race_status === 'racing' || gpu.raceState?.race_status === 'countdown') && (
-            <div className="absolute bottom-20 right-4 z-30">
-              <HeadTrackingIndicator
-                faceDetected={headTracking.faceDetected}
-                offsetX={headTracking.offsetX}
-                offsetY={headTracking.offsetY}
-                videoElement={headTracking.videoElement}
-              />
-            </div>
-          )}
-
-          {/* Phone steering overlay (gyroscope visual feedback) */}
-          {phoneSteering.isActive && (
-            <PhoneSteeringOverlay
-              isActive={phoneSteering.isActive}
-              steer={phoneSteering.steer}
-              throttle={phoneSteering.throttle}
-              brake={phoneSteering.brake}
-            />
-          )}
-
-          {/* Drunk AI overlay (shows AI drunkenness level) */}
-          <DrunkAIOverlay
-            drunkLevel={drunkAI.drunkLevel}
-            drunkLabel={drunkAI.drunkLabel}
-            enabled={drunkAI.enabled}
-          />
-
-          {/* Challenge ghost indicator banner */}
-          {showChallengeGhostBanner && challengeGhostFrames && (
-            <div className="absolute top-16 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
-              <div className="flex items-center gap-2 rounded-full px-4 py-1.5 border border-amber-500/30 bg-black/60 backdrop-blur-sm">
-                <div className="w-2 h-2 rounded-full bg-amber-400" style={{ animation: 'challenge-ghost-pulse 1.5s ease-in-out infinite' }} />
-                <span className="text-amber-400/90 text-xs font-bold uppercase tracking-wider">Racing against a friend's ghost</span>
-              </div>
-              <style>{`
-                @keyframes challenge-ghost-pulse {
-                  0%, 100% { opacity: 1; }
-                  50% { opacity: 0.4; }
-                }
-              `}</style>
-            </div>
-          )}
-
-          {/* Bet-Your-Laptime Challenge banner (from ?challenge= URL param) */}
-          {challengeData && !showChallengeGhostBanner && (
-            <div className="absolute top-16 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
-              <div className="flex items-center gap-2 rounded-full px-5 py-2 border border-purple-500/30 bg-black/70 backdrop-blur-sm">
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-purple-400">
-                  <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6" /><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18" />
-                  <path d="M4 22h16" /><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22" />
-                  <path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22" />
-                  <path d="M18 2H6v7a6 6 0 0 0 12 0V2Z" />
-                </svg>
-                <span className="text-purple-400/90 text-xs font-bold uppercase tracking-wider">
-                  Beat {challengeData.playerName}'s {formatChallengeTime(challengeData.time)}
-                </span>
-              </div>
-            </div>
-          )}
+          <RaceHUD raceState={gpu.raceState} latencyMs={gpu.latencyMs} gamepadConnected={gamepad.connected} localKeys={keysRef} />
 
           {/* Drift score overlay (active drift display + score popups + total score) */}
           <DriftScore
@@ -2857,21 +1533,6 @@ export function Race() {
             driftEndEvent={gpu.latestDriftEnd}
             showDriftBoost={driftBoostActive}
           />
-
-          {/* AI race commentary */}
-          <CommentaryOverlay messages={gpu.commentary} spokenText={commentary.isEnabled ? commentary.currentText : null} />
-
-          {/* Static AI commentary subtitles (event-triggered, pre-generated lines) */}
-          <CommentarySubtitle line={subtitleCommentary.currentLine} />
-
-          {/* AI opponent trash talk bubble (personality-aware) */}
-          <AIChat
-            personality={aiPersonality.personality}
-            message={aiPersonality.currentMessage}
-            isGrudgeMode={aiPersonality.isGrudgeMode}
-          />
-          {/* Fallback: server-sent AI chat (if server sends ai_chat messages) */}
-          <AIChatBubble message={gpu.aiChat} />
 
           {/* Exit button */}
           <button
@@ -2897,42 +1558,24 @@ export function Race() {
             </div>
           )}
 
-          {/* Minimap with optional challenge ghost from URL */}
+          {/* Minimap */}
           <Minimap
             raceState={gpu.raceState}
-            challengeGhost={challengeGhostFrames && challengeGhostStartRef.current > 0 ? {
-              frames: challengeGhostFrames,
-              startTime: challengeGhostStartRef.current,
-            } : null}
+            challengeGhost={null}
             racingLine={racingLine}
             playerTrail={playerTrail}
-            raceFinished={view === 'results'}
-            sectorTimes={view === 'results' && gpu.raceFinished?.sector_times ? gpu.raceFinished.sector_times : null}
+            raceFinished={false}
+            sectorTimes={null}
           />
 
           {/* Rear-view mirror (toggle with M key) */}
           <RearMirror onRearFrame={gpu.onRearFrame} visible={showRearMirror} />
 
-          {/* AI Brain HUD: neural network explainability overlay (toggle with B key) */}
-          {(gpu.raceState?.race_status === 'racing' || gpu.raceState?.race_status === 'finishing') && (
-            <AIBrainHUD
-              steer={gpu.raceState?.ai?.steer ?? 0}
-              throttle={gpu.raceState?.ai?.throttle ?? 0}
-              brake={gpu.raceState?.ai?.brake ?? 0}
-              speed={gpu.raceState?.ai?.speed_kmh ?? 0}
-              playerGap={gpu.raceState?.player?.gap_seconds ?? 0}
-              isVisible={showAIBrain}
-            />
-          )}
-
-          {/* Mute/unmute button (controls both engine sound and background music) */}
+          {/* Mute/unmute button */}
           <button
             onClick={() => {
               const newMuted = !engineSound.isMuted;
               engineSound.setMuted(newMuted);
-              aiEngineSound.setMuted(newMuted);
-              bgMusic.setMuted(newMuted);
-              musicStems.setMuted(newMuted);
               crowd.setMuted(newMuted);
             }}
             className="absolute top-[88px] left-4 z-10 pointer-events-auto bg-black/60 backdrop-blur-sm rounded-lg px-3 py-2 text-white/60 hover:text-white text-sm border border-white/10 transition-colors"
@@ -2949,30 +1592,6 @@ export function Race() {
                 <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
                 <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
                 <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-              </svg>
-            )}
-          </button>
-
-          {/* Commentary toggle button */}
-          <button
-            onClick={commentary.toggleCommentary}
-            className="absolute top-[132px] left-4 z-10 pointer-events-auto bg-black/60 backdrop-blur-sm rounded-lg px-3 py-2 text-white/60 hover:text-white text-sm border border-white/10 transition-colors"
-            title={commentary.isEnabled ? 'Disable Commentary' : 'Enable Commentary'}
-          >
-            {commentary.isEnabled ? (
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                <line x1="12" y1="19" x2="12" y2="23" />
-                <line x1="8" y1="23" x2="16" y2="23" />
-              </svg>
-            ) : (
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                <line x1="12" y1="19" x2="12" y2="23" />
-                <line x1="8" y1="23" x2="16" y2="23" />
-                <line x1="1" y1="1" x2="23" y2="23" />
               </svg>
             )}
           </button>
@@ -2994,7 +1613,6 @@ export function Race() {
           {!gpu.isConnected && (
             <div className="absolute inset-0 flex items-center justify-center z-40 pointer-events-none bg-black/60">
               <div className="flex flex-col items-center gap-5">
-                {/* Pulsing dot animation */}
                 <div className="relative w-16 h-16 flex items-center justify-center">
                   <div
                     className="absolute w-16 h-16 rounded-full"
@@ -3027,180 +1645,6 @@ export function Race() {
           {/* Controls hint: appears briefly when race starts after countdown */}
           <ControlsHint visible={showControlsHint} />
 
-          {/* Save clip button (camera icon) */}
-          {replayRecorder.isRecording && (
-            <button
-              onClick={() => {
-                replayRecorder.saveClip().then(url => {
-                  if (url) setShowClipPreview(true);
-                });
-              }}
-              className="absolute bottom-20 left-4 z-10 pointer-events-auto bg-black/60 backdrop-blur-sm rounded-lg px-3 py-2 text-white/60 hover:text-white text-sm border border-white/10 transition-colors"
-              title="Save Clip (V)"
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
-                <circle cx="12" cy="13" r="4" />
-              </svg>
-            </button>
-          )}
-
-          {/* Recording indicator dot */}
-          {replayRecorder.isRecording && (
-            <div className="absolute bottom-[132px] left-5 z-10 flex items-center gap-1.5">
-              <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse shadow-[0_0_6px_rgba(239,68,68,0.8)]" />
-              <span className="text-white/30 text-[10px] font-mono">REC</span>
-            </div>
-          )}
-
-          {/* Clip preview overlay */}
-          <ClipPreview
-            clipUrl={showClipPreview ? replayRecorder.lastClipUrl : null}
-            onDismiss={() => setShowClipPreview(false)}
-            onDownload={() => {
-              if (replayRecorder.lastClipUrl) {
-                const a = document.createElement('a');
-                a.href = replayRecorder.lastClipUrl;
-                a.download = `shadow-driver-clip-${Date.now()}.webm`;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-              }
-            }}
-          />
-
-          {/* Screen recording controls */}
-          <RecordingControls
-            isRecording={screenRecorder.isRecording}
-            recordingDuration={screenRecorder.recordingDuration}
-            lastRecordingUrl={screenRecorder.lastRecordingUrl}
-            autoRecordEnabled={screenRecorder.autoRecordEnabled}
-            isSupported={screenRecorder.isSupported}
-            onToggleRecording={screenRecorder.toggleRecording}
-            onDownload={screenRecorder.downloadRecording}
-            onShare={screenRecorder.shareRecording}
-            onToggleAutoRecord={screenRecorder.toggleAutoRecord}
-            onDismiss={screenRecorder.dismissRecording}
-          />
-
-          {/* GIF export button (G key) */}
-          <button
-            onClick={() => {
-              if (!gifExport.isEncoding) {
-                gifExport.exportGif().then(blob => {
-                  if (blob) {
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = `shadow-driver-${Date.now()}.gif`;
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
-                    setTimeout(() => URL.revokeObjectURL(url), 10000);
-                  }
-                });
-              }
-            }}
-            disabled={gifExport.isEncoding || gifExport.bufferFrameCount === 0}
-            className={`absolute bottom-20 left-16 z-10 pointer-events-auto bg-black/60 backdrop-blur-sm rounded-lg px-3 py-2 text-sm border transition-colors ${
-              gifExport.isEncoding
-                ? 'text-amber-400 border-amber-500/40 cursor-wait'
-                : gifExport.bufferFrameCount === 0
-                  ? 'text-white/20 border-white/5 cursor-not-allowed'
-                  : 'text-white/60 hover:text-white border-white/10 hover:border-white/30'
-            }`}
-            title={gifExport.isEncoding ? `Encoding GIF... ${gifExport.encodingProgress}%` : 'Save GIF of last 5 seconds (G)'}
-          >
-            {gifExport.isEncoding ? (
-              <span className="font-mono text-xs font-bold animate-pulse">GIF {gifExport.encodingProgress}%</span>
-            ) : (
-              <span className="font-mono text-xs font-bold">GIF</span>
-            )}
-          </button>
-
-          {/* GIF export preview card */}
-          {gifExport.lastGifUrl && !gifExport.isEncoding && (
-            <div
-              className="absolute bottom-20 left-32 z-40 pointer-events-auto"
-              style={{ animation: 'gifPreviewSlideIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards' }}
-            >
-              <style>{`
-                @keyframes gifPreviewSlideIn {
-                  from { transform: translateY(10px); opacity: 0; }
-                  to { transform: translateY(0); opacity: 1; }
-                }
-              `}</style>
-              <div className="bg-black/85 backdrop-blur-md rounded-xl border border-white/15 overflow-hidden shadow-2xl" style={{ width: '200px' }}>
-                <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/10">
-                  <span className="text-green-400 text-[10px] font-bold font-mono uppercase tracking-wider">
-                    GIF Ready
-                  </span>
-                  <button
-                    onClick={gifExport.dismissGif}
-                    className="text-white/40 hover:text-white/80 transition-colors"
-                  >
-                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <line x1="18" y1="6" x2="6" y2="18" />
-                      <line x1="6" y1="6" x2="18" y2="18" />
-                    </svg>
-                  </button>
-                </div>
-                <div className="relative w-full" style={{ aspectRatio: '16/9' }}>
-                  <img
-                    src={gifExport.lastGifUrl}
-                    alt="GIF preview"
-                    className="w-full h-full object-cover"
-                  />
-                </div>
-                <div className="flex gap-1.5 p-1.5">
-                  <button
-                    onClick={gifExport.downloadGif}
-                    className="flex-1 flex items-center justify-center gap-1 bg-white/10 hover:bg-white/20 rounded-lg px-2 py-1 text-white text-[10px] font-mono transition-colors border border-white/10"
-                  >
-                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                      <polyline points="7 10 12 15 17 10" />
-                      <line x1="12" y1="15" x2="12" y2="3" />
-                    </svg>
-                    Save
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (gifExport.lastGifBlob && navigator.share) {
-                        const file = new File(
-                          [gifExport.lastGifBlob],
-                          `shadow-driver-${Date.now()}.gif`,
-                          { type: 'image/gif' },
-                        );
-                        if (navigator.canShare?.({ files: [file] })) {
-                          navigator.share({
-                            title: 'Shadow Driver Race Clip',
-                            text: 'Check out this racing moment!',
-                            files: [file],
-                          }).catch(() => {});
-                        } else {
-                          gifExport.downloadGif();
-                        }
-                      } else {
-                        gifExport.downloadGif();
-                      }
-                    }}
-                    className="flex-1 flex items-center justify-center gap-1 bg-green-500/20 hover:bg-green-500/30 rounded-lg px-2 py-1 text-green-400 text-[10px] font-mono transition-colors border border-green-500/20"
-                  >
-                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <circle cx="18" cy="5" r="3" />
-                      <circle cx="6" cy="12" r="3" />
-                      <circle cx="18" cy="19" r="3" />
-                      <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
-                      <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
-                    </svg>
-                    Share
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
           {/* Photo Mode overlay */}
           {photoModeActive && (
             <PhotoMode
@@ -3208,9 +1652,6 @@ export function Race() {
               onExit={handleExitPhotoMode}
             />
           )}
-
-          {/* ASCII Art Mode overlay: converts video to colored ASCII characters */}
-          <AsciiOverlay canvasRef={replayCanvasRef} enabled={asciiMode} />
 
           {/* First-time player overlay: full controls guide, dismiss with any key */}
           <FirstTimeOverlay
@@ -3230,32 +1671,9 @@ export function Race() {
             raceSettings={raceSettingsForResults}
             onInstantReplay={handleInstantReplay}
             personalBestResult={pbResult}
-            isDailyChallenge={isDailyChallenge}
-            dailyChallengePosition={dailyChallengePosition}
             streakResult={streakResult}
-            ghostFrames={ghostRecorder.getGhostData().frames}
-            dareTime={effectiveDareTime}
-            challengeData={challengeData}
-            cargoIntegrity={cargoMode.isCargoMode ? cargoMode.integrity : undefined}
-            cargoScore={cargoMode.isCargoMode && gpu.raceFinished.player_time != null ? cargoMode.computeScore(gpu.raceFinished.player_time) : undefined}
-            blindfoldTotalTime={blindfoldMode.isBlindfoldMode ? blindfoldMode.totalBlindTime : undefined}
-            tabPenalty={tabPenalty.switchCount > 0 ? { switchCount: tabPenalty.switchCount, totalSecondsAway: tabPenalty.totalSecondsAway } : undefined}
-            highlights={raceHighlights}
-            tournamentProgress={tournamentProgressResult}
-            onNextTournamentTrack={tournamentProgressResult?.nextTrack ? () => {
-              // Navigate to the next tournament track with pre-filled settings
-              const next = tournamentProgressResult.nextTrack;
-              if (!next) return;
-              const params = new URLSearchParams(window.location.search);
-              params.set('track', next);
-              params.set('laps', String(tournaments.current.laps));
-              params.set('weather', tournaments.current.weather);
-              params.set('model', tournaments.current.model);
-              params.set('timeOfDay', tournaments.current.timeOfDay);
-              window.location.href = `/race?${params.toString()}`;
-            } : undefined}
           />
-          {/* Photo Finish overlay on results screen (golden glow + text, auto-dismisses after 3s) */}
+          {/* Photo Finish overlay on results screen */}
           {photoFinish && (
             <>
               <div

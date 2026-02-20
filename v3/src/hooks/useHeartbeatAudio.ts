@@ -34,14 +34,8 @@ declare global {
     startNotifications(): Promise<BluetoothRemoteGATTCharacteristic>;
     stopNotifications(): Promise<BluetoothRemoteGATTCharacteristic>;
     readValue(): Promise<DataView>;
-    addEventListener(
-      type: 'characteristicvaluechanged',
-      listener: (event: Event & { target: BluetoothRemoteGATTCharacteristic }) => void,
-    ): void;
-    removeEventListener(
-      type: 'characteristicvaluechanged',
-      listener: (event: Event & { target: BluetoothRemoteGATTCharacteristic }) => void,
-    ): void;
+    addEventListener(type: string, listener: EventListenerOrEventListenerObject | null, options?: boolean | AddEventListenerOptions): void;
+    removeEventListener(type: string, listener: EventListenerOrEventListenerObject | null, options?: boolean | EventListenerOptions): void;
   }
 
   interface BluetoothRemoteGATTService {
@@ -389,7 +383,7 @@ export function useHeartbeatAudio(options: UseHeartbeatAudioOptions): UseHeartbe
     // Remove characteristic listener
     if (btCharRef.current && btListenerRef.current) {
       try {
-        btCharRef.current.removeEventListener('characteristicvaluechanged', btListenerRef.current);
+        btCharRef.current.removeEventListener('characteristicvaluechanged', btListenerRef.current as EventListener);
         void btCharRef.current.stopNotifications();
       } catch {
         // already disconnected
@@ -453,7 +447,7 @@ export function useHeartbeatAudio(options: UseHeartbeatAudioOptions): UseHeartbe
       };
 
       btListenerRef.current = onValue;
-      characteristic.addEventListener('characteristicvaluechanged', onValue);
+      characteristic.addEventListener('characteristicvaluechanged', onValue as EventListener);
       await characteristic.startNotifications();
 
       setIsConnected(true);
@@ -510,7 +504,7 @@ export function useHeartbeatAudio(options: UseHeartbeatAudioOptions): UseHeartbe
       // Disconnect Bluetooth
       if (btCharRef.current && btListenerRef.current) {
         try {
-          btCharRef.current.removeEventListener('characteristicvaluechanged', btListenerRef.current);
+          btCharRef.current.removeEventListener('characteristicvaluechanged', btListenerRef.current as EventListener);
           void btCharRef.current.stopNotifications();
         } catch { /* ok */ }
       }

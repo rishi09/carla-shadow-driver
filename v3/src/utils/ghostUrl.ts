@@ -245,7 +245,7 @@ function subsample<T>(arr: T[], maxCount: number): T[] {
 async function compressGzip(data: Uint8Array): Promise<Uint8Array> {
   const cs = new CompressionStream('gzip');
   const writer = cs.writable.getWriter();
-  writer.write(data);
+  writer.write(data as unknown as BufferSource);
   writer.close();
 
   const reader = cs.readable.getReader();
@@ -270,7 +270,7 @@ async function compressGzip(data: Uint8Array): Promise<Uint8Array> {
 async function decompressGzip(data: Uint8Array): Promise<Uint8Array> {
   const ds = new DecompressionStream('gzip');
   const writer = ds.writable.getWriter();
-  writer.write(data);
+  writer.write(data as unknown as BufferSource);
   writer.close();
 
   const reader = ds.readable.getReader();

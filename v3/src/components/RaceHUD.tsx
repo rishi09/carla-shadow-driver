@@ -1,14 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
-import type { RaceState, AIEmotion, KeyState } from '../types/index.ts';
+import type { RaceState, KeyState } from '../types/index.ts';
 import { RaceProgressBar } from './RaceProgressBar.tsx';
 import { ArcSpeedometer } from './ArcSpeedometer.tsx';
-
-interface BatteryDisplayState {
-  level: number | null;
-  charging: boolean;
-  isAvailable: boolean;
-  percent: number | null;
-}
 
 interface RaceHUDProps {
   raceState: RaceState | null;
@@ -16,19 +9,9 @@ interface RaceHUDProps {
   gamepadConnected?: boolean;
   className?: string;
   localKeys?: React.RefObject<KeyState>;
-  /** Browser quip to display during countdown */
-  browserQuip?: string;
-  /** Battery quip to display during countdown */
-  batteryQuip?: string;
-  /** Battery state for HUD indicator */
-  batteryState?: BatteryDisplayState;
-  /** Tab penalty message to display as a toast */
-  tabPenaltyMessage?: { text: string; id: number } | null;
-  /** Whether time-zone-aware racing is active (shows local time indicator) */
-  timeSyncActive?: boolean;
 }
 
-export function RaceHUD({ raceState, latencyMs, gamepadConnected = false, className = '', localKeys, browserQuip, batteryQuip, batteryState, tabPenaltyMessage, timeSyncActive }: RaceHUDProps) {
+export function RaceHUD({ raceState, latencyMs, gamepadConnected = false, className = '', localKeys }: RaceHUDProps) {
   // Track HUD visibility for fade-in on GO
   const [hudVisible, setHudVisible] = useState(false);
   const prevStatusRef = useRef<string | null>(null);
@@ -69,7 +52,7 @@ export function RaceHUD({ raceState, latencyMs, gamepadConnected = false, classN
     <div className={`absolute inset-0 pointer-events-none ${className}`} style={{ textShadow: '0 1px 3px rgba(0,0,0,0.8)' }}>
       {/* Cinematic countdown overlay */}
       {race_status === 'countdown' && countdown !== null && countdown !== undefined && (
-        <CountdownOverlay countdown={countdown} browserQuip={browserQuip} batteryQuip={batteryQuip} />
+        <CountdownOverlay countdown={countdown} />
       )}
 
       {/* Top bar: position + lap -- hidden during countdown, fades in on GO */}
@@ -94,10 +77,6 @@ export function RaceHUD({ raceState, latencyMs, gamepadConnected = false, classN
         {(race_status === 'racing' || race_status === 'finishing') && player.gap_seconds != null && (
           <div className="bg-black/60 backdrop-blur-sm rounded-lg px-4 py-2 border border-white/20 flex items-center gap-3">
             <GapTimer gap={player.gap_seconds} />
-            {/* AI Emotion indicator next to gap */}
-            {raceState.ai_emotion && (
-              <AIEmotionBadge emotion={raceState.ai_emotion} />
-            )}
           </div>
         )}
 
@@ -219,9 +198,6 @@ export function RaceHUD({ raceState, latencyMs, gamepadConnected = false, classN
           {raceState.weather_mood && raceState.weather_mood.mood !== 'CALM' && (
             <WeatherIndicator mood={raceState.weather_mood.mood} intensity={raceState.weather_mood.intensity} />
           )}
-          {timeSyncActive && (
-            <TimeSyncIndicator />
-          )}
           <div className="text-white/20 text-xs font-mono mt-1">WASD + Space | R=Respawn | C=Camera | G=GIF | B=AI Brain</div>
           {gamepadConnected && (
             <div className="flex items-center gap-1.5 mt-1">
@@ -229,45 +205,17 @@ export function RaceHUD({ raceState, latencyMs, gamepadConnected = false, classN
               <span className="text-green-400/60 text-[10px] font-mono">Gamepad</span>
             </div>
           )}
-          {/* Battery indicator (only when Battery API is available) */}
-          {batteryState?.isAvailable && batteryState.percent != null && (
-            <BatteryIndicator percent={batteryState.percent} charging={batteryState.charging} />
-          )}
         </div>
       </div>
 
-      {/* Tab penalty toast message (appears when player returns from another tab) */}
-      {tabPenaltyMessage && (
-        <div
-          key={tabPenaltyMessage.id}
-          className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-40 pointer-events-none"
-          style={{ animation: 'tabPenaltyFade 3s ease-out forwards' }}
-        >
-          <div className="bg-red-900/80 backdrop-blur-sm border border-red-500/50 rounded-lg px-6 py-3 shadow-lg shadow-red-500/20">
-            <div className="text-red-300 text-sm font-mono text-center whitespace-nowrap">
-              {tabPenaltyMessage.text}
-            </div>
-          </div>
-          <style>{`
-            @keyframes tabPenaltyFade {
-              0% { opacity: 0; transform: translate(-50%, -50%) scale(0.9); }
-              10% { opacity: 1; transform: translate(-50%, -50%) scale(1.0); }
-              70% { opacity: 1; transform: translate(-50%, -50%) scale(1.0); }
-              100% { opacity: 0; transform: translate(-50%, -55%) scale(0.95); }
-            }
-          `}</style>
-        </div>
-      )}
     </div>
   );
 }
 
 /** Enhanced cinematic 3-2-1-GO countdown with slam animations and screen effects */
-function CountdownOverlay({ countdown, browserQuip, batteryQuip }: { countdown: number; browserQuip?: string; batteryQuip?: string }) {
+function CountdownOverlay({ countdown }: { countdown: number }) {
   const [animPhase, setAnimPhase] = useState(0);
   const prevCountdownRef = useRef(countdown);
-  const [showQuip, setShowQuip] = useState(false);
-  const quipShownRef = useRef(false);
 
   useEffect(() => {
     // Reset animation on each new countdown value
@@ -275,16 +223,8 @@ function CountdownOverlay({ countdown, browserQuip, batteryQuip }: { countdown: 
     const timer = setTimeout(() => setAnimPhase(1), 30);
     prevCountdownRef.current = countdown;
 
-    // Show browser quip at countdown === 1 (between "1" and "GO")
-    if (countdown === 1 && !quipShownRef.current && (browserQuip || batteryQuip)) {
-      quipShownRef.current = true;
-      // Small delay so it appears after the "1" slam animation
-      const quipTimer = setTimeout(() => setShowQuip(true), 400);
-      return () => { clearTimeout(timer); clearTimeout(quipTimer); };
-    }
-
     return () => clearTimeout(timer);
-  }, [countdown, browserQuip, batteryQuip]);
+  }, [countdown]);
 
   const isGo = countdown === 0;
   const color = isGo ? '#4CAF50' : '#f44336';
@@ -479,42 +419,7 @@ function CountdownOverlay({ countdown, browserQuip, batteryQuip }: { countdown: 
             Hold W to rev
           </div>
         )}
-
-        {/* Browser/battery quip: appears at countdown 1, fades during GO */}
-        {showQuip && (browserQuip || batteryQuip) && (
-          <div
-            className="mt-3 max-w-md text-center"
-            style={{ animation: 'quipFadeInOut 3s ease-out forwards' }}
-          >
-            {browserQuip && (
-              <div
-                className="text-cyan-300/90 text-sm font-mono italic px-4 py-1.5"
-                style={{ textShadow: '0 0 10px rgba(0,210,255,0.4), 0 1px 3px rgba(0,0,0,0.8)' }}
-              >
-                "{browserQuip}"
-              </div>
-            )}
-            {batteryQuip && (
-              <div
-                className="text-amber-300/70 text-xs font-mono mt-1 px-4"
-                style={{ textShadow: '0 0 8px rgba(255,200,50,0.3), 0 1px 3px rgba(0,0,0,0.8)' }}
-              >
-                {batteryQuip}
-              </div>
-            )}
-          </div>
-        )}
       </div>
-
-      {/* Quip animation keyframes */}
-      <style>{`
-        @keyframes quipFadeInOut {
-          0% { opacity: 0; transform: translateY(8px); }
-          15% { opacity: 1; transform: translateY(0); }
-          70% { opacity: 1; transform: translateY(0); }
-          100% { opacity: 0; transform: translateY(-4px); }
-        }
-      `}</style>
     </div>
   );
 }
@@ -746,41 +651,6 @@ function GamepadIcon() {
   );
 }
 
-/** Battery level indicator for the HUD */
-function BatteryIndicator({ percent, charging }: { percent: number; charging: boolean }) {
-  // Color: green > 50%, yellow 20-50%, red < 20%
-  const color = percent > 50 ? '#4CAF50' : percent > 20 ? '#FFC107' : '#f44336';
-  const fillWidth = Math.max(0, Math.min(100, percent));
-
-  return (
-    <div className="flex items-center gap-1.5 mt-1">
-      {/* Battery SVG icon with fill level */}
-      <svg width="16" height="10" viewBox="0 0 20 12" className="shrink-0">
-        {/* Battery body outline */}
-        <rect x="0.5" y="1" width="16" height="10" rx="1.5" ry="1.5"
-          fill="none" stroke="white" strokeOpacity="0.3" strokeWidth="1" />
-        {/* Battery terminal nub */}
-        <rect x="17" y="3.5" width="2.5" height="5" rx="0.5" ry="0.5"
-          fill="white" fillOpacity="0.3" />
-        {/* Fill level */}
-        <rect x="2" y="2.5" width={`${fillWidth * 0.13}`} height="7" rx="0.5" ry="0.5"
-          fill={color} fillOpacity="0.7" />
-        {/* Charging bolt icon */}
-        {charging && (
-          <path d="M9 1.5L6.5 6H9L7.5 10.5L11 5.5H8.5L10 1.5Z"
-            fill="#FFC107" fillOpacity="0.9" stroke="none" />
-        )}
-      </svg>
-      <span
-        className="text-[10px] font-mono"
-        style={{ color, opacity: 0.6 }}
-      >
-        {percent}%
-      </span>
-    </div>
-  );
-}
-
 /** Weather mood indicator: small icon + label showing the current weather mood in the HUD corner */
 function WeatherIndicator({ mood, intensity }: { mood: string; intensity: number }) {
   // Map mood to icon, label, and color
@@ -811,100 +681,4 @@ function WeatherIndicator({ mood, intensity }: { mood: string; intensity: number
       </span>
     </div>
   );
-}
-
-/** AI Emotion badge: shows the AI opponent's current emotional state with color-coded styling.
- *  Includes a tooltip on hover with details about how the emotion affects AI driving. */
-function AIEmotionBadge({ emotion }: { emotion: AIEmotion }) {
-  // Map state to a pulsing animation for aggressive/desperate/frustrated states
-  const isPulsing = emotion.state === 'aggressive' || emotion.state === 'desperate' || emotion.state === 'frustrated';
-
-  // Tooltip descriptions for each emotional state
-  const tooltips: Record<string, string> = {
-    calm: 'AI is driving steadily',
-    aggressive: 'AI is pushing harder (+5% speed)',
-    nervous: 'AI is making mistakes (-3% speed)',
-    frustrated: 'AI is erratic (frequent mistakes)',
-    confident: 'AI is driving smoothly',
-    desperate: 'AI is going all-out (+8% speed)',
-    respectful: 'AI is impressed by your lead',
-  };
-
-  const tooltip = tooltips[emotion.state] || emotion.label;
-
-  return (
-    <div
-      className={`relative group flex items-center gap-1.5 px-2 py-0.5 rounded-md border transition-all duration-700 ease-out pointer-events-auto ${isPulsing ? 'animate-pulse' : ''}`}
-      style={{
-        borderColor: `${emotion.color}60`,
-        backgroundColor: `${emotion.color}20`,
-      }}
-    >
-      <span className="text-sm leading-none" role="img" aria-label={emotion.label}>
-        {emotion.emoji}
-      </span>
-      <span
-        className="text-[10px] font-mono font-bold uppercase tracking-wider leading-none"
-        style={{ color: emotion.color }}
-      >
-        {emotion.label}
-      </span>
-      {/* Tooltip on hover */}
-      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2 py-1 bg-black/90 text-white/80 text-[10px] font-mono rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-50">
-        {tooltip}
-      </div>
-    </div>
-  );
-}
-
-/** Time sync indicator: shows local time and sun/moon icon when time-zone racing is active */
-function TimeSyncIndicator() {
-  const [timeStr, setTimeStr] = useState(() => formatLocalTime());
-
-  useEffect(() => {
-    // Update the displayed time every 30 seconds
-    const interval = setInterval(() => setTimeStr(formatLocalTime()), 30000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const hour = new Date().getHours();
-  const isDaytime = hour >= 6 && hour < 18;
-
-  return (
-    <div className="flex items-center gap-1.5 mt-1">
-      {isDaytime ? (
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FFC107" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.6 }}>
-          <circle cx="12" cy="12" r="5" />
-          <line x1="12" y1="1" x2="12" y2="3" />
-          <line x1="12" y1="21" x2="12" y2="23" />
-          <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
-          <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
-          <line x1="1" y1="12" x2="3" y2="12" />
-          <line x1="21" y1="12" x2="23" y2="12" />
-          <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
-          <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
-        </svg>
-      ) : (
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#7986cb" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.6 }}>
-          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
-        </svg>
-      )}
-      <span
-        className="text-[10px] font-mono leading-none"
-        style={{ color: isDaytime ? '#FFC107' : '#7986cb', opacity: 0.5 }}
-      >
-        {timeStr}
-      </span>
-    </div>
-  );
-}
-
-function formatLocalTime(): string {
-  const now = new Date();
-  let hours = now.getHours();
-  const minutes = now.getMinutes();
-  const ampm = hours >= 12 ? 'PM' : 'AM';
-  hours = hours % 12;
-  if (hours === 0) hours = 12;
-  return `${hours}:${minutes.toString().padStart(2, '0')} ${ampm}`;
 }

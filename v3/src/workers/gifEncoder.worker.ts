@@ -368,7 +368,7 @@ self.onmessage = (e: MessageEvent<EncodeRequest>) => {
       percent: 100,
     } satisfies ProgressResponse);
 
-    const blob = new Blob([gifData], { type: 'image/gif' });
+    const blob = new Blob([gifData as Uint8Array<ArrayBuffer>], { type: 'image/gif' });
 
     (self as unknown as Worker).postMessage({
       type: 'done',

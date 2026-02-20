@@ -52,7 +52,7 @@ export function useVoiceBoost(): UseVoiceBoostReturn {
   const streamRef = useRef<MediaStream | null>(null);
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const rafIdRef = useRef<number | null>(null);
-  const dataArrayRef = useRef<Uint8Array | null>(null);
+  const dataArrayRef = useRef<Uint8Array<ArrayBuffer> | null>(null);
 
   // Smoothed boost value (stored in ref for the rAF loop)
   const smoothedBoostRef = useRef(0);

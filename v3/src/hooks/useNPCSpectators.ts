@@ -238,7 +238,7 @@ function getNextReactionDelay(): number {
 // --- Hook ---
 
 export function useNPCSpectators(options: UseNPCSpectatorsOptions): UseNPCSpectatorsReturn {
-  const { enabled, speed, collisionCount, gapToAI, isLeading, currentLap, isDrifting } = options;
+  const { enabled, speed, collisionCount, gapToAI: _gapToAI, isLeading: _isLeading, currentLap, isDrifting: _isDrifting } = options;
 
   // Generate spectators once on mount
   const [spectators] = useState<Spectator[]>(() => generateSpectators());

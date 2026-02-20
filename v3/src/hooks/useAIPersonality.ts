@@ -7,7 +7,7 @@
 
 import { useState, useCallback, useRef } from 'react';
 import type { TrashTalkEvent, AIPersonality } from '../data/aiPersonalities.ts';
-import { selectPersonality, getPersonalityById } from '../data/aiPersonalities.ts';
+import { selectPersonality } from '../data/aiPersonalities.ts';
 
 /** Grudge record stored in localStorage */
 interface GrudgeRecord {
