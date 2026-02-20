@@ -505,12 +505,13 @@ class RaceServer:
 
     async def _send_frame(self):
         """Encode and send chase camera frame as binary WebSocket message.
-        Skipped when WebRTC is active (video flows via the RTP track instead)."""
+        Skipped when WebRTC is active and connected (video flows via the RTP track instead)."""
         if not self.ws_client:
             return
 
         # When WebRTC is streaming video, skip JPEG-over-WebSocket
-        if self.pc is not None:
+        # But only if the connection is actually established (not just negotiated)
+        if self.pc is not None and self.pc.connectionState == "connected":
             return
 
         frame = self.carla.get_chase_frame()
