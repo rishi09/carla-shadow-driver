@@ -45,6 +45,17 @@ export function Race() {
   const isDemo = params.get('demo') === 'true';
   const directWsUrl = params.get('ws');
   const isQuickstart = params.get('quickstart') === 'true';
+
+  // Deep linking: parse race settings from URL (e.g. shared challenge links)
+  const urlSettings = useMemo(() => ({
+    track: params.get('track') || undefined,
+    laps: params.get('laps') ? parseInt(params.get('laps')!, 10) : undefined,
+    weather: params.get('weather') || undefined,
+    model: params.get('model') || undefined,
+    playerCar: params.get('playerCar') || undefined,
+    timeOfDay: params.get('timeOfDay') || undefined,
+  }), []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const [view, setView] = useState<RaceView>(isDemo || directWsUrl || isQuickstart ? 'pre_race' : 'setup');
   const [showRespawning, setShowRespawning] = useState(false);
   const [raceWeather, setRaceWeather] = useState('clear');
@@ -268,6 +279,47 @@ export function Race() {
       }
     };
   }, [gpu.raceState?.collisions, engineSound.playImpact, triggerScreenShake]);
+
+  // --- Acceleration/braking: subtle camera shake on hard inputs ---
+  const prevThrottleRef = useRef(0);
+  const prevBrakeRef = useRef(0);
+  const prevSpeedForShakeRef = useRef(0);
+
+  useEffect(() => {
+    if (view !== 'racing') return;
+    const player = gpu.raceState?.player;
+    if (!player) return;
+
+    const throttle = player.throttle ?? 0;
+    const brake = player.brake ?? 0;
+    const speed = player.speed_kmh ?? 0;
+
+    // Hard acceleration onset: throttle jumps up significantly while moving
+    const throttleDelta = throttle - prevThrottleRef.current;
+    if (throttleDelta > 0.4 && speed > 5) {
+      // Subtle forward-heavy shake scaled by speed
+      const mag = Math.min(3, 1 + speed / 80);
+      triggerScreenShake(mag, 120);
+    }
+
+    // Hard braking onset: brake jumps up while at speed
+    const brakeDelta = brake - prevBrakeRef.current;
+    if (brakeDelta > 0.4 && speed > 20) {
+      const mag = Math.min(4, 1.5 + speed / 60);
+      triggerScreenShake(mag, 180);
+    }
+
+    // Speed loss jolt: sudden deceleration (not from braking) e.g. scraping wall
+    const speedDrop = prevSpeedForShakeRef.current - speed;
+    if (speedDrop > 30 && brake < 0.3) {
+      const mag = Math.min(5, speedDrop / 15);
+      triggerScreenShake(mag, 150);
+    }
+
+    prevThrottleRef.current = throttle;
+    prevBrakeRef.current = brake;
+    prevSpeedForShakeRef.current = speed;
+  }, [view, gpu.raceState?.player?.throttle, gpu.raceState?.player?.brake, gpu.raceState?.player?.speed_kmh, triggerScreenShake]);
 
   // --- Adaptive music event triggers ---
   // Track previous gap sign for overtake detection and previous lap for final lap
@@ -777,6 +829,7 @@ export function Race() {
           onStartDailyChallenge={handleStartDailyChallenge}
           quickstart={isQuickstart}
           isConnected={gpu.isConnected}
+          urlSettings={urlSettings}
         />
       )}
 

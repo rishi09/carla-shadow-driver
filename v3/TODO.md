@@ -75,7 +75,7 @@ The perceived lag stack when turning:
 - [x] Camera FOV scaling at speed (subtle 1.0→1.05x zoom at 150+ km/h)
 - [x] Let player pick their car from 6 vehicles (Tesla, Mustang, Charger, Audi TT, Mini Cooper, Impala)
 - [x] Speed vignette: GPU-accelerated CSS radial gradient, scales with speed
-- [ ] Camera shake on acceleration/hard braking (collision shake already exists)
+- [x] Camera shake on acceleration/hard braking -- throttle/brake onset shake + sudden deceleration jolt (collision shake already exists)
 - [x] Impact sparks and tire smoke (CSS/canvas overlay particles) -- ParticleOverlay.tsx
 - [x] Gear shift animation/sound -- visual flash in SpeedEffects.tsx
 - [x] Drift scoring (angle * speed * duration = points) -- DriftDetector in race_logic.py, DriftScore.tsx overlay
@@ -213,7 +213,7 @@ The #1 lesson from every viral browser game (agar.io, slither.io, Wordle, GeoGue
 
 - [ ] **Progressive loading during GPU wait**: While the GPU instance is provisioning (~60-120s), show: interactive track preview (client-side 3D minimap), controls tutorial, leaderboard for selected track, and a "warm up" mode where the player can practice steering with a local 2D car physics sim. The wait becomes part of the experience, not dead time.
 
-- [ ] **Deep linking everything**: Every game state should be a URL. `?ws=X` for direct connect, `?track=town05&weather=rain&laps=3` for settings, `?ghost=base64` for challenge mode, `?replay=id` for watching replays. URLs are the browser's native sharing primitive.
+- [x] **Deep linking everything**: Every game state should be a URL. `?ws=X` for direct connect, `?track=town05&weather=rain&laps=3` for settings pre-fill. Share button generates link with track/laps/weather/model/car/timeOfDay params. RaceSetup auto-fills from URL, auto-expands advanced options when URL includes model/car/timeOfDay.
 
 ### Gamepad API (controller support)
 Racing games on keyboard feel terrible compared to analog sticks. The Gamepad API is mature (baseline since 2017) and trivial to add.

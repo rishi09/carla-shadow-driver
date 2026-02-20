@@ -102,16 +102,26 @@ interface RaceSetupProps {
   onStartDailyChallenge?: () => void;
   quickstart?: boolean;
   isConnected?: boolean;
+  urlSettings?: {
+    track?: string;
+    laps?: number;
+    weather?: string;
+    model?: string;
+    playerCar?: string;
+    timeOfDay?: string;
+  };
 }
 
-export function RaceSetup({ onStartRace, onBack, onStartDailyChallenge, quickstart, isConnected }: RaceSetupProps) {
-  const [selectedTrack, setSelectedTrack] = useState(DEFAULT_TRACK);
-  const [selectedWeather, setSelectedWeather] = useState(DEFAULT_WEATHER);
-  const [selectedLaps, setSelectedLaps] = useState(DEFAULT_LAPS);
-  const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL);
-  const [selectedCar, setSelectedCar] = useState(DEFAULT_CAR);
-  const [selectedTimeOfDay, setSelectedTimeOfDay] = useState(DEFAULT_TIME_OF_DAY);
-  const [showAdvanced, setShowAdvanced] = useState(false);
+export function RaceSetup({ onStartRace, onBack, onStartDailyChallenge, quickstart, isConnected, urlSettings }: RaceSetupProps) {
+  const [selectedTrack, setSelectedTrack] = useState(urlSettings?.track || DEFAULT_TRACK);
+  const [selectedWeather, setSelectedWeather] = useState(urlSettings?.weather || DEFAULT_WEATHER);
+  const [selectedLaps, setSelectedLaps] = useState(urlSettings?.laps || DEFAULT_LAPS);
+  const [selectedModel, setSelectedModel] = useState(urlSettings?.model || DEFAULT_MODEL);
+  const [selectedCar, setSelectedCar] = useState(urlSettings?.playerCar || DEFAULT_CAR);
+  const [selectedTimeOfDay, setSelectedTimeOfDay] = useState(urlSettings?.timeOfDay || DEFAULT_TIME_OF_DAY);
+  const [showAdvanced, setShowAdvanced] = useState(
+    !!(urlSettings?.playerCar || urlSettings?.timeOfDay || urlSettings?.model)
+  );
 
   // Quickstart auto-start: when quickstart is true and connected, start after a brief delay
   const quickstartFiredRef = useRef(false);
@@ -119,11 +129,18 @@ export function RaceSetup({ onStartRace, onBack, onStartDailyChallenge, quicksta
     if (quickstart && isConnected && !quickstartFiredRef.current) {
       quickstartFiredRef.current = true;
       const timer = setTimeout(() => {
-        onStartRace(DEFAULT_TRACK, DEFAULT_LAPS, DEFAULT_WEATHER, DEFAULT_MODEL, DEFAULT_CAR, DEFAULT_TIME_OF_DAY);
+        onStartRace(
+          urlSettings?.track || DEFAULT_TRACK,
+          urlSettings?.laps || DEFAULT_LAPS,
+          urlSettings?.weather || DEFAULT_WEATHER,
+          urlSettings?.model || DEFAULT_MODEL,
+          urlSettings?.playerCar || DEFAULT_CAR,
+          urlSettings?.timeOfDay || DEFAULT_TIME_OF_DAY,
+        );
       }, 1000);
       return () => clearTimeout(timer);
     }
-  }, [quickstart, isConnected, onStartRace]);
+  }, [quickstart, isConnected, onStartRace, urlSettings]);
 
   const playerName = usePlayerName();
   const streak = useStreak();
