@@ -311,6 +311,41 @@ Format: `## [timestamp] Category: Short description`
 
 ---
 
+## [2026-02-19 12:00] Drift detection: heading vs velocity direction
+
+- **Implemented**: `DriftDetector` class in `race_logic.py` detects drifting by comparing vehicle heading (yaw) vs velocity direction (atan2 of velocity components). When the angle between them exceeds 15 degrees and speed is above 30 km/h, a drift is registered.
+- **Scoring formula**: `base_score = avg_angle * avg_speed * duration * 0.1`. Multipliers: chain bonus (1.5x for consecutive drifts within 2s), high-speed bonus (1.5x for avg >120 km/h), reverse entry bonus (2x for drifting in the opposite direction of the previous drift).
+- **Frontend display**: `DriftScore.tsx` shows three elements: (1) live "DRIFT!" label with growing score counter during active drift, (2) floating score popup that rises and fades when drift ends, (3) persistent total drift score counter.
+- **Key detail**: The velocity components (`velocity_x`, `velocity_y`) are added to the telemetry dict in `carla_manager.py`. Without these, drift detection would require computing heading change rate, which is noisier.
+- **Lesson**: For drift detection, comparing heading vs velocity direction is more reliable than using lateral G-force or steering angle. Heading vs velocity captures the actual slip angle, while steering angle can be zero during a sustained drift (countersteering).
+- **Lesson**: Drift chain combos need a timeout (2s) between drifts to be fun. Too short and players can't chain; too long and every drift is a "chain."
+
+## [2026-02-19 12:00] AI race commentary: event-driven toast messages
+
+- **Implemented**: `RaceCommentary` class in `race_logic.py` monitors race events and queues contextual text messages. Events tracked: race start quality, position changes (overtakes), gap changes, collisions, best lap improvements, final lap, close finishes, and notable drifts.
+- **Cooldown**: 4-second minimum between messages to avoid spamming. Messages are priority-sorted so important events (overtakes, final lap) preempt less urgent ones.
+- **Frontend**: `CommentaryOverlay.tsx` renders messages as animated toast notifications centered at the top of the screen. Each message slides in, holds for 4 seconds, then auto-removes via setTimeout.
+- **Message categories**: Each message has a category (`positive`, `warning`, `critical`, `collision`, `drift`, `info`) that determines its color scheme and icon.
+- **Lesson**: Commentary messages must be carefully timed. During countdown: silence (don't distract). During racing: 4-second cooldown prevents message fatigue. Highest-priority events (overtake, final lap) jump the queue.
+
+## [2026-02-19 12:00] Dynamic weather transitions: sun path across the sky
+
+- **Implemented**: `WeatherTransitionManager` in `weather_transitions.py` gradually shifts CARLA's sun position as the race progresses. For clear/cloudy/rain presets, the sun moves from dawn (east, -5 altitude) through noon (top, 70 altitude) to sunset (west, 2 altitude). For night preset, the moon moves with a hint of dawn at finish.
+- **Smoothstep interpolation**: Sun position is interpolated between keyframes using `t * t * (3 - 2t)` for smooth transitions rather than linear interpolation, which would make the sun appear to "accelerate" through the middle of its path.
+- **Storm event**: At 65-80% race progress on 3+ lap races, a brief rain storm triggers (60% intensity, 80% cloud coverage, 50% wind). This creates a dramatic mid-race challenge.
+- **Update throttling**: Weather is only updated every 15 frames (~0.5s at 30fps) and only if progress changed by >0.5% to avoid excessive CARLA API calls.
+- **Lesson**: Weather transitions must be gradual. Instant weather changes are visually jarring. The smoothstep curve ensures the golden hour periods (dawn, sunset) are lingered on while noon passes quickly -- matching how real sunrises/sunsets feel longer than midday.
+
+## [2026-02-19 12:00] Personal bests and leaderboard: localStorage persistence
+
+- **Implemented**: Two hooks for leaderboard functionality. `useLeaderboard.ts` stores the last 100 race results per track/lap combo with full stats (time, best lap, max speed, drift score, difficulty, car). `usePersonalBests.ts` stores only the single best time per track/lap combo for quick lookup.
+- **Medal system**: `useLeaderboard` awards medals based on fixed par times per track (Gold = par, Silver = +30%, Bronze = +70%). `usePersonalBests` awards medals relative to personal best (Gold = within 5%, Silver = within 15%, Bronze = finished).
+- **Frontend**: `LeaderboardPanel.tsx` renders in the RaceSetup page showing the personal best for the selected track/lap combo, with recent results and medal targets.
+- **Race results integration**: `Race.tsx` saves results to both hooks when a race finishes. The `RaceResults.tsx` page shows drift statistics (total score, best drift, drift count).
+- **Lesson**: Two separate storage mechanisms (full history + single best) serve different purposes. Full history enables "recent races" lists and statistics. Single best enables instant "is this a PB?" checks without scanning arrays.
+
+---
+
 ## [2026-02-19 12:00] Landing page: cinematic dark theme with canvas speed streaks
 
 - **Implemented**: Full-page landing at `/` with animated SpeedCanvas background, scroll-reveal feature cards, "How it works" steps, technical stats, and "Powered by" badges. Zero external assets -- everything is CSS, SVG, and canvas.
