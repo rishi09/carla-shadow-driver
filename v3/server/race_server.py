@@ -242,6 +242,7 @@ class RaceServer:
 
         # --- Previous gap tracking for overtake detection in highlights ---
         self._prev_gap_seconds: Optional[float] = None
+        self._highlight_collision_count: int = 0
 
         # --- Frame skip state (stationary camera optimization) ---
         self._last_sent_x: Optional[float] = None
@@ -579,6 +580,7 @@ class RaceServer:
         self.cost_tracker.log_session_cost("race reset")
         self.highlight_buffer.reset()
         self._prev_gap_seconds = None
+        self._highlight_collision_count = 0
 
         print("Race reset (actors preserved for reconnect)")
 
@@ -667,6 +669,7 @@ class RaceServer:
         # Reset highlight buffer and start new cost session
         self.highlight_buffer.reset()
         self._prev_gap_seconds = None
+        self._highlight_collision_count = 0
         self.cost_tracker.log_session_cost("restart")
         self.cost_tracker.start_session()
 
@@ -832,6 +835,7 @@ class RaceServer:
         self.cost_tracker.start_session()
         self.highlight_buffer.reset()
         self._prev_gap_seconds = None
+        self._highlight_collision_count = 0
 
         # Run the frame loop (30fps) and telemetry loop (30Hz) concurrently
         self._race_task = asyncio.create_task(self._race_loop())
@@ -1475,16 +1479,20 @@ class RaceServer:
         self._prev_gap_seconds = gap
 
         # --- Collision detection ---
-        collisions = self.carla.get_recent_collisions()
-        if collisions:
-            max_intensity = max(c['intensity'] for c in collisions)
-            if max_intensity > 500:  # Only capture significant collisions
+        # Note: we don't call get_recent_collisions() here because the telemetry
+        # loop already consumes them. Instead, check the drift angle as a proxy
+        # for collision intensity, or use the collision count from race_state.
+        # We use a separate flag set from the telemetry loop.
+        collision_count = getattr(self, '_highlight_collision_count', 0)
+        current_collisions = getattr(self.race_state, '_player_collisions', 0)
+        if current_collisions > collision_count:
+            # New collisions detected since last check
+            new_collisions = current_collisions - collision_count
+            if new_collisions > 0:
                 self.highlight_buffer.capture_highlight('collision', metadata={
-                    'intensity': round(max_intensity, 0),
+                    'count': new_collisions,
                 })
-            # Re-report collisions since we consumed them
-            for c in collisions:
-                self.race_state.report_player_collision()
+        self._highlight_collision_count = current_collisions
 
         # --- Drift detection (score > 500) ---
         if drift_event and drift_event.get('event') == 'drift_end':

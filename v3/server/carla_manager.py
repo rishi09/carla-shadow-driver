@@ -107,6 +107,16 @@ class RaceManager:
             'bumper': {'x': 2.0, 'z': 0.8, 'pitch': -3},
         }
 
+        # Post-processing settings (applied to chase & rear cameras)
+        self._post_processing_enabled = True
+        self._post_processing = {
+            'motion_blur_intensity': '0.3',
+            'motion_blur_max_distortion': '0.35',
+            'motion_blur_min_object_screen_size': '0.1',
+            'lens_flare_intensity': '0.1',
+            'bloom_intensity': '0.3',
+        }
+
     def connect(self) -> bool:
         """Connect to CARLA server."""
         cfg = self.config['carla']
@@ -323,6 +333,43 @@ class RaceManager:
         self.world.set_weather(weather_params)
         print(f"Weather set to: {weather}")
 
+    def set_post_processing(self, enabled: bool):
+        """Toggle post-processing effects on/off.
+
+        When toggled, existing cameras are NOT recreated. The change takes
+        effect the next time a camera is attached (e.g., on camera mode switch
+        or race restart).
+
+        Args:
+            enabled: True to enable post-processing, False to disable.
+        """
+        old = self._post_processing_enabled
+        self._post_processing_enabled = enabled
+        if old != enabled:
+            print(f"Post-processing {'enabled' if enabled else 'disabled'} "
+                  "(takes effect on next camera attach)")
+
+    def configure_post_processing(self, settings: Dict[str, str]):
+        """Update post-processing parameters.
+
+        Accepts a dict of camera blueprint attribute names to string values.
+        Supported keys:
+            - motion_blur_intensity (default '0.3')
+            - motion_blur_max_distortion (default '0.35')
+            - motion_blur_min_object_screen_size (default '0.1')
+            - lens_flare_intensity (default '0.1')
+            - bloom_intensity (default '0.3')
+
+        Changes take effect on next camera attach (mode switch or race restart).
+
+        Args:
+            settings: Dict mapping attribute names to string values.
+        """
+        for key, value in settings.items():
+            if key in self._post_processing:
+                self._post_processing[key] = str(value)
+        print(f"Post-processing configured: {self._post_processing}")
+
     def set_time_of_day(self, preset: str):
         """Set time-of-day lighting preset in CARLA.
 
@@ -447,7 +494,8 @@ class RaceManager:
 
         Args:
             cinematic: If True, apply cinematic post-processing attributes
-                       (motion blur, histogram exposure). Used for chase cam.
+                       (motion blur, bloom, lens flare, histogram exposure).
+                       Uses self._post_processing dict for values.
             yaw: Rotation yaw in degrees (0 = forward, 180 = backward).
         """
         bp_library = self.world.get_blueprint_library()
@@ -457,14 +505,23 @@ class RaceManager:
         camera_bp.set_attribute('fov', str(fov))
 
         # Cinematic post-processing for chase camera
-        if cinematic:
+        if cinematic and self._post_processing_enabled:
             try:
-                camera_bp.set_attribute('motion_blur_intensity', '0.3')
-                camera_bp.set_attribute('motion_blur_max_distortion', '0.5')
-                camera_bp.set_attribute('motion_blur_min_object_screen_size', '0.1')
+                pp = self._post_processing
+                # Motion blur
+                camera_bp.set_attribute('motion_blur_intensity', pp.get('motion_blur_intensity', '0.3'))
+                camera_bp.set_attribute('motion_blur_max_distortion', pp.get('motion_blur_max_distortion', '0.35'))
+                camera_bp.set_attribute('motion_blur_min_object_screen_size', pp.get('motion_blur_min_object_screen_size', '0.1'))
+                # Bloom
+                camera_bp.set_attribute('bloom_intensity', pp.get('bloom_intensity', '0.3'))
+                # Lens flare
+                camera_bp.set_attribute('lens_flare_intensity', pp.get('lens_flare_intensity', '0.1'))
+                # Exposure
                 camera_bp.set_attribute('exposure_mode', 'histogram')
                 camera_bp.set_attribute('shutter_speed', '60.0')
                 camera_bp.set_attribute('iso', '100.0')
+                print(f"Post-processing enabled: motion_blur={pp.get('motion_blur_intensity')}, "
+                      f"bloom={pp.get('bloom_intensity')}, lens_flare={pp.get('lens_flare_intensity')}")
             except Exception as e:
                 print(f"Some cinematic camera attributes not supported: {e}")
 

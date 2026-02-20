@@ -44,7 +44,7 @@ The perceived lag stack when turning:
 
 ### CARLA rendering improvements (server-side)
 - [x] **Higher render resolution**: Render at 1920x1080 on server, downscale to 1280x720 for streaming (supersampling anti-aliasing). CARLA supports arbitrary camera resolution.
-- [ ] **Post-processing effects**: Enable CARLA's built-in post-processing — motion blur, bloom, lens flare via `carla.ColorConverter` or UE4 post-process settings.
+- [x] **Post-processing effects**: Enable CARLA's built-in post-processing — motion blur, bloom, lens flare via `carla.ColorConverter` or UE4 post-process settings. Configurable via `_post_processing` dict in RaceManager, togglable with `set_post_processing(enabled)` and `configure_post_processing(settings)`. Defaults: motion_blur=0.3, bloom=0.3, lens_flare=0.1.
 - [x] **Better camera settings**: Cinematic camera: FOV 90, motion_blur_intensity 0.3, histogram exposure, shutter_speed 60, ISO 100. Applied on camera attach + mode switch.
 - [x] **Time of day**: Dynamic sun path transitions during race via WeatherTransitionManager. Sun moves from dawn to sunset over the course of a race.
 - [x] **Rain/wet roads**: CARLA has wet road reflections when precipitation > 0. Looks dramatically better than dry roads. (Partial: storm event triggers at 70% race progress for 3+ lap races)
@@ -137,7 +137,7 @@ Learnings from Forza Horizon 5, Mario Kart, Trackmania, Slow Roads, agar.io.
 
 ## Infrastructure & DevOps
 - [ ] **Auto-provisioning e2e test**: Test the full Play Game → Vast.ai provision → callback → tunnel → connect flow
-- [ ] **Instance cost tracking**: Log GPU cost per session, alert if spending > $X/day
+- [x] **Instance cost tracking**: Log GPU cost per session, alert if spending > $X/day. CostTracker in cost_tracker.py: tracks session start/end, logs hourly cost estimates every 5 min, persists daily totals to /tmp/gpu_cost.json, warns when daily spend exceeds threshold ($2/day default). Configurable via GPU_HOURLY_RATE and GPU_DAILY_BUDGET env vars.
 - [x] **Auto-shutdown**: `AutoShutdownManager` in race_server.py — 10-minute idle timer, logs countdown every minute, self-destroys via Vast.ai API. VASTAI_API_KEY passed from start.ts to container env.
 - [x] **Deploy script improvements**: deploy.sh should also start CARLA if not running
 - [x] **Health monitoring**: Endpoint that returns CARLA status, GPU temp, VRAM usage, active connections
@@ -514,8 +514,8 @@ Comprehensive research into AI in games beyond self-driving, with concrete imple
 - After race, send highlight clips to frontend, play sequentially with commentary overlay.
 - **Feasibility**: 5/10. Memory pressure from frame buffering. Medium complexity.
 - [x] Define highlight criteria from telemetry patterns
-- [ ] Implement ring-buffer for recent frames in server memory
-- [ ] Snapshot buffer on highlight event
+- [x] Implement ring-buffer for recent frames in server memory. HighlightBuffer in highlight_buffer.py: 150-frame (5s) ring buffer of JPEG frames, thread-safe push/capture, up to 5 highlights per race, 5s cooldown per event type.
+- [x] Snapshot buffer on highlight event. Detects overtakes (gap sign change), collisions, drifts (>500 score), near-misses (<2m at speed), and race finish. Metadata included in race_finished message.
 - [x] Frontend playback with transition effects
 
 #### Wild / Experimental Ideas
