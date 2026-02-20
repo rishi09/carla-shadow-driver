@@ -173,14 +173,36 @@ export function useGPUConnection(): UseGPUConnectionReturn {
               const pc = new RTCPeerConnection({ iceServers: [] });
               pcRef.current = pc;
               pc.addTransceiver('video', { direction: 'recvonly' });
+              // Hold stream until connection is confirmed
+              let pendingStream: MediaStream | null = null;
               pc.ontrack = (e) => {
                 console.log('[v3] WebRTC track received');
-                setRemoteStream(e.streams[0]);
+                pendingStream = e.streams[0];
                 // Minimize jitter buffer delay for lowest latency (~20ms instead of default ~100ms+)
                 try {
                   (e.receiver as any).playoutDelayHint = 0.02;
                 } catch { /* not supported in all browsers */ }
+                // If already connected, activate immediately
+                if (pc.connectionState === 'connected') {
+                  setRemoteStream(pendingStream);
+                }
               };
+              pc.onconnectionstatechange = () => {
+                console.log(`[v3] WebRTC connection state: ${pc.connectionState}`);
+                if (pc.connectionState === 'connected' && pendingStream) {
+                  setRemoteStream(pendingStream);
+                } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+                  console.warn('[v3] WebRTC connection failed, falling back to JPEG');
+                  setRemoteStream(null);
+                }
+              };
+              // Timeout: if not connected within 5s, clear stream to ensure JPEG fallback
+              setTimeout(() => {
+                if (pcRef.current && pcRef.current.connectionState !== 'connected') {
+                  console.warn('[v3] WebRTC timeout, falling back to JPEG');
+                  setRemoteStream(null);
+                }
+              }, 5000);
               const offer = await pc.createOffer();
               await pc.setLocalDescription(offer);
               // Wait for ICE gathering to complete
