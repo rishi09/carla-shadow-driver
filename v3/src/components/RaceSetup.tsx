@@ -200,9 +200,32 @@ interface RaceSetupProps {
   evolutionEnabled?: boolean;
   onToggleEvolution?: (on: boolean) => void;
   totalRaces?: number;
+  // Batch 8: Game modes + utility hooks
+  floorIsLavaEnabled?: boolean;
+  onToggleFloorIsLava?: (on: boolean) => void;
+  wrongWayChickenEnabled?: boolean;
+  onToggleWrongWayChicken?: (on: boolean) => void;
+  shrinkingTrackEnabled?: boolean;
+  onToggleShrinkingTrack?: (on: boolean) => void;
+  tagModeEnabled?: boolean;
+  onToggleTagMode?: (on: boolean) => void;
+  copsEnabled?: boolean;
+  onToggleCops?: (on: boolean) => void;
+  musicalChairsEnabled?: boolean;
+  onToggleMusicalChairs?: (on: boolean) => void;
+  photoRallyEnabled?: boolean;
+  onTogglePhotoRally?: (on: boolean) => void;
+  webcamReactionsEnabled?: boolean;
+  onToggleWebcamReactions?: (on: boolean) => void;
+  speedrunEnabled?: boolean;
+  onToggleSpeedrun?: (on: boolean) => void;
+  infiniteEnabled?: boolean;
+  onToggleInfinite?: (on: boolean) => void;
+  eyeTrackingEnabled?: boolean;
+  onToggleEyeTracking?: (on: boolean) => void;
 }
 
-export function RaceSetup({ onStartRace, onBack, onStartDailyChallenge, quickstart, isConnected, urlSettings, dareTime, challengeData, isCargoMode, onToggleCargoMode, isBlindfoldMode, onToggleBlindfoldMode, voiceCommandsSupported, voiceCommandsEnabled, onToggleVoiceCommands, ambientLightSupported, ambientLightEnabled, onToggleAmbientLight, headTrackingSupported, headTrackingEnabled, onToggleHeadTracking, twitchChannel, onSetTwitchChannel, phoneSteeringSupported, phoneSteeringEnabled, onTogglePhoneSteering, synthwaveEnabled, onToggleSynthwave, timeZoneEnabled, timeZoneLabel, onToggleTimeZone, drunkAIEnabled, onToggleDrunkAI, aiGrudgeMood, aiGrudgeMessage, binauralEnabled, onToggleBinaural, aiNemesisName, aiNemesisTaunt, stockWeatherEnabled, onToggleStockWeather, stockMarketMood, copycatEnabled, onToggleCopycat, backseatEnabled, onToggleBackseat, narrationEnabled, onToggleNarration, spectatorsEnabled, onToggleSpectators, reverseRaceEnabled, onToggleReverseRace, aiEvolutionGen, evolutionEnabled, onToggleEvolution, totalRaces }: RaceSetupProps) {
+export function RaceSetup({ onStartRace, onBack, onStartDailyChallenge, quickstart, isConnected, urlSettings, dareTime, challengeData, isCargoMode, onToggleCargoMode, isBlindfoldMode, onToggleBlindfoldMode, voiceCommandsSupported, voiceCommandsEnabled, onToggleVoiceCommands, ambientLightSupported, ambientLightEnabled, onToggleAmbientLight, headTrackingSupported, headTrackingEnabled, onToggleHeadTracking, twitchChannel, onSetTwitchChannel, phoneSteeringSupported, phoneSteeringEnabled, onTogglePhoneSteering, synthwaveEnabled, onToggleSynthwave, timeZoneEnabled, timeZoneLabel, onToggleTimeZone, drunkAIEnabled, onToggleDrunkAI, aiGrudgeMood, aiGrudgeMessage, binauralEnabled, onToggleBinaural, aiNemesisName, aiNemesisTaunt, stockWeatherEnabled, onToggleStockWeather, stockMarketMood, copycatEnabled, onToggleCopycat, backseatEnabled, onToggleBackseat, narrationEnabled, onToggleNarration, spectatorsEnabled, onToggleSpectators, reverseRaceEnabled, onToggleReverseRace, aiEvolutionGen, evolutionEnabled, onToggleEvolution, totalRaces, floorIsLavaEnabled, onToggleFloorIsLava, wrongWayChickenEnabled, onToggleWrongWayChicken, shrinkingTrackEnabled, onToggleShrinkingTrack, tagModeEnabled, onToggleTagMode, copsEnabled, onToggleCops, musicalChairsEnabled, onToggleMusicalChairs, photoRallyEnabled, onTogglePhotoRally, webcamReactionsEnabled, onToggleWebcamReactions, speedrunEnabled, onToggleSpeedrun, infiniteEnabled, onToggleInfinite, eyeTrackingEnabled, onToggleEyeTracking }: RaceSetupProps) {
   const [selectedTrack, setSelectedTrack] = useState(urlSettings?.track || DEFAULT_TRACK);
   const [selectedWeather, setSelectedWeather] = useState(urlSettings?.weather || DEFAULT_WEATHER);
   const [selectedLaps, setSelectedLaps] = useState(urlSettings?.laps || DEFAULT_LAPS);
@@ -1284,6 +1307,184 @@ export function RaceSetup({ onStartRace, onBack, onStartDailyChallenge, quicksta
         {totalRaces != null && totalRaces > 0 && (
           <div className="mb-4 flex justify-center">
             <span className="text-white/25 text-[10px] font-mono">{totalRaces} race{totalRaces !== 1 ? 's' : ''} in memory</span>
+          </div>
+        )}
+
+        {/* Batch 8: Game Mode Toggles */}
+        {onToggleFloorIsLava && (
+          <div className="mb-2">
+            <button onClick={() => onToggleFloorIsLava(!floorIsLavaEnabled)} className={`w-full flex items-center gap-3 py-3 px-4 rounded-lg border text-left transition-all ${floorIsLavaEnabled ? 'bg-red-500/10 border-red-500/40' : 'bg-black/60 border-white/10 hover:border-white/20'}`}>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <span className={`text-sm font-medium ${floorIsLavaEnabled ? 'text-red-400' : 'text-white'}`}>Floor Is Lava</span>
+                  {floorIsLavaEnabled && <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded border border-red-500/40 bg-red-500/20 text-red-400">ON</span>}
+                </div>
+                <p className="text-[11px] text-white/30 mt-0.5">Slow zones appear — stay on the racing line!</p>
+              </div>
+              <div className={`w-10 h-5 rounded-full relative transition-colors ${floorIsLavaEnabled ? 'bg-red-500/40' : 'bg-white/10'}`}>
+                <div className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${floorIsLavaEnabled ? 'left-[22px] bg-red-400' : 'left-0.5 bg-white/40'}`} />
+              </div>
+            </button>
+          </div>
+        )}
+        {onToggleWrongWayChicken && (
+          <div className="mb-2">
+            <button onClick={() => onToggleWrongWayChicken(!wrongWayChickenEnabled)} className={`w-full flex items-center gap-3 py-3 px-4 rounded-lg border text-left transition-all ${wrongWayChickenEnabled ? 'bg-yellow-500/10 border-yellow-500/40' : 'bg-black/60 border-white/10 hover:border-white/20'}`}>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <span className={`text-sm font-medium ${wrongWayChickenEnabled ? 'text-yellow-400' : 'text-white'}`}>Wrong-Way Chicken</span>
+                  {wrongWayChickenEnabled && <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded border border-yellow-500/40 bg-yellow-500/20 text-yellow-400">ON</span>}
+                </div>
+                <p className="text-[11px] text-white/30 mt-0.5">Drive toward AI head-on — who swerves first?</p>
+              </div>
+              <div className={`w-10 h-5 rounded-full relative transition-colors ${wrongWayChickenEnabled ? 'bg-yellow-500/40' : 'bg-white/10'}`}>
+                <div className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${wrongWayChickenEnabled ? 'left-[22px] bg-yellow-400' : 'left-0.5 bg-white/40'}`} />
+              </div>
+            </button>
+          </div>
+        )}
+        {onToggleShrinkingTrack && (
+          <div className="mb-2">
+            <button onClick={() => onToggleShrinkingTrack(!shrinkingTrackEnabled)} className={`w-full flex items-center gap-3 py-3 px-4 rounded-lg border text-left transition-all ${shrinkingTrackEnabled ? 'bg-amber-500/10 border-amber-500/40' : 'bg-black/60 border-white/10 hover:border-white/20'}`}>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <span className={`text-sm font-medium ${shrinkingTrackEnabled ? 'text-amber-400' : 'text-white'}`}>Shrinking Track</span>
+                  {shrinkingTrackEnabled && <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded border border-amber-500/40 bg-amber-500/20 text-amber-400">ON</span>}
+                </div>
+                <p className="text-[11px] text-white/30 mt-0.5">Safe zone shrinks each lap — stay inside!</p>
+              </div>
+              <div className={`w-10 h-5 rounded-full relative transition-colors ${shrinkingTrackEnabled ? 'bg-amber-500/40' : 'bg-white/10'}`}>
+                <div className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${shrinkingTrackEnabled ? 'left-[22px] bg-amber-400' : 'left-0.5 bg-white/40'}`} />
+              </div>
+            </button>
+          </div>
+        )}
+        {onToggleTagMode && (
+          <div className="mb-2">
+            <button onClick={() => onToggleTagMode(!tagModeEnabled)} className={`w-full flex items-center gap-3 py-3 px-4 rounded-lg border text-left transition-all ${tagModeEnabled ? 'bg-cyan-500/10 border-cyan-500/40' : 'bg-black/60 border-white/10 hover:border-white/20'}`}>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <span className={`text-sm font-medium ${tagModeEnabled ? 'text-cyan-400' : 'text-white'}`}>Tag Mode</span>
+                  {tagModeEnabled && <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded border border-cyan-500/40 bg-cyan-500/20 text-cyan-400">ON</span>}
+                </div>
+                <p className="text-[11px] text-white/30 mt-0.5">You're it! Tag the AI car to swap roles</p>
+              </div>
+              <div className={`w-10 h-5 rounded-full relative transition-colors ${tagModeEnabled ? 'bg-cyan-500/40' : 'bg-white/10'}`}>
+                <div className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${tagModeEnabled ? 'left-[22px] bg-cyan-400' : 'left-0.5 bg-white/40'}`} />
+              </div>
+            </button>
+          </div>
+        )}
+        {onToggleCops && (
+          <div className="mb-2">
+            <button onClick={() => onToggleCops(!copsEnabled)} className={`w-full flex items-center gap-3 py-3 px-4 rounded-lg border text-left transition-all ${copsEnabled ? 'bg-blue-500/10 border-blue-500/40' : 'bg-black/60 border-white/10 hover:border-white/20'}`}>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <span className={`text-sm font-medium ${copsEnabled ? 'text-blue-400' : 'text-white'}`}>Cops & Robbers</span>
+                  {copsEnabled && <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded border border-blue-500/40 bg-blue-500/20 text-blue-400">ON</span>}
+                </div>
+                <p className="text-[11px] text-white/30 mt-0.5">Chase or flee — one car is the law</p>
+              </div>
+              <div className={`w-10 h-5 rounded-full relative transition-colors ${copsEnabled ? 'bg-blue-500/40' : 'bg-white/10'}`}>
+                <div className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${copsEnabled ? 'left-[22px] bg-blue-400' : 'left-0.5 bg-white/40'}`} />
+              </div>
+            </button>
+          </div>
+        )}
+        {onToggleMusicalChairs && (
+          <div className="mb-2">
+            <button onClick={() => onToggleMusicalChairs(!musicalChairsEnabled)} className={`w-full flex items-center gap-3 py-3 px-4 rounded-lg border text-left transition-all ${musicalChairsEnabled ? 'bg-pink-500/10 border-pink-500/40' : 'bg-black/60 border-white/10 hover:border-white/20'}`}>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <span className={`text-sm font-medium ${musicalChairsEnabled ? 'text-pink-400' : 'text-white'}`}>Musical Chairs</span>
+                  {musicalChairsEnabled && <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded border border-pink-500/40 bg-pink-500/20 text-pink-400">ON</span>}
+                </div>
+                <p className="text-[11px] text-white/30 mt-0.5">Music stops — reach the zone first!</p>
+              </div>
+              <div className={`w-10 h-5 rounded-full relative transition-colors ${musicalChairsEnabled ? 'bg-pink-500/40' : 'bg-white/10'}`}>
+                <div className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${musicalChairsEnabled ? 'left-[22px] bg-pink-400' : 'left-0.5 bg-white/40'}`} />
+              </div>
+            </button>
+          </div>
+        )}
+        {onTogglePhotoRally && (
+          <div className="mb-2">
+            <button onClick={() => onTogglePhotoRally(!photoRallyEnabled)} className={`w-full flex items-center gap-3 py-3 px-4 rounded-lg border text-left transition-all ${photoRallyEnabled ? 'bg-green-500/10 border-green-500/40' : 'bg-black/60 border-white/10 hover:border-white/20'}`}>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <span className={`text-sm font-medium ${photoRallyEnabled ? 'text-green-400' : 'text-white'}`}>Photography Rally</span>
+                  {photoRallyEnabled && <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded border border-green-500/40 bg-green-500/20 text-green-400">ON</span>}
+                </div>
+                <p className="text-[11px] text-white/30 mt-0.5">Find photo spots and capture them (press P)</p>
+              </div>
+              <div className={`w-10 h-5 rounded-full relative transition-colors ${photoRallyEnabled ? 'bg-green-500/40' : 'bg-white/10'}`}>
+                <div className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${photoRallyEnabled ? 'left-[22px] bg-green-400' : 'left-0.5 bg-white/40'}`} />
+              </div>
+            </button>
+          </div>
+        )}
+        {onToggleWebcamReactions && (
+          <div className="mb-2">
+            <button onClick={() => onToggleWebcamReactions(!webcamReactionsEnabled)} className={`w-full flex items-center gap-3 py-3 px-4 rounded-lg border text-left transition-all ${webcamReactionsEnabled ? 'bg-indigo-500/10 border-indigo-500/40' : 'bg-black/60 border-white/10 hover:border-white/20'}`}>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <span className={`text-sm font-medium ${webcamReactionsEnabled ? 'text-indigo-400' : 'text-white'}`}>Webcam Reactions</span>
+                  {webcamReactionsEnabled && <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded border border-indigo-500/40 bg-indigo-500/20 text-indigo-400">ON</span>}
+                </div>
+                <p className="text-[11px] text-white/30 mt-0.5">AI reads your facial expressions via webcam</p>
+              </div>
+              <div className={`w-10 h-5 rounded-full relative transition-colors ${webcamReactionsEnabled ? 'bg-indigo-500/40' : 'bg-white/10'}`}>
+                <div className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${webcamReactionsEnabled ? 'left-[22px] bg-indigo-400' : 'left-0.5 bg-white/40'}`} />
+              </div>
+            </button>
+          </div>
+        )}
+        {onToggleSpeedrun && (
+          <div className="mb-2">
+            <button onClick={() => onToggleSpeedrun(!speedrunEnabled)} className={`w-full flex items-center gap-3 py-3 px-4 rounded-lg border text-left transition-all ${speedrunEnabled ? 'bg-violet-500/10 border-violet-500/40' : 'bg-black/60 border-white/10 hover:border-white/20'}`}>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <span className={`text-sm font-medium ${speedrunEnabled ? 'text-violet-400' : 'text-white'}`}>Speedrun Internet</span>
+                  {speedrunEnabled && <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded border border-violet-500/40 bg-violet-500/20 text-violet-400">ON</span>}
+                </div>
+                <p className="text-[11px] text-white/30 mt-0.5">Collect Wi-Fi pickups to keep your connection alive</p>
+              </div>
+              <div className={`w-10 h-5 rounded-full relative transition-colors ${speedrunEnabled ? 'bg-violet-500/40' : 'bg-white/10'}`}>
+                <div className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${speedrunEnabled ? 'left-[22px] bg-violet-400' : 'left-0.5 bg-white/40'}`} />
+              </div>
+            </button>
+          </div>
+        )}
+        {onToggleInfinite && (
+          <div className="mb-2">
+            <button onClick={() => onToggleInfinite(!infiniteEnabled)} className={`w-full flex items-center gap-3 py-3 px-4 rounded-lg border text-left transition-all ${infiniteEnabled ? 'bg-emerald-500/10 border-emerald-500/40' : 'bg-black/60 border-white/10 hover:border-white/20'}`}>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <span className={`text-sm font-medium ${infiniteEnabled ? 'text-emerald-400' : 'text-white'}`}>Infinite Highway</span>
+                  {infiniteEnabled && <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded border border-emerald-500/40 bg-emerald-500/20 text-emerald-400">ON</span>}
+                </div>
+                <p className="text-[11px] text-white/30 mt-0.5">Endless mode — survive as long as possible</p>
+              </div>
+              <div className={`w-10 h-5 rounded-full relative transition-colors ${infiniteEnabled ? 'bg-emerald-500/40' : 'bg-white/10'}`}>
+                <div className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${infiniteEnabled ? 'left-[22px] bg-emerald-400' : 'left-0.5 bg-white/40'}`} />
+              </div>
+            </button>
+          </div>
+        )}
+        {onToggleEyeTracking && (
+          <div className="mb-2">
+            <button onClick={() => onToggleEyeTracking(!eyeTrackingEnabled)} className={`w-full flex items-center gap-3 py-3 px-4 rounded-lg border text-left transition-all ${eyeTrackingEnabled ? 'bg-fuchsia-500/10 border-fuchsia-500/40' : 'bg-black/60 border-white/10 hover:border-white/20'}`}>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <span className={`text-sm font-medium ${eyeTrackingEnabled ? 'text-fuchsia-400' : 'text-white'}`}>Eye Tracking Steering</span>
+                  {eyeTrackingEnabled && <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded border border-fuchsia-500/40 bg-fuchsia-500/20 text-fuchsia-400">ON</span>}
+                </div>
+                <p className="text-[11px] text-white/30 mt-0.5">Steer with your eyes via webcam gaze detection</p>
+              </div>
+              <div className={`w-10 h-5 rounded-full relative transition-colors ${eyeTrackingEnabled ? 'bg-fuchsia-500/40' : 'bg-white/10'}`}>
+                <div className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${eyeTrackingEnabled ? 'left-[22px] bg-fuchsia-400' : 'left-0.5 bg-white/40'}`} />
+              </div>
+            </button>
           </div>
         )}
 

@@ -115,6 +115,9 @@ import { useEyeTracking } from '../hooks/useEyeTracking.ts';
 import { useTabRearview } from '../hooks/useTabRearview.ts';
 import { useCommentarySoundboard } from '../hooks/useCommentarySoundboard.ts';
 import { useDailyTimelapse } from '../hooks/useDailyTimelapse.ts';
+import { useSplitScreen } from '../hooks/useSplitScreen.ts';
+import { useRaceRoulette } from '../hooks/useRaceRoulette.ts';
+import { useSaddestLeaderboard } from '../hooks/useSaddestLeaderboard.ts';
 import { useEffect, useRef } from 'react';
 
 type RaceView = 'setup' | 'pre_race' | 'racing' | 'results';
@@ -401,6 +404,9 @@ export function Race() {
   const tabRearview = useTabRearview({ enabled: false, role: 'sender' as const });
   const commentarySoundboard = useCommentarySoundboard();
   const dailyTimelapse = useDailyTimelapse();
+  const splitScreen = useSplitScreen(false);
+  const raceRoulette = useRaceRoulette();
+  const saddestLeaderboard = useSaddestLeaderboard();
 
   const [twitchChannel, setTwitchChannel] = useState<string | null>(twitchChannelParam);
   const twitchChat = useTwitchChat(twitchChannel);
@@ -1867,6 +1873,17 @@ export function Race() {
         });
       }
 
+      // Record to saddest leaderboard (tracks worst performances)
+      if (raceConfigRef.current && gpu.raceFinished.player_time != null) {
+        saddestLeaderboard.recordResult(
+          raceConfigRef.current.track,
+          gpu.raceFinished.player_time,
+          0, // collisions
+          0, // reverseTime
+          gpu.raceFinished.player_max_speed ?? 0,
+        );
+      }
+
       // Win/loss commentary subtitle
       subtitleCommentary.triggerCommentary(playerWon ? 'win' : 'loss');
 
@@ -2202,6 +2219,28 @@ export function Race() {
           evolutionEnabled={evolutionEnabled}
           onToggleEvolution={setEvolutionEnabled}
           totalRaces={raceMemory.totalRaces}
+          floorIsLavaEnabled={floorIsLavaEnabled}
+          onToggleFloorIsLava={setFloorIsLavaEnabled}
+          wrongWayChickenEnabled={wrongWayChickenEnabled}
+          onToggleWrongWayChicken={setWrongWayChickenEnabled}
+          shrinkingTrackEnabled={shrinkingTrackEnabled}
+          onToggleShrinkingTrack={setShrinkingTrackEnabled}
+          tagModeEnabled={tagModeEnabled}
+          onToggleTagMode={setTagModeEnabled}
+          copsEnabled={copsEnabled}
+          onToggleCops={setCopsEnabled}
+          musicalChairsEnabled={musicalChairsEnabled}
+          onToggleMusicalChairs={setMusicalChairsEnabled}
+          photoRallyEnabled={photoRallyEnabled}
+          onTogglePhotoRally={setPhotoRallyEnabled}
+          webcamReactionsEnabled={webcamReactionsEnabled}
+          onToggleWebcamReactions={setWebcamReactionsEnabled}
+          speedrunEnabled={speedrunEnabled}
+          onToggleSpeedrun={setSpeedrunEnabled}
+          infiniteEnabled={infiniteEnabled}
+          onToggleInfinite={setInfiniteEnabled}
+          eyeTrackingEnabled={eyeTrackingEnabled}
+          onToggleEyeTracking={setEyeTrackingEnabled}
         />
       )}
 
