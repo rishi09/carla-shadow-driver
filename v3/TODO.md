@@ -877,7 +877,7 @@ Hold your phone sideways as a steering wheel. DeviceOrientationEvent gives tilt 
 Use TensorFlow.js face-mesh model to track where the player's eyes are looking. Look left to steer left. Look down to brake. Blink to honk. Sounds insane, actually works -- MediaPipe FaceMesh runs at 30fps in-browser, and gaze direction is just a vector from iris landmarks.
 - Viral: 10/10 | Feasibility: 5/10 | Wow: 10/10
 
-**3. Voice-Powered Turbo Boost**
+**3. Voice-Powered Turbo Boost** [DONE]
 Microphone input via Web Audio API. The louder you scream, the faster you go. AnalyserNode gives you real-time volume (getByteFrequencyData). Map decibels to a nitro boost multiplier. Imagine the clips: person screaming at their laptop to win a race.
 - Viral: 10/10 | Feasibility: 8/10 | Wow: 9/10
 
@@ -897,7 +897,7 @@ Open a second browser tab that shows a rear-facing CARLA camera. Position it abo
 Connect a MIDI controller via Web MIDI API. Map knobs to weather parameters (rain, fog, sun angle). One knob controls time of day. Another controls traffic density. You DJ the race conditions while your friend races. Twitch-ready.
 - Viral: 8/10 | Feasibility: 7/10 | Wow: 8/10
 
-**8. GPU-Rendered ASCII Art Mode**
+**8. GPU-Rendered ASCII Art Mode** [DONE]
 Server-side: convert CARLA frames to colored ASCII art using a GPU shader. Stream the ASCII as plain text via WebSocket. Render in a `<pre>` tag with syntax highlighting colors. Looks like the Matrix. Playable. Ridiculous. Uses almost zero bandwidth (text is tiny vs JPEG).
 - Viral: 9/10 | Feasibility: 8/10 | Wow: 8/10
 
@@ -987,7 +987,7 @@ Random sections of the road turn red (lava zones) and deal damage if you drive o
 Like a battle royale ring, the driveable road width shrinks over time. Drive outside the shrinking boundary and you take damage. By the final lap, you're threading a needle. Client-side overlay shows the boundary; server enforces collision damage.
 - Viral: 7/10 | Feasibility: 5/10 | Wow: 7/10
 
-**29. Cargo Delivery Mode**
+**29. Cargo Delivery Mode** [DONE]
 You're carrying fragile cargo. A "cargo integrity" meter starts at 100%. Every collision, hard brake, and sharp turn depletes it. Reach the destination before it hits 0%. Compete on a combined score: speed vs cargo integrity. The tension between "go fast" and "don't break the eggs" is sublime.
 - Viral: 6/10 | Feasibility: 8/10 | Wow: 7/10
 
