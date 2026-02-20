@@ -13,22 +13,29 @@ Shadow Driver is a browser-based racing game where you race against an AI car in
 
 ---
 
-## Current Status (Feb 18, 2026)
+## Current Status (Feb 19, 2026)
 
 ### Working
 - CARLA 0.9.15 running on Vast.ai GPU (RTX 3090, root privilege fix applied)
 - Direct WebSocket connection via `?ws=<tunnel_url>` query parameter
 - Player car controls: WASD + Space (handbrake), R (respawn), C (camera toggle)
-- AI opponent using CARLA autopilot (racing mode: ignores lights/signs, 40% over speed limit)
+- Car selection: 6 vehicles (Tesla Model 3, Ford Mustang, Dodge Charger, Audi TT, Mini Cooper, Chevrolet Impala)
+- AI opponent using CARLA autopilot with 3 difficulty levels (Easy/Medium/Hard)
+- AI rubber banding: distance-based speed adjustment keeps races close (50m threshold, per-difficulty scaling)
+- AI mistake injection: periodic speed penalties create overtaking opportunities
+- Hard mode: 55% over speed limit, aggressive lane changes
 - Steering: progressive ramping (~100-130ms attack, ~130-200ms release), speed-limited (0.7 low, 0.15 high)
-- Reverse: full throttle when S pressed and speed < 5 km/h
+- Faster throttle (~150ms) and brake (~60ms) response; reverse threshold 15 km/h
+- WebRTC video streaming (H.264 via aiortc) with automatic JPEG/WebSocket fallback
+- WebRTC performance instrumentation (server frame_prep + browser RTCPeerConnection.getStats)
 - Compass navigation arrow pointing to next checkpoint
 - Race HUD: speedometer, lap timer, gap timer, throttle/brake/steer bars, connection quality
 - Minimap with player/AI positions
 - Countdown overlay (3-2-1-GO with traffic light colors)
 - Screen shake + impact sound on collisions
 - Engine sound + background music with speed-based intensity
-- Model selector on RaceSetup screen (Easy/Medium/Hard - UI only, no weights yet)
+- Camera FOV scaling at speed (1.0→1.05x at 150+ km/h)
+- Speed vignette (GPU-accelerated CSS gradient) + speed lines above 80 km/h
 - GitHub Actions auto-builds Docker image on push to v3 (server/docker/configs paths)
 - Vercel auto-deploys frontend on push to v3
 
@@ -69,19 +76,22 @@ Vast.ai GPU Instance (Docker: rkshah09/shadow-driver-v3:latest)
 ### Key Files
 
 **Frontend (v3/src/):**
-- `pages/Race.tsx` - Main racing page, keyboard controls, view state machine
-- `components/RaceSetup.tsx` - Pre-race config: track, weather, laps, AI model
+- `pages/Race.tsx` - Main racing page, keyboard controls, view state machine, FOV scaling
+- `components/RaceSetup.tsx` - Pre-race config: track, weather, laps, AI model, car selection
 - `components/RaceHUD.tsx` - HUD overlay: speed, laps, gap, inputs, checkpoint arrow
-- `components/VideoCanvas.tsx` - Renders binary JPEG frames to canvas
+- `components/VideoCanvas.tsx` - Renders binary JPEG frames to canvas (fallback path)
+- `components/WebRTCVideo.tsx` - Renders WebRTC H.264 video stream (primary path)
+- `components/SpeedEffects.tsx` - Speed vignette (CSS gradient) + speed lines (canvas)
 - `components/Minimap.tsx` - Top-down minimap with positions
-- `hooks/useGPUConnection.ts` - WebSocket connection + GPU provisioning state
+- `hooks/useGPUConnection.ts` - WebSocket + WebRTC connection, GPU provisioning state
 - `hooks/useEngineSound.ts` - Web Audio API engine sounds
 - `types/index.ts` - TypeScript interfaces (RaceState, RacerState, etc.)
 
 **Server (v3/server/):**
-- `race_server.py` - WebSocket server, race loop (30Hz frames + 30Hz telemetry)
-- `carla_manager.py` - CARLA vehicle/camera/control management, physics
-- `race_logic.py` - Checkpoints, lap tracking, race state
+- `race_server.py` - WebSocket server, WebRTC signaling, race loop (30Hz frames + 30Hz telemetry)
+- `carla_manager.py` - CARLA vehicle/camera/control management, physics, AI speed adjustment
+- `race_logic.py` - Checkpoints, lap tracking, race state, RaceDirector (rubber banding), AIMistakeGenerator
+- `webrtc_track.py` - CarlaVideoTrack (MediaStreamTrack) for H.264 streaming via aiortc
 - `model_manager.py` - AI model loading (PilotNet/Alpamayo)
 
 **Infrastructure:**

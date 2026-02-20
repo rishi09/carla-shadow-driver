@@ -176,6 +176,10 @@ export function useGPUConnection(): UseGPUConnectionReturn {
               pc.ontrack = (e) => {
                 console.log('[v3] WebRTC track received');
                 setRemoteStream(e.streams[0]);
+                // Minimize jitter buffer delay for lowest latency (~20ms instead of default ~100ms+)
+                try {
+                  (e.receiver as any).playoutDelayHint = 0.02;
+                } catch { /* not supported in all browsers */ }
               };
               const offer = await pc.createOffer();
               await pc.setLocalDescription(offer);
