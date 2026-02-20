@@ -648,3 +648,63 @@ Format: `## [timestamp] Category: Short description`
 - **Rule**: For racing line optimization, start with minimum curvature (fast, no vehicle model needed). Only move to minimum time if you need absolute optimal lines and are willing to characterize the vehicle's acceleration/braking envelope (ggv diagrams).
 
 ---
+
+## [2026-02-19] Drift Scoring System
+
+**Drift detection uses heading-vs-velocity slip angle, not steering input.** The server computes slip angle as the difference between the vehicle's forward heading and its velocity vector. This is physically correct — a car can be drifting with zero steering input (momentum drift). Threshold: 15 degrees of slip angle at speed > 20 km/h triggers a drift. The detection runs server-side in `race_logic.py`'s `DriftDetector` class.
+
+**Score formula: avg_angle × avg_speed × duration × 0.1.** Averaging angle and speed over the drift duration (rather than summing per-frame) produces stable, predictable scores that don't depend on frame rate. The 0.1 scaling factor keeps scores in a human-readable range (100-5000 points per drift). Multipliers for special situations: 1.5x chain bonus (new drift within 2 seconds of previous), 1.5x high-speed bonus (average speed > 120 km/h), 2x reverse-entry bonus (entering drift while in reverse).
+
+**The frontend DriftScore component uses three visual layers.** Active drift display (bottom-center, shows live angle/speed/score while drifting), score popups (animated numbers that rise and fade on drift end), and a persistent total score counter (top area). CSS keyframe animations handle the visual feedback: `drift-score-pulse` for the active indicator, `drift-popup-rise` for the floating score numbers, `drift-total-bump` for the total counter update.
+
+**Rule**: For drift scoring, average angle and speed over drift duration rather than summing per-frame values. Per-frame sums create frame-rate-dependent scores and produce unintuitive numbers. Averages × duration gives consistent results regardless of server tick rate.
+
+---
+
+## [2026-02-19] Auto-Shutdown for GPU Instances
+
+**Cloud GPU instances must always have an auto-shutdown mechanism.** Without it, a forgotten instance can run for hours at $0.30-1.50/hr. The `AutoShutdownManager` in `race_server.py` tracks WebSocket connections and starts a 10-minute countdown when the last client disconnects. Any new connection cancels the timer.
+
+**Self-destruct uses the Vast.ai API directly from within the container.** The instance calls `DELETE https://console.vast.ai/api/v0/instances/{instance_id}/` with its own API key and instance ID (both passed as environment variables via the onstart script). This is more reliable than an external watchdog because it works even if the callback URL is unreachable.
+
+**Instance ID discovery is non-trivial on Vast.ai.** The container doesn't inherently know its own instance ID. We pass it via the `INSTANCE_ID` env var in the provisioning onstart script. Vast.ai also sets `VAST_CONTAINERLABEL` to `C.{instance_id}`, which serves as a fallback. The auto-shutdown manager tries both.
+
+**Rule**: For cloud GPU instances, always implement auto-shutdown with an idle timer. 10 minutes is a good default — long enough to survive page refreshes and brief disconnects, short enough to prevent runaway costs. Pass the instance ID and API key as environment variables during provisioning.
+
+---
+
+## [2026-02-19] Camera Motion Extrapolation
+
+**Client-side frame extrapolation reduces perceived choppiness between 30fps server frames.** The `useFrameExtrapolation` hook applies subtle CSS `translate()` transforms to the video canvas between server frame arrivals. Direction: lateral (X) based on current steering input × speed, vertical (Y) based on speed alone (simulating forward motion). The transform resets smoothly when a new server frame arrives.
+
+**Maximum displacement must be tiny (±5px) to avoid visible artifacts.** Larger extrapolation causes visible "snapping" when the real frame arrives and doesn't match the prediction. At ±5px, the correction is imperceptible — the brain fills in the gap. The time delta is capped at 50ms to prevent large jumps after frame drops.
+
+**Extrapolation compounds with existing CSS transforms.** Race.tsx already applies steering prediction (translateX) and speed-based FOV (scale) transforms. The extrapolation transform is combined via string concatenation: `translate(${steerX + extraX}px, ${extraY}px) scale(${fov})`. Order matters — translate before scale.
+
+**Rule**: For frame extrapolation, keep maximum displacement to ±5px and time delta cap to 50ms. Larger values make the correction visible when real frames arrive. The goal is subliminal smoothness, not accurate prediction.
+
+---
+
+## [2026-02-19] Personal Best Times
+
+**Personal bests use localStorage keyed by track and lap count.** Key format: `shadow-driver-pb` containing a JSON object keyed by `${track}_${laps}`. This means "Town01 3 laps" and "Town01 5 laps" have separate records. The `usePersonalBests` hook provides `saveBest()`, `getBest()`, and `getResult()` functions.
+
+**Compare before saving to detect new records.** The `getResult()` function must be called BEFORE `saveBest()` — it returns the medal earned and whether a new PB was set by comparing the current time against the stored best. If you save first and then compare, you're comparing against yourself and will never detect improvement.
+
+**Medal thresholds are percentage-based relative to personal best.** Gold: finish within 5% of PB (near-perfect run). Silver: within 15%. Bronze: completed the race. This system rewards consistency and improvement rather than absolute speed, which is appropriate for a game where track conditions and AI behavior vary.
+
+**Rule**: When implementing personal best systems, always compare the new time against the old PB before saving. Call `getResult(time)` first to determine if it's a new record, then call `saveBest(time)` to persist it. Reversing this order means you always compare against your just-saved time.
+
+---
+
+## [2026-02-19] Time-of-Day Presets and Camera Settings
+
+**CARLA's weather system controls sun position via sun_altitude_angle and sun_azimuth_angle.** Five presets implemented: Morning (altitude 15°, warm fog), Noon (altitude 90°, clear), Sunset (altitude 5°, azimuth 180°, orange clouds), Night (altitude -30°, dark), Storm (altitude 30°, heavy rain/clouds/wind). Each preset sets 10+ weather parameters including cloudiness, precipitation, fog density, wetness, and wind intensity.
+
+**Cinematic camera settings significantly improve visual quality.** FOV 90 (wider than CARLA's default 70), motion_blur_intensity 0.3, exposure_mode histogram (auto-adjusts to scene brightness), shutter_speed 1/60, ISO 100. These are set as blueprint attributes on the camera sensor in `carla_manager.py`'s `_attach_camera()`. The histogram exposure mode is important — without it, night scenes are too dark and sunny scenes are blown out.
+
+**The time-of-day selector uses a 5-column grid with themed colors.** Morning=amber, Noon=sky-blue, Sunset=orange, Night=indigo, Storm=gray. Each option has an emoji icon and descriptive subtitle. The selection is passed to the server as part of the `start_race` message and applied before the first frame renders.
+
+**Rule**: When setting CARLA camera attributes, always use histogram exposure mode (`exposure_mode: "histogram"`) for scenes with varying lighting. Manual exposure breaks badly in night/dawn transitions. Also set shutter_speed and ISO explicitly — CARLA's defaults produce noisy images in low light.
+
+---
