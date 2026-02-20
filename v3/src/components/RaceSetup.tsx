@@ -69,8 +69,23 @@ const CAR_OPTIONS: CarOption[] = [
   { id: 'vehicle.chevrolet.impala', name: 'Chevrolet Impala' },
 ];
 
+interface TimeOfDayOption {
+  id: string;
+  label: string;
+  color: string;
+  borderColor: string;
+}
+
+const TIME_OF_DAY_OPTIONS: TimeOfDayOption[] = [
+  { id: 'morning', label: 'Morning', color: 'text-amber-400', borderColor: 'border-amber-500/50' },
+  { id: 'noon', label: 'Noon', color: 'text-yellow-300', borderColor: 'border-yellow-400/50' },
+  { id: 'sunset', label: 'Sunset', color: 'text-orange-400', borderColor: 'border-orange-500/50' },
+  { id: 'night', label: 'Night', color: 'text-indigo-400', borderColor: 'border-indigo-500/50' },
+  { id: 'storm', label: 'Storm', color: 'text-gray-400', borderColor: 'border-gray-500/50' },
+];
+
 interface RaceSetupProps {
-  onStartRace: (track: string, laps: number, weather: string, model?: string, playerCar?: string) => void;
+  onStartRace: (track: string, laps: number, weather: string, model?: string, playerCar?: string, timeOfDay?: string) => void;
   onBack: () => void;
 }
 
@@ -80,6 +95,7 @@ export function RaceSetup({ onStartRace, onBack }: RaceSetupProps) {
   const [selectedLaps, setSelectedLaps] = useState(3);
   const [selectedModel, setSelectedModel] = useState('carla_pilotnet');
   const [selectedCar, setSelectedCar] = useState('vehicle.tesla.model3');
+  const [selectedTimeOfDay, setSelectedTimeOfDay] = useState('noon');
 
   const personalBests = usePersonalBests();
   const currentTrack = TRACKS.find(t => t.id === selectedTrack);
@@ -143,6 +159,26 @@ export function RaceSetup({ onStartRace, onBack }: RaceSetupProps) {
               >
                 <span className="text-lg">{weather.icon}</span>
                 <span>{weather.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Time of Day Selector */}
+        <div className="mb-5">
+          <label className="block text-white/60 text-sm font-medium mb-2">Time of Day</label>
+          <div className="grid grid-cols-5 gap-2">
+            {TIME_OF_DAY_OPTIONS.map((tod) => (
+              <button
+                key={tod.id}
+                onClick={() => setSelectedTimeOfDay(tod.id)}
+                className={`flex flex-col items-center gap-1 py-2.5 px-1 rounded-lg border text-xs transition-all ${
+                  selectedTimeOfDay === tod.id
+                    ? `bg-white/10 ${tod.borderColor} ${tod.color}`
+                    : 'bg-black/60 border-white/10 text-white/50 hover:border-white/20 hover:text-white/70'
+                }`}
+              >
+                <span className="font-medium">{tod.label}</span>
               </button>
             ))}
           </div>
@@ -226,7 +262,7 @@ export function RaceSetup({ onStartRace, onBack }: RaceSetupProps) {
 
         {/* Start Race Button */}
         <button
-          onClick={() => onStartRace(selectedTrack, selectedLaps, selectedWeather, selectedModel, selectedCar)}
+          onClick={() => onStartRace(selectedTrack, selectedLaps, selectedWeather, selectedModel, selectedCar, selectedTimeOfDay)}
           className="w-full py-3 px-6 bg-gradient-to-r from-player to-ai rounded-lg text-white font-bold text-lg hover:opacity-90 transition-opacity animate-glow"
         >
           Start Race

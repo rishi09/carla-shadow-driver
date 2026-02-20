@@ -13,7 +13,7 @@ import { RaceHUD } from '../components/RaceHUD.tsx';
 import { SpeedEffects } from '../components/SpeedEffects.tsx';
 import { SpeedLines } from '../components/SpeedLines.tsx';
 import { ParticleOverlay } from '../components/ParticleOverlay.tsx';
-import { DriftOverlay } from '../components/DriftOverlay.tsx';
+import { DriftScore } from '../components/DriftScore.tsx';
 import { CommentaryOverlay } from '../components/CommentaryOverlay.tsx';
 import { GPUConnectionModal } from '../components/GPUConnectionModal.tsx';
 import { RaceResults } from '../components/RaceResults.tsx';
@@ -41,7 +41,7 @@ export function Race() {
   const CAMERA_MODES = ['chase', 'hood', 'bumper'] as const;
 
   // Store last race settings for instant replay and share link
-  const lastRaceSettingsRef = useRef<{ track: string; laps: number; weather: string; model?: string; playerCar?: string } | null>(null);
+  const lastRaceSettingsRef = useRef<{ track: string; laps: number; weather: string; model?: string; playerCar?: string; timeOfDay?: string } | null>(null);
 
   const gpu = useGPUConnection();
   const engineSound = useEngineSound();
@@ -318,6 +318,25 @@ export function Race() {
           difficulty: config.model,
           playerCar: config.playerCar,
         });
+
+        // Compute personal best result BEFORE saving (so we compare against the old best)
+        const settings = lastRaceSettingsRef.current;
+        const pbResultData = personalBests.getResult(config.track, config.laps, gpu.raceFinished.player_time);
+        setPbResult(pbResultData);
+
+        // Save personal best
+        personalBests.saveBest({
+          time: gpu.raceFinished.player_time,
+          date: new Date().toISOString(),
+          track: config.track,
+          laps: config.laps,
+          weather: settings?.weather ?? 'clear',
+          difficulty: config.model,
+          topSpeed: gpu.raceFinished.player_max_speed ?? 0,
+          driftScore: gpu.raceFinished.total_drift_score,
+        });
+      } else {
+        setPbResult(null);
       }
     }
   }, [gpu.raceFinished]);
@@ -358,20 +377,20 @@ export function Race() {
   }, [gpu.raceState?.player?.speed_kmh]);
 
   // Track pending demo race config to send once WebSocket connects
-  const pendingDemoRaceRef = useRef<{ track: string; laps: number; weather: string; model?: string; player_car?: string } | null>(null);
+  const pendingDemoRaceRef = useRef<{ track: string; laps: number; weather: string; model?: string; player_car?: string; time_of_day?: string } | null>(null);
 
   // --- Send start_race once connected in demo mode ---
   useEffect(() => {
     if ((isDemo || directWsUrl) && gpu.isConnected && pendingDemoRaceRef.current) {
-      const { track, laps, weather, model, player_car } = pendingDemoRaceRef.current;
+      const { track, laps, weather, model, player_car, time_of_day } = pendingDemoRaceRef.current;
       pendingDemoRaceRef.current = null;
-      gpu.sendStartRace(track, laps, weather, model, player_car);
+      gpu.sendStartRace(track, laps, weather, model, player_car, time_of_day);
     }
   }, [isDemo, directWsUrl, gpu.isConnected, gpu.sendStartRace]);
 
-  const handleStartRace = useCallback((track: string, laps: number, weather: string, model?: string, playerCar?: string) => {
+  const handleStartRace = useCallback((track: string, laps: number, weather: string, model?: string, playerCar?: string, timeOfDay?: string) => {
     // Save settings for instant replay
-    lastRaceSettingsRef.current = { track, laps, weather, model, playerCar };
+    lastRaceSettingsRef.current = { track, laps, weather, model, playerCar, timeOfDay };
     // Save config for leaderboard
     raceConfigRef.current = {
       track,
@@ -382,11 +401,11 @@ export function Race() {
     setView('racing');
     setRaceWeather(weather);
     if (isDemo || directWsUrl) {
-      pendingDemoRaceRef.current = { track, laps, weather, model, player_car: playerCar };
+      pendingDemoRaceRef.current = { track, laps, weather, model, player_car: playerCar, time_of_day: timeOfDay };
       const wsUrl = directWsUrl || DEMO_WS_URL;
       gpu.connectDirect(wsUrl.replace('https://', 'wss://').replace('http://', 'ws://'));
     } else {
-      gpu.sendStartRace(track, laps, weather, model, playerCar);
+      gpu.sendStartRace(track, laps, weather, model, playerCar, timeOfDay);
     }
   }, [gpu, isDemo, directWsUrl]);
 
@@ -398,7 +417,7 @@ export function Race() {
   const handleInstantReplay = useCallback(() => {
     const settings = lastRaceSettingsRef.current;
     if (settings) {
-      handleStartRace(settings.track, settings.laps, settings.weather, settings.model, settings.playerCar);
+      handleStartRace(settings.track, settings.laps, settings.weather, settings.model, settings.playerCar, settings.timeOfDay);
     } else {
       // Fallback to setup if no saved settings
       setView('pre_race');
@@ -420,6 +439,7 @@ export function Race() {
       weather: s.weather,
       model: s.model,
       playerCar: s.playerCar,
+      timeOfDay: s.timeOfDay,
     };
   }, [view]); // Re-compute when view changes (entering results)
 
@@ -506,10 +526,11 @@ export function Race() {
           {/* HUD overlay */}
           <RaceHUD raceState={gpu.raceState} latencyMs={gpu.latencyMs} />
 
-          {/* Drift score overlay */}
-          <DriftOverlay
+          {/* Drift score overlay (active drift display + score popups + total score) */}
+          <DriftScore
             drift={gpu.raceState?.drift}
             totalDriftScore={gpu.raceState?.total_drift_score}
+            driftEndEvent={gpu.latestDriftEnd}
           />
 
           {/* AI race commentary */}
@@ -604,6 +625,7 @@ export function Race() {
           onMainMenu={handleMainMenu}
           raceSettings={raceSettingsForResults}
           onInstantReplay={handleInstantReplay}
+          personalBestResult={pbResult}
         />
       )}
     </div>
