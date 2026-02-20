@@ -1,75 +1,83 @@
 # Shadow Driver v3 - TODO
 
-## WebRTC Migration (JPEG/WebSocket → H.264/WebRTC)
+## Latency & Streaming (the #1 problem)
 
-Goal: Reduce perceived input lag by ~15-40ms by switching video streaming from JPEG-over-WebSocket to H.264-over-WebRTC. Controls and telemetry stay on WebSocket.
+### Current bottleneck analysis
+The perceived lag stack when turning:
+1. **Server-side steering ramp**: ~40ms (was ~130ms, fixed)
+2. **JPEG encode**: ~5-10ms (quality=50, 1280x720)
+3. **Network transit**: ~30-60ms (SSH tunnel) or ~80-140ms (Cloudflare tunnel)
+4. **Browser JPEG decode + canvas paint**: ~5-15ms
+5. **rAF sync wait**: 0-16ms (requestAnimationFrame)
+**Total: ~80-140ms (SSH) or ~120-220ms (Cloudflare)**
 
-### Phase 1: Basic WebRTC video stream
-- [x] Add `aiortc` to `docker/requirements.txt`
-- [x] Add system deps to Dockerfile (conda-forge `av` for FFmpeg compat with Ubuntu 18.04)
-- [x] Create `CarlaVideoTrack(MediaStreamTrack)` in server — reads from `CameraBuffer`, returns `av.VideoFrame`
-- [x] Add WebRTC offer/answer handling to `race_server.py` — `webrtc_offer` → `RTCPeerConnection` + video track + H.264 → `webrtc_answer`
-- [x] Frontend: add `RTCPeerConnection` setup in `useGPUConnection.ts` — offer via WebSocket, handle answer, capture remote stream
-- [x] Frontend: create `WebRTCVideo.tsx` component — `<video>` element with `srcObject = remoteStream`
-- [x] Skip `_send_frame()` when WebRTC active (JPEG fallback still works when `self.pc is None`)
-- [x] Add performance instrumentation (server frame_prep + browser RTCPeerConnection.getStats)
-- [ ] Test with direct Vast.ai port exposure (UDP ports 10000-10010) instead of Cloudflare tunnel for media
+### Transport: Kill the Cloudflare middleman
+- [ ] **WSS via self-signed cert on GPU**: Generate self-signed TLS cert on instance boot, serve `wss://` directly on port 8765. Browser will warn about self-signed cert but `wss://` won't be blocked by mixed content. Add a "trust this GPU" interstitial page.
+- [ ] **Ngrok alternative**: Try ngrok (free tier supports TCP+TLS) as Cloudflare tunnel replacement — it terminates TLS, giving us `wss://` with a valid cert and no UDP restrictions.
+- [ ] **Tailscale/WireGuard tunnel**: Set up Tailscale on GPU instance — gives stable hostname + encrypted tunnel with ~2ms overhead vs Cloudflare's ~40-80ms.
+- [ ] **Direct Vast.ai with SSL**: Rent instances with "Direct" network mode, use Let's Encrypt or Caddy for auto-TLS on a custom domain pointing to the GPU IP.
 
-### Phase 2: Optimize latency
-- [x] Force H.264 codec via `force_codec(pc, sender, "video/H264")` with baseline profile
-- [x] Set browser-side `playoutDelayHint = 0.02` (20ms) on the video receiver to minimize jitter buffer
+### Encoding: Faster frame pipeline
+- [ ] **NVENC JPEG encoding**: Replace OpenCV JPEG with `nvjpeg` (CUDA JPEG encoder). Drops encode from ~5-10ms to <1ms. Available via `pip install pynvjpeg` or PyTorch's `torchvision.io.encode_jpeg` with CUDA tensors.
+- [ ] **WebRTC with direct UDP**: Test on Vast.ai "Direct" mode with UDP ports exposed. This is the real WebRTC win — browser hardware H.264 decode + no rAF sync.
+- [ ] **Skip unchanged frames**: If car is stationary and camera hasn't moved, skip encoding entirely. Send a "no-change" signal instead.
+- [ ] **Adaptive quality**: Drop JPEG quality to 30 when latency spikes >150ms, raise to 60 when stable <80ms. Frontend sends latency back in telemetry.
+- [ ] **Resolution downscale at speed**: At 200+ km/h you can't see detail anyway — drop to 960x540 at high speed, full res when slow/stopped.
+
+### Client-side prediction (biggest perceived improvement)
+- [ ] **Steering prediction overlay**: When A/D pressed, immediately rotate the canvas by a few degrees in the steering direction BEFORE the next server frame arrives. Undo rotation when frame arrives. This masks ~60-100ms of latency.
+- [ ] **Camera motion extrapolation**: Use current velocity vector to shift the camera view by `velocity * dt` between server frames. Smooth interpolation, corrected on next frame.
+- [ ] **Input echo in HUD**: Steering/throttle/brake bars already update instantly from local input — consider adding a subtle visual indicator (steering wheel icon, wheel turn animation) that responds instantly to input.
+
+### WebRTC (Phase 2-4 from original plan)
+- [ ] Test with Vast.ai "Direct" network mode (UDP ports 10000-10010 exposed)
 - [ ] Tune H.264 bitrate (start 1.5 Mbps, auto-adjust via WebRTC congestion control)
-- [ ] Remove `FrameEncoder` class (no more JPEG encoding needed)
+- [ ] NVENC via GStreamer pipeline if CPU x264 can't sustain 30fps
+- [ ] TURN server for tunnel compatibility (Metered.ca free tier: 50GB/month)
 - [ ] Measure actual latency improvement vs JPEG baseline
+- [ ] Remove FrameEncoder class once WebRTC is stable
 
-### Phase 3: GPU encoding (NVENC) — aiortc vs GStreamer decision
-- [ ] Deploy WebRTC, check server logs for `effective_fps` — if consistently <30, software x264 is the bottleneck
-- [ ] Check browser console `[WebRTC stats]` — high jitter or low framesReceived confirms encode bottleneck
-- [ ] **Decision: stick with aiortc or switch to GStreamer?**
-  - **aiortc (current):** `pip install`, simple Python API, but software x264 only (~15-30ms encode). No way to use NVENC without forking aiortc or feeding pre-encoded NAL units.
-  - **GStreamer + webrtcbin:** Pipeline-based, uses `nvh264enc` for NVENC (~9ms encode), battle-tested WebRTC stack. But: heavier install (~200-400MB), GObject boilerplate, replaces aiortc entirely.
-  - **Hybrid hack:** Encode with FFmpeg `h264_nvenc` externally, pipe NAL units into a custom aiortc MediaStreamTrack that skips re-encoding. Fragile but avoids full GStreamer switch.
-- [ ] If switching to GStreamer: prototype pipeline `appsrc → videoconvert → nvh264enc → rtph264pay → webrtcbin`
-- [ ] Validate no VRAM contention with CARLA on RTX 3090 (NVENC uses dedicated hardware encoder chip, should be fine)
-- [ ] Expected improvement: encoding drops from ~15-30ms (CPU x264) to ~9ms (NVENC)
+---
 
-### Phase 4: Production readiness
-- [ ] Add TURN server for Cloudflare tunnel compatibility (WebRTC needs UDP, Cloudflare tunnels only do TCP)
-- [ ] Add JPEG/WebSocket fallback if WebRTC negotiation fails
-- [ ] Close `RTCPeerConnection` on client disconnect (add to cleanup/reconnect flow)
-- [ ] Adaptive bitrate monitoring via `pc.getStats()`
+## Graphics & Visual Quality
 
-### Key gotcha: Cloudflare tunnel + WebRTC
-Cloudflare quick tunnels do NOT support UDP. Options:
-1. **Direct port exposure on Vast.ai** (best latency, exposes IP) — expose UDP 10000-10010
-2. **TURN relay over TCP/TLS** (works through tunnel, adds some overhead)
-3. **Hybrid** — try direct first, fall back to TURN
+### CARLA rendering improvements (server-side)
+- [ ] **Higher render resolution**: Render at 1920x1080 on server, downscale to 1280x720 for streaming (supersampling anti-aliasing). CARLA supports arbitrary camera resolution.
+- [ ] **Post-processing effects**: Enable CARLA's built-in post-processing — motion blur, bloom, lens flare via `carla.ColorConverter` or UE4 post-process settings.
+- [ ] **Better camera settings**: Tune FOV, exposure, gamma. CARLA cameras support `fov`, `shutter_speed`, `iso`, `fstop`, `gamma` attributes.
+- [ ] **Time of day**: Add sunset/sunrise/night race options. CARLA's weather system supports sun altitude/azimuth for dramatic lighting.
+- [ ] **Rain/wet roads**: CARLA has wet road reflections when precipitation > 0. Looks dramatically better than dry roads.
 
-### Latency comparison (estimated)
-| Stage | Current (JPEG/WS) | WebRTC (H.264) |
-|-------|-------------------|----------------|
-| H.264/JPEG encode | 5-10ms (JPEG) | 8-15ms CPU / 2ms NVENC |
-| Network transit | 30-100ms | 30-100ms |
-| Browser decode | 5-15ms (JPEG blob) | 1-3ms (hardware H.264) |
-| Display sync | 0-16ms (rAF wait) | 0ms (video compositor) |
-| **Total overhead** | **40-141ms** | **39-118ms (CPU) / 33-105ms (NVENC)** |
+### Frontend visual polish
+- [ ] **Motion blur shader**: CSS/WebGL post-process motion blur on the video canvas, driven by speed. Cheap to compute, hides frame rate artifacts.
+- [ ] **Speed lines**: Animated radial lines overlaid on canvas at high speed (anime/racing game style).
+- [ ] **Better HUD design**: Redesign speedometer as an arc/gauge. Add tachometer. Use racing game UI conventions.
+- [ ] **Particle effects**: Canvas-overlay spark particles on collisions, tire smoke on handbrake.
+- [ ] **Rear-view mirror**: Small inset showing rear camera (CARLA supports multiple cameras).
 
 ---
 
 ## Vehicle Physics Tuning
-- [x] Faster throttle ramp (~150ms, was ~300ms) and brake ramp (~60ms, was ~100ms)
+- [x] Faster throttle ramp (~80ms, was ~300ms) and brake ramp (~60ms, was ~100ms)
+- [x] Faster steering ramp (~40ms, was ~130ms)
 - [x] Reverse threshold raised to 15 km/h (was 5 km/h)
-- [ ] Tune vehicle physics via `vehicle.get_physics_control()`: increase tire friction, stiffen suspension, lower center of mass for less floaty feel
+- [x] Vehicle physics: reduced mass, boosted torque, increased tire friction, lowered center of mass
 - [ ] Add countersteer assist (auto-correct when sliding)
 - [ ] Add traction control (reduce throttle on wheel spin)
+- [ ] Drift mode: handbrake reduces rear tire friction for controlled slides
 
 ## Game Feel / Juice
 - [x] Camera FOV scaling at speed (subtle 1.0→1.05x zoom at 150+ km/h)
 - [x] Let player pick their car from 6 vehicles (Tesla, Mustang, Charger, Audi TT, Mini Cooper, Impala)
 - [x] Speed vignette: GPU-accelerated CSS radial gradient, scales with speed
 - [ ] Camera shake on acceleration/hard braking (collision shake already exists)
+- [ ] Impact sparks and tire smoke (CSS/canvas overlay particles)
+- [ ] Gear shift animation/sound
+- [ ] Drift scoring (angle * speed * duration = points)
 
-## First-Time User Experience (FTUE) — Future
+---
+
+## First-Time User Experience (FTUE)
 Learnings from Forza Horizon 5, Mario Kart, Trackmania, Slow Roads, agar.io.
 
 ### Landing Page
@@ -97,6 +105,8 @@ Learnings from Forza Horizon 5, Mario Kart, Trackmania, Slow Roads, agar.io.
 - [ ] Show something exciting during GPU provisioning wait (replays, leaderboards, tips)
 - [ ] Make the `?ws=` URL shareable — post-race "Share this track" button
 
+---
+
 ## AI Opponent
 - [x] Distance-based rubber banding (50m threshold, per-difficulty scaling: easy strong, hard minimal)
 - [x] AI mistake injection (easy: every 10-15s, medium: 20-30s, hard: 60s) — creates overtaking windows
@@ -104,3 +114,12 @@ Learnings from Forza Horizon 5, Mario Kart, Trackmania, Slow Roads, agar.io.
 - [ ] Load PilotNet weights from HuggingFace (sergiopaniego/OptimizedPilotNet, 200x66 input)
 - [ ] Hook up Medium difficulty to use PilotNet steering + rule-based throttle
 - [ ] Test if PilotNet + CARLA + WebRTC all fit on 24GB GPU
+
+---
+
+## Infrastructure & DevOps
+- [ ] **Auto-provisioning e2e test**: Test the full Play Game → Vast.ai provision → callback → tunnel → connect flow
+- [ ] **Instance cost tracking**: Log GPU cost per session, alert if spending > $X/day
+- [ ] **Auto-shutdown**: Kill GPU instance after 10min of no WebSocket connections
+- [ ] **Deploy script improvements**: deploy.sh should also start CARLA if not running
+- [ ] **Health monitoring**: Endpoint that returns CARLA status, GPU temp, VRAM usage, active connections
