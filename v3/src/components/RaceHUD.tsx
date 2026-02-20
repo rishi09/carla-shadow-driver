@@ -422,19 +422,36 @@ function CountdownOverlay({ countdown }: { countdown: number }) {
   );
 }
 
-/** Gap timer: shows +/- seconds vs opponent */
+/** Gap timer: shows +/- seconds vs opponent with warning pulse */
 function GapTimer({ gap }: { gap: number }) {
   const isAhead = gap > 0;
   const absGap = Math.abs(gap);
   const color = isAhead ? 'text-player' : 'text-warning';
   const sign = isAhead ? '+' : '-';
 
+  // Close-gap warning: pulse when AI is catching up (gap < 2s and player behind)
+  const showPulse = !isAhead && absGap < 2.0;
+  const pulseColor = absGap < 1.0 ? 'rgba(239,68,68,0.5)' : 'rgba(245,158,11,0.3)';
+
   return (
     <div
       className={`${color} font-mono font-bold text-lg`}
-      style={{ textShadow: '0 1px 4px rgba(0,0,0,0.8)' }}
+      style={{
+        textShadow: showPulse
+          ? `0 0 8px ${pulseColor}, 0 1px 4px rgba(0,0,0,0.8)`
+          : '0 1px 4px rgba(0,0,0,0.8)',
+        animation: showPulse ? 'gapPulse 1s ease-in-out infinite' : 'none',
+      }}
     >
       {sign}{absGap.toFixed(1)}s
+      {showPulse && (
+        <style>{`
+          @keyframes gapPulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+          }
+        `}</style>
+      )}
     </div>
   );
 }

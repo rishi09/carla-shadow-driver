@@ -67,7 +67,7 @@ export function SpeedEffects({ speedKmh, collisions, gear, className = '' }: Spe
     const opacity = Math.min(0.85, baseOpacity);
 
     return {
-      background: `radial-gradient(ellipse 70% 60% at 50% 50%, transparent 0%, rgba(${r},0,0,${(opacity * 0.3).toFixed(3)}) 55%, rgba(${r},0,0,${opacity.toFixed(3)}) 100%)`,
+      background: `radial-gradient(ellipse 70% 50% at 50% 50%, transparent 0%, rgba(${r},0,0,${(opacity * 0.3).toFixed(3)}) 55%, rgba(${r},0,0,${opacity.toFixed(3)}) 100%)`,
       transition: 'background 0.3s ease-out',
     };
   }, [speedKmh]);

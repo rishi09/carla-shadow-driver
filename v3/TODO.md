@@ -833,12 +833,12 @@ See `LEARNINGS.md` section "What Makes Racing Games Fun" for full rationale behi
 #### HUD Improvements
 - [ ] **Split-time delta at every checkpoint**: Show "+0.2s" or "-0.1s" vs PB at each checkpoint as a color-coded floating number (green = ahead, red = behind). Appears at checkpoint position on screen, floats up and fades over 1.5s. Requires storing per-checkpoint PB times. This is the micro-drama that makes Trackmania's time-trial mode so engaging.
 - [ ] **Speedometer needle bounce on gear shift**: In `ArcSpeedometer.tsx`, on gear change event, briefly overshoot the needle position by 5% then spring back (CSS transition with bounce easing). Syncs with the gear shift flash and audio pop for triple-feedback gear changes.
-- [ ] **Close-gap warning pulse**: When gap decreases to < 2.0s (AI catching up), add a subtle pulsing border glow on the gap timer HUD element. Orange at 2.0s, red at 1.0s. Creates urgency. Disappears when gap widens. Visual equivalent of the audio tension layer.
+- [x] **Close-gap warning pulse**: When gap decreases to < 2.0s (AI catching up), add a subtle pulsing border glow on the gap timer HUD element. Orange at 2.0s, red at 1.0s. Creates urgency. Disappears when gap widens. Visual equivalent of the audio tension layer.
 
 ### TIER 3: Medium Impact, Low Effort (polish items)
 
-- [ ] **Speed-dependent vignette shape**: Modify SpeedEffects.tsx vignette to darken top and sides more than bottom. Change ellipse from `70% 60%` to `70% 50%` (taller, keeping bottom lighter). Maintains road readability while enhancing tunnel vision.
-- [ ] **Speed line vanishing point offset**: In SpeedLines.tsx, move the radial center from dead center to 40% from top (slightly above center). Matches visual perspective of looking down a road. Change `centerY = h / 2` to `centerY = h * 0.4`.
+- [x] **Speed-dependent vignette shape**: Modify SpeedEffects.tsx vignette to darken top and sides more than bottom. Change ellipse from `70% 60%` to `70% 50%` (taller, keeping bottom lighter). Maintains road readability while enhancing tunnel vision.
+- [x] **Speed line vanishing point offset**: In SpeedLines.tsx, move the radial center from dead center to 40% from top (slightly above center). Matches visual perspective of looking down a road. Change `centerY = h / 2` to `centerY = h * 0.4`.
 - [ ] **Emphasize hood cam for speed**: When player switches to first-person/hood cam (C key), increase speed line intensity by 50% and lower the FOV curve threshold. Hood cam should feel MUCH faster than chase cam because road is closer (Wipeout lesson).
 - [ ] **Victory/defeat results enhancements**: Show gap to 3 decimal places when < 1.0s. Show improvement vs previous attempt. Add "Best Improvement" stat (e.g., "1.3s faster than your first race on this track!"). Show time progression chart of last 5 attempts.
 - [ ] **Slipstream/drafting visual**: When player is within 10m behind AI car, show faint blue-white speed streaks converging toward center (drafting visual). Even if no actual speed boost, the visual cue makes close following feel intentional and skill-based. If combining with actual draft speed boost, becomes a visible mechanic.

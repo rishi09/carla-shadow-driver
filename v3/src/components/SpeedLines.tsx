@@ -92,7 +92,7 @@ export function SpeedLines({ speedKmh, className = '' }: SpeedLinesProps) {
       }
 
       const centerX = w / 2;
-      const centerY = h / 2;
+      const centerY = h * 0.4; // Vanishing point slightly above center (road perspective)
       const maxRadius = Math.sqrt(centerX * centerX + centerY * centerY);
       // Inner ring: lines start from ~35% of the way out
       const innerRadius = maxRadius * 0.30;
