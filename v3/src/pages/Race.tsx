@@ -2322,7 +2322,7 @@ export function Race() {
           `}</style>
 
           {/* HUD overlay */}
-          <RaceHUD raceState={gpu.raceState} latencyMs={gpu.latencyMs} gamepadConnected={gamepad.connected} localKeys={keysRef} browserQuip={browserQuip} batteryQuip={batteryQuip} batteryState={batteryDifficulty.battery} tabPenaltyMessage={tabPenalty.message} />
+          <RaceHUD raceState={gpu.raceState} latencyMs={gpu.latencyMs} gamepadConnected={gamepad.connected} localKeys={keysRef} browserQuip={browserQuip} batteryQuip={batteryQuip} batteryState={batteryDifficulty.battery} tabPenaltyMessage={tabPenalty.message} timeSyncActive={timeZoneRacing.enabled} />
 
           {/* Cargo integrity meter (Fragile Cargo mode) */}
           {cargoMode.isCargoMode && (gpu.raceState?.race_status === 'racing' || gpu.raceState?.race_status === 'finishing') && (
