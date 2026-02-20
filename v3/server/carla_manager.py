@@ -402,20 +402,22 @@ class RaceManager:
             self._current_brake = max(0.0, self._current_brake - dt * 10.0)
 
         # --- Speed-sensitive steering with progressive ramping ---
+        # Lower limits prevent over-rotation/drifting at all speeds.
+        # Keyboard is binary (on/off), so limits act as max lock angle.
         if speed_kmh < 30:
-            steer_limit = 0.7
+            steer_limit = 0.5   # was 0.7 — less lock at low speed prevents spin-outs
         elif speed_kmh < 80:
-            steer_limit = 0.4
+            steer_limit = 0.3   # was 0.4
         elif speed_kmh < 150:
-            steer_limit = 0.25
+            steer_limit = 0.18  # was 0.25
         else:
-            steer_limit = 0.15
+            steer_limit = 0.10  # was 0.15 — barely any lock at top speed
 
-        # Ramp toward target: very fast attack (~50ms), fast release (~100ms)
-        # Steering responsiveness is critical — network lag already adds ~50ms,
-        # so server-side ramping must be minimal to avoid compounding delay.
-        steer_attack = dt * 18.0  # reaches 0.7 in ~1-2 frames at 30fps
-        steer_release = dt * 12.0 # returns to 0 in ~2-3 frames
+        # Ramp toward target: fast attack (~80ms), fast release (~100ms)
+        # Balance between responsiveness (masking network lag) and not instantly
+        # hitting max lock (which causes constant drifting with binary keyboard input).
+        steer_attack = dt * 10.0  # reaches 0.5 in ~1.5 frames at 30fps
+        steer_release = dt * 10.0 # returns to 0 in ~1.5 frames
 
         if keys.get('a', False):
             target_steer = -steer_limit
