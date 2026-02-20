@@ -1,4 +1,4 @@
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useMemo } from 'react';
 
 interface SpeedEffectsProps {
   speedKmh: number;
@@ -6,8 +6,9 @@ interface SpeedEffectsProps {
 }
 
 /**
- * Canvas overlay that renders speed lines and vignette effect.
- * Intensity scales with player speed for immersive visual feedback.
+ * Overlay that renders speed-dependent visual effects:
+ * - CSS radial-gradient vignette that darkens edges with speed
+ * - Canvas speed lines radiating from center at high speed
  */
 export function SpeedEffects({ speedKmh, className = '' }: SpeedEffectsProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -17,6 +18,21 @@ export function SpeedEffects({ speedKmh, className = '' }: SpeedEffectsProps) {
   // Update ref on every render (no effect teardown needed)
   speedRef.current = speedKmh;
 
+  // --- CSS Vignette ---
+  // At 0 km/h: no vignette (fully transparent)
+  // At 100 km/h: subtle dark edges (opacity ~0.4)
+  // At 150+ km/h: stronger vignette (opacity ~0.7)
+  const vignetteStyle = useMemo(() => {
+    const t = Math.min(1, speedKmh / 150);
+    const opacity = t * 0.7;
+    if (opacity < 0.03) return undefined;
+    return {
+      background: `radial-gradient(ellipse 70% 60% at 50% 50%, transparent 0%, rgba(0,0,0,${(opacity * 0.3).toFixed(3)}) 60%, rgba(0,0,0,${opacity.toFixed(3)}) 100%)`,
+      transition: 'background 0.4s ease-out',
+    };
+  }, [speedKmh]);
+
+  // --- Canvas speed lines ---
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -33,19 +49,7 @@ export function SpeedEffects({ speedKmh, className = '' }: SpeedEffectsProps) {
       const speed = speedRef.current;
       ctx.clearRect(0, 0, w, h);
 
-      // --- Vignette ---
-      // Intensity: 0 at rest, 0.7 at 200+ km/h
-      const vignetteIntensity = Math.min(0.7, speed / 300);
-      if (vignetteIntensity > 0.05) {
-        const gradient = ctx.createRadialGradient(w / 2, h / 2, w * 0.25, w / 2, h / 2, w * 0.7);
-        gradient.addColorStop(0, 'rgba(0,0,0,0)');
-        gradient.addColorStop(1, `rgba(0,0,0,${vignetteIntensity})`);
-        ctx.fillStyle = gradient;
-        ctx.fillRect(0, 0, w, h);
-      }
-
-      // --- Speed lines ---
-      // Only show above 80 km/h, intensity increases with speed
+      // Speed lines: only show above 80 km/h, intensity increases with speed
       if (speed > 80) {
         const lineIntensity = Math.min(1.0, (speed - 80) / 200);
         const numLines = Math.floor(8 + lineIntensity * 24);
@@ -98,10 +102,20 @@ export function SpeedEffects({ speedKmh, className = '' }: SpeedEffectsProps) {
   }, []);
 
   return (
-    <canvas
-      ref={canvasRef}
-      className={`absolute inset-0 pointer-events-none ${className}`}
-      style={{ width: '100%', height: '100%' }}
-    />
+    <>
+      {/* CSS vignette overlay (GPU-accelerated, smooth transitions) */}
+      {vignetteStyle && (
+        <div
+          className={`absolute inset-0 pointer-events-none ${className}`}
+          style={vignetteStyle}
+        />
+      )}
+      {/* Canvas speed lines overlay */}
+      <canvas
+        ref={canvasRef}
+        className={`absolute inset-0 pointer-events-none ${className}`}
+        style={{ width: '100%', height: '100%' }}
+      />
+    </>
   );
 }

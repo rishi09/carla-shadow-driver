@@ -47,8 +47,22 @@ const AI_MODELS: ModelOption[] = [
   { id: 'alpamayo', name: 'Speed Demon', difficulty: 'Hard', diffColor: 'text-red-400 border-red-500/40 bg-red-500/20', description: 'Aggressive rule-based AI. Ignores all traffic rules, 50% over speed limit.' },
 ];
 
+interface CarOption {
+  id: string;
+  name: string;
+}
+
+const CAR_OPTIONS: CarOption[] = [
+  { id: 'vehicle.tesla.model3', name: 'Tesla Model 3' },
+  { id: 'vehicle.ford.mustang', name: 'Ford Mustang' },
+  { id: 'vehicle.dodge.charger_2020', name: 'Dodge Charger' },
+  { id: 'vehicle.audi.tt', name: 'Audi TT' },
+  { id: 'vehicle.mini.cooper_s_2021', name: 'Mini Cooper' },
+  { id: 'vehicle.chevrolet.impala', name: 'Chevrolet Impala' },
+];
+
 interface RaceSetupProps {
-  onStartRace: (track: string, laps: number, weather: string, model?: string) => void;
+  onStartRace: (track: string, laps: number, weather: string, model?: string, playerCar?: string) => void;
   onBack: () => void;
 }
 
@@ -57,12 +71,13 @@ export function RaceSetup({ onStartRace, onBack }: RaceSetupProps) {
   const [selectedWeather, setSelectedWeather] = useState('clear');
   const [selectedLaps, setSelectedLaps] = useState(3);
   const [selectedModel, setSelectedModel] = useState('carla_pilotnet');
+  const [selectedCar, setSelectedCar] = useState('vehicle.tesla.model3');
 
   const currentTrack = TRACKS.find(t => t.id === selectedTrack);
 
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-dark-300 rounded-xl border border-white/10 max-w-lg w-full p-6 shadow-2xl">
+      <div className="bg-dark-300 rounded-xl border border-white/10 max-w-lg w-full p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
         {/* Header */}
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-xl font-bold text-white">Race Setup</h2>
@@ -134,6 +149,26 @@ export function RaceSetup({ onStartRace, onBack }: RaceSetupProps) {
           </div>
         </div>
 
+        {/* Car Selector */}
+        <div className="mb-5">
+          <label className="block text-white/60 text-sm font-medium mb-2">Your Car</label>
+          <div className="grid grid-cols-3 gap-2">
+            {CAR_OPTIONS.map((car) => (
+              <button
+                key={car.id}
+                onClick={() => setSelectedCar(car.id)}
+                className={`flex flex-col items-center gap-1 py-3 px-2 rounded-lg border text-sm transition-all ${
+                  selectedCar === car.id
+                    ? 'bg-white/10 border-player/50 text-white'
+                    : 'bg-black/60 border-white/10 text-white/50 hover:border-white/20 hover:text-white/70'
+                }`}
+              >
+                <span className="text-xs text-center font-medium leading-tight">{car.name}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* AI Opponent */}
         <div className="mb-6">
           <label className="block text-white/60 text-sm font-medium mb-2">AI Opponent</label>
@@ -167,7 +202,7 @@ export function RaceSetup({ onStartRace, onBack }: RaceSetupProps) {
 
         {/* Start Race Button */}
         <button
-          onClick={() => onStartRace(selectedTrack, selectedLaps, selectedWeather, selectedModel)}
+          onClick={() => onStartRace(selectedTrack, selectedLaps, selectedWeather, selectedModel, selectedCar)}
           className="w-full py-3 px-6 bg-gradient-to-r from-player to-ai rounded-lg text-white font-bold text-lg hover:opacity-90 transition-opacity animate-glow"
         >
           Start Race

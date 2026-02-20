@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { useGPUConnection } from '../hooks/useGPUConnection.ts';
 import { useEngineSound } from '../hooks/useEngineSound.ts';
 import { useBackgroundMusic } from '../hooks/useBackgroundMusic.ts';
@@ -235,26 +235,34 @@ export function Race() {
     setView('pre_race');
   }, []);
 
+  // --- Speed-based FOV zoom ---
+  // Subtle scale from 1.0 at rest to 1.05 at 150+ km/h to simulate FOV widening
+  const speedFovScale = useMemo(() => {
+    const speed = gpu.raceState?.player?.speed_kmh ?? 0;
+    const t = Math.min(1, speed / 150);
+    return 1.0 + t * 0.05;
+  }, [gpu.raceState?.player?.speed_kmh]);
+
   // Track pending demo race config to send once WebSocket connects
-  const pendingDemoRaceRef = useRef<{ track: string; laps: number; weather: string; model?: string } | null>(null);
+  const pendingDemoRaceRef = useRef<{ track: string; laps: number; weather: string; model?: string; player_car?: string } | null>(null);
 
   // --- Send start_race once connected in demo mode ---
   useEffect(() => {
     if ((isDemo || directWsUrl) && gpu.isConnected && pendingDemoRaceRef.current) {
-      const { track, laps, weather, model } = pendingDemoRaceRef.current;
+      const { track, laps, weather, model, player_car } = pendingDemoRaceRef.current;
       pendingDemoRaceRef.current = null;
-      gpu.sendStartRace(track, laps, weather, model);
+      gpu.sendStartRace(track, laps, weather, model, player_car);
     }
   }, [isDemo, directWsUrl, gpu.isConnected, gpu.sendStartRace]);
 
-  const handleStartRace = useCallback((track: string, laps: number, weather: string, model?: string) => {
+  const handleStartRace = useCallback((track: string, laps: number, weather: string, model?: string, playerCar?: string) => {
     setView('racing');
     if (isDemo || directWsUrl) {
-      pendingDemoRaceRef.current = { track, laps, weather, model };
+      pendingDemoRaceRef.current = { track, laps, weather, model, player_car: playerCar };
       const wsUrl = directWsUrl || DEMO_WS_URL;
       gpu.connectDirect(wsUrl.replace('https://', 'wss://').replace('http://', 'ws://'));
     } else {
-      gpu.sendStartRace(track, laps, weather, model);
+      gpu.sendStartRace(track, laps, weather, model, playerCar);
     }
   }, [gpu, isDemo, directWsUrl]);
 
@@ -297,10 +305,18 @@ export function Race() {
       {/* Racing view */}
       {view === 'racing' && (
         <div
-          className="relative w-full h-screen"
+          className="relative w-full h-screen overflow-hidden"
           style={{ transform: `translate(${shakeX}px, ${shakeY}px)` }}
         >
           {/* Video feed: prefer WebRTC, fall back to JPEG canvas */}
+          {/* Speed-based FOV scale applied to video for subtle zoom effect */}
+          <div
+            className="absolute inset-0"
+            style={{
+              transform: `scale(${speedFovScale})`,
+              transition: 'transform 0.3s ease-out',
+            }}
+          >
           {gpu.remoteStream ? (
             <WebRTCVideo
               remoteStream={gpu.remoteStream}
@@ -312,6 +328,7 @@ export function Race() {
               className="absolute inset-0 w-full h-full object-cover"
             />
           )}
+          </div>
 
           {/* Speed effects overlay (speed lines + vignette) */}
           <SpeedEffects speedKmh={gpu.raceState?.player.speed_kmh ?? 0} />
