@@ -115,6 +115,12 @@ export interface UseGPUConnectionReturn {
   remoteStream: MediaStream | null;
   // Timestamp (performance.now()) of the last received binary/video frame
   lastFrameTime: number;
+  // Server perf stats (quality, encode time, frame size, resolution)
+  perfStats: import('../types/index.ts').PerfStats | null;
+  // Count of no_change messages (delta-skipped frames)
+  noChangeCount: number;
+  // Total binary frames received (JPEG + H.264)
+  totalFrameCount: number;
   // WebRTC data channel state for controls: 'closed' | 'connecting' | 'open' | 'failed'
   dataChannelState: string;
 }
@@ -139,6 +145,9 @@ export function useGPUConnection(): UseGPUConnectionReturn {
   const [latestDriftEnd, setLatestDriftEnd] = useState<DriftEndEvent | null>(null);
   const [aiChat, setAiChat] = useState<AIChatMessage | null>(null);
   const [lastFrameTime, setLastFrameTime] = useState<number>(0);
+  const [perfStats, setPerfStats] = useState<import('../types/index.ts').PerfStats | null>(null);
+  const noChangeCountRef = useRef(0);
+  const totalFrameCountRef = useRef(0);
   const commentaryIdRef = useRef(0);
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -201,6 +210,10 @@ export function useGPUConnection(): UseGPUConnectionReturn {
     framesExpectedRef.current = 0;
     framesReceivedRef.current = 0;
     lastRttRef.current = 0;
+    // Reset debug overlay tracking
+    noChangeCountRef.current = 0;
+    totalFrameCountRef.current = 0;
+    setPerfStats(null);
     // Close WebRTC video peer connection
     if (pcRef.current) {
       pcRef.current.close();
@@ -448,6 +461,7 @@ export function useGPUConnection(): UseGPUConnectionReturn {
           if (frameType === 0x10 || frameType === 0x11) {
             // H.264 frame (keyframe or delta)
             setLastFrameTime(performance.now());
+            totalFrameCountRef.current += 1;
             if (h264FrameHandlerRef.current) {
               h264FrameHandlerRef.current(frameType === 0x10, buffer.slice(1));
             }
@@ -474,6 +488,7 @@ export function useGPUConnection(): UseGPUConnectionReturn {
             const jpegBlob = new Blob([buffer.slice(1)], { type: 'image/jpeg' });
             const now = performance.now();
             setLastFrameTime(now);
+            totalFrameCountRef.current += 1;
             _recordFrameArrival(now);
             if (binaryFrameHandlerRef.current) {
               binaryFrameHandlerRef.current(jpegBlob);
@@ -580,9 +595,11 @@ export function useGPUConnection(): UseGPUConnectionReturn {
           } else if (data.type === 'no_change') {
             // Server says frame is unchanged -- keep displaying the last frame.
             // No action needed; the VideoCanvas retains the last rendered frame.
+            noChangeCountRef.current += 1;
           } else if (data.type === 'perf_stats') {
             // Server performance stats for debug overlay
             const perf = data as import('../types/index.ts').PerfStats;
+            setPerfStats(perf);
             console.log(`[perf_stats] encode=${perf.avg_encode_ms}ms, ` +
               `size=${perf.avg_frame_size_kb}KB, ` +
               `q=${perf.quality}, res=${perf.resolution}, ` +
@@ -918,6 +935,9 @@ export function useGPUConnection(): UseGPUConnectionReturn {
     provisioningState, connectionState, instanceData, error,
     raceState, raceFinished, availableModels, activeModel, latencyMs, cameraMode, commentary, latestDriftEnd, aiChat,
     retryCount, maxRetries: MAX_RETRIES, lastFrameTime,
+    perfStats,
+    noChangeCount: noChangeCountRef.current,
+    totalFrameCount: totalFrameCountRef.current,
     startGPU, stopGPU, sendControls, sendStartRace, sendSwitchModel, sendRespawn, sendRestartRace, sendCameraMode, sendPause, sendResume, sendAmbientWeather,
     connectDirect, clearError, onBinaryFrame, onRearFrame, onH264Frame, onCodecConfig, remoteStream,
     isConnected: connectionState === 'connected',

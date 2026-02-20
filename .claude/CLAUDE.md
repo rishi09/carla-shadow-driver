@@ -41,11 +41,15 @@ Shadow Driver is a browser-based racing game where you race against an AI car in
 - Engine sound + background music with speed-based intensity
 - Camera FOV scaling at speed (1.0→1.05x at 150+ km/h)
 - Speed vignette (GPU-accelerated CSS gradient) + speed lines above 80 km/h
-- Rear-view mirror camera
+- Rear-view mirror camera (disabled — can be re-enabled)
 - Daily Challenge system (unique track/weather/difficulty per day)
 - Photo mode (F key)
 - Race recording overlay (REC indicator)
 - FirstTimeOverlay with controls tutorial
+- Debug overlay (~ key): FPS, latency, quality, resolution, encode time, codec
+- Tab title stats: shows `18fps 340ms | Shadow Driver` during racing
+- Health check script: `node v3/scripts/health_check.mjs` tests full WebSocket pipeline
+- Server session metrics: per-second [stats] log line, session summary on disconnect
 - GitHub Actions auto-builds Docker image on push to v3 (server/docker/configs paths)
 - NvFBC zero-copy GPU framebuffer capture (with x11grab fallback, then CARLA sensor fallback)
 - Adaptive bitrate (2-12 Mbps) based on client network quality (jitter, drop rate, RTT)
@@ -53,8 +57,10 @@ Shadow Driver is a browser-based racing game where you race against an AI car in
 - WebRTC data channel for low-latency input (~30-50ms savings, falls back to WebSocket over tunnels)
 - Xvfb virtual display (:99) for NvFBC capture compatibility
 - Visual Style selector in Race Setup advanced settings
+- Adaptive quality tiers relaxed for SSH tunnels: >500ms->q25/540p, 300-500ms->q50/720p, 150-300ms->q60, 80-150ms->q70, <80ms->q75
 
 ### Not Working / TODO
+- **Tunneling**: ngrok blocked by IT restrictions. bore.pub unreachable from some Vast.ai datacenters. Cloudflare QUIC timeouts on Russian datacenters. **SSH port forwarding is the most reliable option**: `ssh -N -L 8765:localhost:8765 -p PORT root@IP`. Localtunnel.me may work as alternative.
 - **Vercel deploy**: Project is `shadow-driver-v3` under team `rishi09-3609s-projects`. Root directory is `v3/`.
   - **CLI deploy** (from repo root, NOT from v3/): `npx vercel deploy --prod --yes --scope rishi09-3609s-projects --token <VERCEL_TOKEN>`
   - **IMPORTANT**: Must run from repo root (`/Users/rkshah20/side-projects/carla-shadow-driver/`), not from `v3/`. Vercel project has `rootDirectory: v3` configured server-side.
@@ -67,7 +73,7 @@ Shadow Driver is a browser-based racing game where you race against an AI car in
 - **Full provisioning flow untested**: The "Play Game" button flow (Vast.ai auto-provision + Cloudflare tunnel + callback) hasn't been tested end-to-end with the v3 Docker image.
 - **Docker Hub token**: Secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` are set in GitHub. Push to v3 branch (paths: `v3/server/**`, `v3/docker/**`, `v3/configs/**`) triggers auto-build via `.github/workflows/docker-build.yml`.
 - **Cloudflare tunnels unreliable on some datacenters**: QUIC connections timeout on some Vast.ai hosts. Workaround: use `--protocol http2` flag, or SSH port forwarding (`ssh -N -L 8765:localhost:8765 -p PORT root@IP`), or local dev server (`npm run dev` + SSH tunnel). ngrok is preferred but requires valid auth token.
-- **ngrok auth token expired**: The stored ngrok token is invalid. Generate a new one at https://dashboard.ngrok.com/get-started/your-authtoken
+- **ngrok auth token**: If the token is expired or missing, generate a new one at https://dashboard.ngrok.com/get-started/your-authtoken. **Do not ask the user for this — proactively get a new token yourself from the ngrok dashboard if needed, or remind the user only once that they need to provide it.** Store the token in Vercel env (`NGROK_AUTHTOKEN`) and pass to Vast.ai instances via `start.ts`.
 
 ---
 
@@ -257,3 +263,39 @@ VERCEL_PROJECT_ID           - Vercel project ID (from Project Settings > General
 ```
 NGROK_AUTHTOKEN             - ngrok auth token (passed from Vercel env, or set manually)
 ```
+
+---
+
+## Testing Workflow
+
+### Quick test after deploy (automated)
+Run a WebSocket health check from local machine through SSH tunnel:
+```bash
+node -e "
+const WebSocket = require('ws');
+const ws = new WebSocket('ws://localhost:8765');
+ws.on('open', () => ws.send(JSON.stringify({type:'handshake', client:'shadow-driver-v3'})));
+ws.on('message', (data) => { console.log('OK:', JSON.parse(data).type); ws.close(); process.exit(0); });
+ws.on('error', (e) => { console.log('Error:', e.message); process.exit(1); });
+setTimeout(() => { console.log('Timeout'); process.exit(1); }, 5000);
+"
+```
+
+### Server performance check
+After the user plays, check the race log for performance data:
+```bash
+ssh -p <PORT> root@<IP> 'grep -E "perf|adaptive|latency|encode" /tmp/race.log | tail -20'
+```
+
+### Key things to verify before telling user to play
+1. Race server process is running: `pgrep -af race_server`
+2. SSH tunnel is forwarding port 8765: `lsof -i :8765`
+3. Vite dev server is running: `lsof -i :5173`
+4. WebSocket handshake works (node test above)
+5. Idle timeout is set to 60+ minutes (not 10 min default)
+
+### Common pitfalls
+- **Server auto-shutdown**: Default is 10 min. Always increase to 60 min after deploy: `sed -i 's/IDLE_TIMEOUT_SECONDS = 10 \* 60/IDLE_TIMEOUT_SECONDS = 60 * 60/' /opt/shadow-driver/server/race_server.py`
+- **Port 8765 zombie**: After killing server, port may stay bound. Fix: `fuser -k 8765/tcp` or find PID via `/proc/net/tcp`
+- **React StrictMode**: Removed from main.tsx (was causing double-mount WebSocket drops in dev mode)
+- **SSH tunnel dies silently**: Re-establish with `ssh -N -L 8765:localhost:8765 -p <PORT> root@<IP> &`

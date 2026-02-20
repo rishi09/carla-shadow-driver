@@ -25,7 +25,8 @@ import { Minimap } from '../components/Minimap.tsx';
 import { ControlsHint } from '../components/ControlsHint.tsx';
 import { FirstTimeOverlay } from '../components/FirstTimeOverlay.tsx';
 import { PhotoMode } from '../components/PhotoMode.tsx';
-import { RearMirror } from '../components/RearMirror.tsx';
+import { DebugOverlay } from '../components/DebugOverlay.tsx';
+
 import { SplitTimeDelta } from '../components/SplitTimeDelta.tsx';
 import type { KeyState } from '../types/index.ts';
 
@@ -112,8 +113,25 @@ export function Race() {
   const [showControlsHint, setShowControlsHint] = useState(false);
   const controlsHintTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // --- Rear-view mirror state (toggled with M key) ---
-  const [showRearMirror, setShowRearMirror] = useState(true);
+  // --- Debug: show FPS/latency in browser tab title ---
+  const fpsCountRef = useRef(0);
+  useEffect(() => {
+    if (view !== 'racing') return;
+    // Count frames via gpu.lastFrameTime changes
+    fpsCountRef.current++;
+    // Update title every second
+    const interval = setInterval(() => {
+      const fps = fpsCountRef.current;
+      fpsCountRef.current = 0;
+      const lat = gpu.latencyMs ?? '?';
+      document.title = `${fps}fps ${lat}ms | Shadow Driver`;
+    }, 1000);
+    return () => { clearInterval(interval); document.title = 'Shadow Driver'; };
+  }, [view]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Track frame count from lastFrameTime changes
+  useEffect(() => { fpsCountRef.current++; }, [gpu.lastFrameTime]);
+
+
 
   // --- Photo Mode state ---
   const [photoModeActive, setPhotoModeActive] = useState(false);
@@ -754,10 +772,6 @@ export function Race() {
         const newMode = CAMERA_MODES[cameraIndexRef.current];
         setCameraMode(newMode);
         gpu.sendCameraMode(newMode);
-        return;
-      }
-      if (key === 'm') {
-        setShowRearMirror(prev => !prev);
         return;
       }
       if (key === ' ') {
@@ -1572,8 +1586,7 @@ export function Race() {
             sectorTimes={null}
           />
 
-          {/* Rear-view mirror (toggle with M key) */}
-          <RearMirror onRearFrame={gpu.onRearFrame} visible={showRearMirror} />
+          {/* Rear-view mirror disabled */}
 
           {/* Mute/unmute button */}
           <button
@@ -1661,6 +1674,17 @@ export function Race() {
           <FirstTimeOverlay
             visible={showFirstTimeOverlay}
             onDismiss={dismissFirstTimeOverlay}
+          />
+
+          {/* Debug overlay: toggle with backtick/tilde key */}
+          <DebugOverlay
+            connectionState={gpu.connectionState}
+            latencyMs={gpu.latencyMs}
+            lastFrameTime={gpu.lastFrameTime}
+            perfStats={gpu.perfStats}
+            noChangeCount={gpu.noChangeCount}
+            totalFrameCount={gpu.totalFrameCount}
+            dataChannelState={gpu.dataChannelState}
           />
         </div>
       )}

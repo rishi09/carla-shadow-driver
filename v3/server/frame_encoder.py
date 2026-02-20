@@ -20,14 +20,19 @@ MAX_QUALITY = 75
 # Latency thresholds and target qualities
 # Format: (latency_threshold, target_quality, target_width, target_height)
 # Checked in order from worst to best latency
+# Note: SSH tunnels through proxies (e.g. Vast.ai) add ~200-400ms of
+# round-trip latency that is NOT bandwidth-related. These thresholds are
+# generous to avoid tanking quality when bandwidth is actually fine.
 LATENCY_TIERS = [
-    # latency > 150ms: emergency quality, reduced resolution
-    (150, 25, 960, 540),
-    # latency 80-150ms: moderate quality, full resolution
-    (80, 40, 1280, 720),
-    # latency 50-80ms: good quality, full resolution
-    (50, 60, 1280, 720),
-    # latency < 50ms: best quality, full resolution
+    # latency > 500ms: emergency quality, reduced resolution
+    (500, 30, 960, 540),
+    # latency 300-500ms: moderate quality, full resolution (SSH tunnel tier)
+    (300, 50, 1280, 720),
+    # latency 150-300ms: good quality, full resolution
+    (150, 60, 1280, 720),
+    # latency 80-150ms: high quality, full resolution
+    (80, 70, 1280, 720),
+    # latency < 80ms: best quality, full resolution
     (0, 75, 1280, 720),
 ]
 
@@ -186,8 +191,9 @@ class FrameEncoder:
         # Log changes
         new_res = (self.max_width, self.max_height)
         if self.quality != old_quality or new_res != old_res:
-            print(f"[adaptive] latency={latency_ms:.0f}ms -> quality {old_quality}->{self.quality}, "
-                  f"res {old_res[0]}x{old_res[1]}->{new_res[0]}x{new_res[1]}")
+            print(f"[quality] latency={latency_ms:.0f}ms -> quality {self.quality}, "
+                  f"res {new_res[0]}x{new_res[1]} "
+                  f"(was quality {old_quality}, res {old_res[0]}x{old_res[1]})")
 
     # ---------------------------------------------------------------
     # 2. Frame Delta Detection

@@ -265,6 +265,20 @@ class RaceServer:
         self._frame_skip_count: int = 0  # Frames skipped since last perf log
         self._delta_skip_count: int = 0  # Frames skipped via frame delta detection
 
+        # --- Per-second stats logging ---
+        self._stats_frames_sent: int = 0        # Frames sent in current 1s window
+        self._stats_skip_count: int = 0          # Frames skipped in current 1s window
+        self._stats_latencies: list = []         # Latency samples in current 1s window
+        self._stats_last_log_time: float = 0.0   # Timestamp of last per-second log
+
+        # --- Session-level metrics (accumulated across entire connection) ---
+        self._session_start_time: float = 0.0
+        self._session_total_frames: int = 0
+        self._session_total_skips: int = 0
+        self._session_latencies: list = []       # All latency samples for the session
+        self._session_qualities: list = []       # All quality samples for the session
+        self._session_frame_sizes: list = []     # All frame sizes (bytes) for the session
+
         # --- Rear mirror frame counter (send at 15fps = every 2nd frame of the 30fps loop) ---
         self._rear_frame_counter: int = 0
 
@@ -389,6 +403,9 @@ class RaceServer:
         # Track connection for auto-shutdown
         self.shutdown_manager.client_connected(websocket)
 
+        # Initialize session stats for this connection
+        self._reset_session_stats()
+
         # Generate a unique connection ID for session tracking
         self._connection_counter += 1
         connection_id = f"{self._connection_counter}_{int(time.time())}"
@@ -450,6 +467,7 @@ class RaceServer:
                     latency = data.get('latency')
                     if latency is not None:
                         self.encoder.adapt_quality(float(latency))
+                        self._record_latency(float(latency))
 
                 elif msg_type == 'switch_model':
                     model_name = data.get('model', 'carla_pilotnet')
@@ -466,6 +484,7 @@ class RaceServer:
                     latency_ms = data.get('latency_ms')
                     if latency_ms is not None:
                         self.encoder.adapt_quality(float(latency_ms))
+                        self._record_latency(float(latency_ms))
 
                 elif msg_type == 'start_race':
                     track = data.get('track', 'Town03')
@@ -545,6 +564,8 @@ class RaceServer:
         except websockets.exceptions.ConnectionClosed:
             print("Client disconnected")
         finally:
+            # Log session summary before resetting state
+            self._log_session_summary()
             # Cancel race loop tasks but do NOT destroy CARLA actors
             # This keeps the server alive for reconnecting clients
             await self._reset_race()
@@ -710,6 +731,7 @@ class RaceServer:
                 latency = data.get('latency')
                 if latency is not None:
                     self.encoder.adapt_quality(float(latency))
+                    self._record_latency(float(latency))
         except Exception as e:
             print(f"[DC] Error parsing control message: {e}")
 
@@ -858,6 +880,86 @@ class RaceServer:
             self._nvfbc_capture.destroy()
             self._nvfbc_capture = None
         self._nvfbc_enabled = False
+
+    def _record_latency(self, latency_ms: float):
+        """Record a latency sample for per-second and session-level stats."""
+        self._stats_latencies.append(latency_ms)
+        self._session_latencies.append(latency_ms)
+
+    def _log_per_second_stats(self):
+        """Log a single concise per-second stats line during an active race.
+
+        Called from the FPS calculation block which fires every ~1 second.
+        Format: [stats] fps=18 lat=340ms q=50 res=1280x720 frame_kb=47.2 skip=3 encode_ms=5.2
+        """
+        if not self.running or not self.race_state or self.race_state.status not in ("racing", "finishing"):
+            return
+
+        perf = self.encoder.get_perf_stats()
+
+        avg_lat = 0
+        if self._stats_latencies:
+            avg_lat = int(sum(self._stats_latencies) / len(self._stats_latencies))
+
+        fps = int(round(self.fps))
+        skip = self._stats_skip_count
+
+        print(f"[stats] fps={fps} lat={avg_lat}ms q={perf['quality']} "
+              f"res={perf['resolution']} frame_kb={perf['avg_frame_size_kb']:.1f} "
+              f"skip={skip} encode_ms={perf['avg_encode_ms']:.1f}")
+
+        # Reset per-second counters
+        self._stats_frames_sent = 0
+        self._stats_skip_count = 0
+        self._stats_latencies = []
+
+    def _log_session_summary(self):
+        """Log a summary of the play session on disconnect.
+
+        Format: [session] duration=120s total_frames=2160 avg_fps=18.0 avg_lat=340ms avg_q=50 avg_frame_kb=47.2 total_skip=156 peak_lat=450ms
+        """
+        if self._session_start_time == 0:
+            return
+
+        duration = time.time() - self._session_start_time
+        if duration < 1.0:
+            return  # Too short to be meaningful
+
+        total_frames = self._session_total_frames
+        avg_fps = total_frames / duration if duration > 0 else 0.0
+
+        avg_lat = 0
+        peak_lat = 0
+        if self._session_latencies:
+            avg_lat = int(sum(self._session_latencies) / len(self._session_latencies))
+            peak_lat = int(max(self._session_latencies))
+
+        avg_q = 0
+        if self._session_qualities:
+            avg_q = int(sum(self._session_qualities) / len(self._session_qualities))
+
+        avg_frame_kb = 0.0
+        if self._session_frame_sizes:
+            avg_frame_kb = sum(self._session_frame_sizes) / len(self._session_frame_sizes) / 1024.0
+
+        total_skip = self._session_total_skips
+
+        print(f"[session] duration={int(duration)}s total_frames={total_frames} "
+              f"avg_fps={avg_fps:.1f} avg_lat={avg_lat}ms avg_q={avg_q} "
+              f"avg_frame_kb={avg_frame_kb:.1f} total_skip={total_skip} peak_lat={peak_lat}ms")
+
+    def _reset_session_stats(self):
+        """Reset all session-level stats counters for a new connection."""
+        self._session_start_time = time.time()
+        self._session_total_frames = 0
+        self._session_total_skips = 0
+        self._session_latencies = []
+        self._session_qualities = []
+        self._session_frame_sizes = []
+        self._stats_frames_sent = 0
+        self._stats_skip_count = 0
+        self._stats_latencies = []
+        self._stats_last_log_time = time.time()
 
     async def _switch_model(self, model_name: str):
         """Switch the AI driving model."""
@@ -1669,6 +1771,8 @@ class RaceServer:
                 self.fps = self._fps_count / (now_wall - self._fps_timer)
                 self._fps_count = 0
                 self._fps_timer = now_wall
+                # Per-second stats line
+                self._log_per_second_stats()
 
         # Race loop ended (finished or client disconnected)
         # Don't cleanup actors here — _reset_race handles loop cancellation,
@@ -1772,6 +1876,8 @@ class RaceServer:
         # Position-based frame skip: don't encode/send if camera hasn't moved
         if self._should_skip_frame():
             self._frame_skip_count += 1
+            self._stats_skip_count += 1
+            self._session_total_skips += 1
             return
 
         # --- H.264 NVENC path ---
@@ -1805,6 +1911,8 @@ class RaceServer:
                 try:
                     await self.ws_client.send(prefix + h264_data)
                     self.frame_count += 1
+                    self._stats_frames_sent += 1
+                    self._session_total_frames += 1
                 except Exception:
                     pass
 
@@ -1875,6 +1983,8 @@ class RaceServer:
         is_countdown = self.race_state and self.race_state.status == "countdown"
         if not is_countdown and self.encoder.is_frame_similar(frame):
             self._delta_skip_count += 1
+            self._stats_skip_count += 1
+            self._session_total_skips += 1
             # Send a lightweight no_change message so the client knows
             # the connection is alive and can keep displaying the last frame
             try:
@@ -1894,6 +2004,12 @@ class RaceServer:
             # Prepend type byte 0x00 for main camera frame
             await self.ws_client.send(b'\x00' + jpeg_bytes)
             self.frame_count += 1
+
+            # Track frame for per-second and session stats
+            self._stats_frames_sent += 1
+            self._session_total_frames += 1
+            self._session_qualities.append(self.encoder.quality)
+            self._session_frame_sizes.append(len(jpeg_bytes))
 
             # Push frame to highlight ring buffer for replay capture
             self.highlight_buffer.push_frame(jpeg_bytes)

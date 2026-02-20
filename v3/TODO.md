@@ -14,9 +14,13 @@ The perceived lag stack when turning:
 
 ### Transport: Kill the Cloudflare middleman
 - [x] **Ngrok tunnel (primary)**: Replaced Cloudflare quick tunnel with ngrok as primary tunnel. Free tier: 1 agent, valid TLS certs, WebSocket support, ~10-20ms overhead (vs Cloudflare's ~40-80ms). Requires `NGROK_AUTHTOKEN` env var. Cloudflare kept as automatic fallback.
-- [ ] **WSS via self-signed cert on GPU**: Generate self-signed TLS cert on instance boot, serve `wss://` directly on port 8765. Browser will warn about self-signed cert but `wss://` won't be blocked by mixed content. Add a "trust this GPU" interstitial page.
-- [ ] **Tailscale/WireGuard tunnel**: Set up Tailscale on GPU instance — gives stable hostname + encrypted tunnel with ~2ms overhead vs Cloudflare's ~40-80ms.
-- [ ] **Direct Vast.ai with SSL**: Rent instances with "Direct" network mode, use Let's Encrypt or Caddy for auto-TLS on a custom domain pointing to the GPU IP.
+- [ ] **bore.pub tunnel**: Open source, no account needed, no IT restrictions. Tried but unreachable from some Vast.ai datacenters (Russia-based hosts block outbound to bore.pub:7835).
+- [ ] **Vast.ai Direct ports**: Some instances expose ports directly without any tunnel. Zero overhead. Requires "Direct" network mode.
+- [ ] **WSS via self-signed cert on GPU**: Generate self-signed TLS cert on instance boot, serve `wss://` directly on port 8765.
+- [ ] **Tailscale/WireGuard tunnel**: Set up Tailscale on GPU instance — gives stable hostname + encrypted tunnel with ~2ms overhead.
+- [ ] **Localtunnel.me**: Open source, no account, worked from Russian datacenter. Try as Cloudflare alternative.
+
+**Note on ngrok**: IT restrictions may block ngrok. If so, use SSH port forwarding + local dev server (`ssh -N -L 8765:localhost:8765 -p PORT root@IP` + `cd v3 && npm run dev`).
 
 ### Encoding: Faster frame pipeline
 - [x] **NVENC H.264 hardware encoding**: FFmpeg subprocess with h264_nvenc, spatial-aq, zero-latency preset. Raw BGRA from CARLA → H.264 access units via NALU parsing. Codec negotiation with client. Auto-fallback to JPEG.
@@ -25,9 +29,11 @@ The perceived lag stack when turning:
 - [x] **WebCodecs hardware decode**: Browser uses VideoDecoder API for hardware H.264 decode. Falls back to JPEG/ImageBitmap on Firefox or older browsers.
 - [ ] **WebRTC with direct UDP**: Test on Vast.ai "Direct" mode with UDP ports exposed. This is the real WebRTC win — browser hardware H.264 decode + no rAF sync.
 - [x] **Skip unchanged frames**: Frame delta detection using block-mean perceptual hash (8x8 blocks, <0.5ms overhead). When frames are similar, sends lightweight `no_change` JSON instead of re-encoding JPEG. Combined with position-based skip for stationary cars.
-- [x] **Adaptive quality**: Four-tier latency-based quality: >150ms->q25/960x540, 80-150ms->q40/720p, 50-80ms->q60/720p, <50ms->q75/720p. Asymmetric stepping (fast down=8/call, slow up=2/call) prevents oscillation. Auto-reduces quality if average encode time >15ms.
+- [x] **Adaptive quality**: Latency-based quality tiers relaxed for SSH tunnel compatibility: >500ms->q25/960x540, 300-500ms->q50/720p, 150-300ms->q60/720p, 80-150ms->q70/720p, <80ms->q75/720p. Asymmetric stepping (fast down=8/call, slow up=2/call) prevents oscillation. Auto-reduces quality if average encode time >15ms.
 - [x] **Resolution downscale at speed**: At 200+ km/h, drops to 960x540. Restores at <150 km/h (50 km/h hysteresis gap prevents flapping).
 - [x] **Performance monitoring**: Rolling 30-frame averages for encode time and frame size. `perf_stats` message sent to client every 3s for debug overlay. Server logs enhanced with pos_skip/delta_skip counts and auto-reduction flags.
+- [x] **Debug overlay + tab title stats**: Press ~ to toggle debug overlay (FPS, latency, quality, resolution, encode time, frame size, codec). Tab title shows `18fps 340ms | Shadow Driver` during racing. Health check script: `node v3/scripts/health_check.mjs` tests the full pipeline.
+- [x] **Server session metrics**: Per-second `[stats]` log line during races. Session summary on disconnect with total frames, avg FPS, avg latency, peak latency.
 
 ### Client-side prediction (biggest perceived improvement)
 - [x] **Steering prediction overlay**: When A/D pressed, immediately rotate the canvas by a few degrees in the steering direction BEFORE the next server frame arrives. Speed-dependent: matches server's steer limits (2.8deg at <30km/h, 0.56deg at >150km/h). Smooth rAF interpolation with attack/release curves. Also includes pitch tilt on W/S and lateral translateX shift.
