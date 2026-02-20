@@ -177,7 +177,7 @@ export function useGPUConnection(): UseGPUConnectionReturn {
           // Read the first byte to determine frame type
           const typeByte = await blob.slice(0, 1).arrayBuffer();
           const frameType = new Uint8Array(typeByte)[0];
-          const jpegBlob = blob.slice(1);
+          const jpegBlob = blob.slice(1, blob.size, 'image/jpeg');
 
           if (frameType === 0x01) {
             // Rear-view mirror frame

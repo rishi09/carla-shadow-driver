@@ -125,8 +125,9 @@ export function VideoCanvas({ onBinaryFrame, className = '', externalCanvasRef }
             setHasFirstFrame(true);
           }
         })
-        .catch(() => {
+        .catch((err) => {
           // Failed to decode JPEG - skip frame
+          console.warn('[VideoCanvas] createImageBitmap failed:', err, 'blob size:', blob.size, 'type:', blob.type);
           decoding = false;
         });
     };
