@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { LeaderboardPanel } from './LeaderboardPanel.tsx';
 import { usePersonalBests } from '../hooks/usePersonalBests.ts';
+import { useAdaptiveDifficulty } from '../hooks/useAdaptiveDifficulty.ts';
 import { getDailyChallenge, getDailyBest } from '../hooks/useDailyChallenge.ts';
 import { usePlayerName } from '../hooks/usePlayerName.ts';
 import { useStreak } from '../hooks/useStreak.ts';
@@ -147,6 +148,7 @@ export function RaceSetup({ onStartRace, onBack, onStartDailyChallenge, quicksta
   const social = useSocialPresence();
 
   const personalBests = usePersonalBests();
+  const adaptiveDifficulty = useAdaptiveDifficulty();
   const currentTrack = TRACKS.find(t => t.id === selectedTrack);
   const currentBest = personalBests.getBest(selectedTrack, selectedLaps);
   const currentMedal = currentBest ? personalBests.getMedal(selectedTrack, selectedLaps, currentBest.time) : null;
@@ -348,6 +350,13 @@ export function RaceSetup({ onStartRace, onBack, onStartDailyChallenge, quicksta
               </button>
             ))}
           </div>
+          {adaptiveDifficulty.isAdjusted && (
+            <div className="mt-1.5 pl-1">
+              <span className="text-white/25 text-[10px] font-mono">
+                AI Adjusted {adaptiveDifficulty.speedFactor > 1.0 ? '+' : ''}{Math.round((adaptiveDifficulty.speedFactor - 1.0) * 100)}%
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Lap Count Selector */}

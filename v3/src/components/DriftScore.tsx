@@ -3,7 +3,11 @@
  *
  * Shows:
  * 1. Active drift: angle gauge + live score counter (bottom-center)
+ *    - Live tier label escalates as score climbs during the drift
  * 2. Score popup: floats up and fades when drift ends (shows combo/multiplier)
+ *    - Tiered celebrations: DRIFT! / GREAT DRIFT! / AMAZING DRIFT! / INSANE DRIFT!
+ *    - Escalating text size, glow, and color per tier
+ *    - INSANE tier (1000+) triggers an orange screen-edge flash
  * 3. Total drift score: persistent counter in top-right area
  *
  * Uses refs for animation values per LEARNINGS.md patterns.
@@ -35,8 +39,82 @@ interface ScorePopup {
   timestamp: number;
 }
 
+/** Drift tier thresholds and visual config */
+interface DriftTier {
+  label: string;
+  /** Font size for the tier label in the popup (rem) */
+  fontSize: number;
+  /** Font size for the score number in the popup (rem) */
+  scoreFontSize: number;
+  /** Primary color for the tier label */
+  color: string;
+  /** Glow color (rgba) */
+  glowColor: string;
+  /** Glow intensity (spread radius multiplier) */
+  glowIntensity: number;
+}
+
+/** Determine the drift tier based on score */
+function getDriftTier(score: number): DriftTier {
+  if (score > 1000) {
+    return {
+      label: 'INSANE DRIFT!',
+      fontSize: 3.0,
+      scoreFontSize: 2.8,
+      color: '#FF2222',
+      glowColor: 'rgba(255, 34, 34,',
+      glowIntensity: 3.0,
+    };
+  }
+  if (score > 500) {
+    return {
+      label: 'AMAZING DRIFT!',
+      fontSize: 2.4,
+      scoreFontSize: 2.4,
+      color: '#FF4400',
+      glowColor: 'rgba(255, 68, 0,',
+      glowIntensity: 2.0,
+    };
+  }
+  if (score >= 200) {
+    return {
+      label: 'GREAT DRIFT!',
+      fontSize: 2.0,
+      scoreFontSize: 2.2,
+      color: '#FF8800',
+      glowColor: 'rgba(255, 136, 0,',
+      glowIntensity: 1.4,
+    };
+  }
+  return {
+    label: 'DRIFT!',
+    fontSize: 1.6,
+    scoreFontSize: 2.0,
+    color: '#FFD700',
+    glowColor: 'rgba(255, 215, 0,',
+    glowIntensity: 1.0,
+  };
+}
+
+/** Get the live tier label for the active drift display */
+function getLiveTierLabel(score: number): string {
+  if (score > 1000) return 'INSANE DRIFT!';
+  if (score > 500) return 'AMAZING DRIFT!';
+  if (score >= 200) return 'GREAT DRIFT!';
+  return 'DRIFT!';
+}
+
+/** Get the live tier color for the active drift display */
+function getLiveTierColor(score: number): string {
+  if (score > 1000) return '#FF2222';
+  if (score > 500) return '#FF4400';
+  if (score >= 200) return '#FF8800';
+  return '#FF6B00';
+}
+
 export function DriftScore({ drift, totalDriftScore = 0, driftEndEvent }: DriftScoreProps) {
   const [popups, setPopups] = useState<ScorePopup[]>([]);
+  const [insaneFlash, setInsaneFlash] = useState(false);
   const popupIdRef = useRef(0);
   const lastDriftEndRef = useRef<DriftEndEvent | null>(null);
 
@@ -60,10 +138,17 @@ export function DriftScore({ drift, totalDriftScore = 0, driftEndEvent }: DriftS
 
     setPopups(prev => [...prev, popup]);
 
-    // Remove popup after animation completes (2 seconds)
+    // Trigger INSANE flash for 1000+ scores
+    if (driftEndEvent.score > 1000) {
+      setInsaneFlash(true);
+      setTimeout(() => setInsaneFlash(false), 400);
+    }
+
+    // Remove popup after animation completes (2.5s for higher tiers)
+    const duration = driftEndEvent.score > 500 ? 2500 : 2000;
     setTimeout(() => {
       setPopups(prev => prev.filter(p => p.id !== id));
-    }, 2000);
+    }, duration);
   }, [driftEndEvent]);
 
   const isActive = drift?.active ?? false;
@@ -76,6 +161,10 @@ export function DriftScore({ drift, totalDriftScore = 0, driftEndEvent }: DriftS
 
   // Scale effect: grows slightly with higher scores
   const scoreScale = Math.min(1.4, 1.0 + liveScore / 2000);
+
+  // Live tier label and color that escalates as score grows during the active drift
+  const liveTierLabel = getLiveTierLabel(liveScore);
+  const liveTierColor = getLiveTierColor(liveScore);
 
   return (
     <>
@@ -92,17 +181,44 @@ export function DriftScore({ drift, totalDriftScore = 0, driftEndEvent }: DriftS
           }
           20% {
             opacity: 1;
-            transform: translateY(-20px) scale(1.1);
+            transform: translateY(-20px) scale(1.15);
           }
           100% {
             opacity: 0;
-            transform: translateY(-120px) scale(0.8);
+            transform: translateY(-140px) scale(0.8);
+          }
+        }
+        @keyframes drift-popup-rise-epic {
+          0% {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+          }
+          15% {
+            opacity: 1;
+            transform: translateY(-10px) scale(1.25);
+          }
+          25% {
+            opacity: 1;
+            transform: translateY(-25px) scale(1.15);
+          }
+          100% {
+            opacity: 0;
+            transform: translateY(-160px) scale(0.85);
           }
         }
         @keyframes drift-total-bump {
           0% { transform: scale(1); }
           50% { transform: scale(1.15); }
           100% { transform: scale(1); }
+        }
+        @keyframes drift-tier-entrance {
+          0% { transform: scale(0.6); opacity: 0; }
+          40% { transform: scale(1.15); opacity: 1; }
+          100% { transform: scale(1.0); opacity: 1; }
+        }
+        @keyframes insane-drift-flash {
+          0% { opacity: 0.6; }
+          100% { opacity: 0; }
         }
       `}</style>
 
@@ -114,16 +230,16 @@ export function DriftScore({ drift, totalDriftScore = 0, driftEndEvent }: DriftS
             animation: 'drift-score-pulse 0.25s ease-in-out infinite alternate',
           }}
         >
-          {/* DRIFT label */}
+          {/* Tier label (escalates live) */}
           <div
             className="font-black italic tracking-wider"
             style={{
               fontSize: `${1.6 * scoreScale}rem`,
-              color: '#FF6B00',
-              textShadow: '0 0 20px rgba(255, 107, 0, 0.7), 0 0 40px rgba(255, 107, 0, 0.3), 0 2px 4px rgba(0,0,0,0.8)',
+              color: liveTierColor,
+              textShadow: `0 0 20px ${liveTierColor}B3, 0 0 40px ${liveTierColor}4D, 0 2px 4px rgba(0,0,0,0.8)`,
             }}
           >
-            DRIFT!
+            {liveTierLabel}
           </div>
 
           {/* Live score */}
@@ -177,52 +293,83 @@ export function DriftScore({ drift, totalDriftScore = 0, driftEndEvent }: DriftS
       )}
 
       {/* Score popups: float up from bottom-center when drift ends */}
-      {popups.map(popup => (
-        <div
-          key={popup.id}
-          className="absolute bottom-32 left-1/2 -translate-x-1/2 z-20 pointer-events-none flex flex-col items-center"
-          style={{
-            animation: 'drift-popup-rise 2s ease-out forwards',
-          }}
-        >
-          {/* Score */}
+      {popups.map(popup => {
+        const tier = getDriftTier(popup.score);
+        const isEpic = popup.score > 500;
+        const animDuration = isEpic ? '2.5s' : '2s';
+        const animName = isEpic ? 'drift-popup-rise-epic' : 'drift-popup-rise';
+
+        return (
           <div
-            className="font-black font-mono tabular-nums"
+            key={popup.id}
+            className="absolute bottom-32 left-1/2 -translate-x-1/2 z-20 pointer-events-none flex flex-col items-center"
             style={{
-              fontSize: '2rem',
-              color: '#FFD700',
-              textShadow: '0 0 20px rgba(255, 215, 0, 0.6), 0 0 40px rgba(255, 215, 0, 0.3), 0 2px 6px rgba(0,0,0,0.9)',
+              animation: `${animName} ${animDuration} ease-out forwards`,
             }}
           >
-            +{popup.score.toLocaleString()}
+            {/* Tier label */}
+            <div
+              className="font-black italic tracking-wider"
+              style={{
+                fontSize: `${tier.fontSize}rem`,
+                color: tier.color,
+                textShadow: `0 0 ${20 * tier.glowIntensity}px ${tier.glowColor} 0.8), 0 0 ${40 * tier.glowIntensity}px ${tier.glowColor} 0.4), 0 0 ${60 * tier.glowIntensity}px ${tier.glowColor} 0.2), 0 2px 6px rgba(0,0,0,0.9)`,
+                animation: 'drift-tier-entrance 0.3s ease-out',
+              }}
+            >
+              {tier.label}
+            </div>
+
+            {/* Score */}
+            <div
+              className="font-black font-mono tabular-nums"
+              style={{
+                fontSize: `${tier.scoreFontSize}rem`,
+                color: '#FFD700',
+                textShadow: `0 0 ${20 * tier.glowIntensity}px rgba(255, 215, 0, 0.6), 0 0 ${40 * tier.glowIntensity}px rgba(255, 215, 0, 0.3), 0 2px 6px rgba(0,0,0,0.9)`,
+              }}
+            >
+              +{popup.score.toLocaleString()}
+            </div>
+
+            {/* Multiplier labels */}
+            {popup.multiplier && (
+              <div
+                className="font-bold text-sm mt-0.5 px-3 py-0.5 rounded-full bg-black/60 border border-cyan-400/40"
+                style={{
+                  color: '#00D2FF',
+                  textShadow: '0 0 8px rgba(0, 210, 255, 0.5)',
+                }}
+              >
+                {popup.multiplier}
+              </div>
+            )}
+
+            {/* Combo indicator */}
+            {popup.combo > 1 && (
+              <div
+                className="text-amber-400 font-bold font-mono text-xs mt-0.5"
+                style={{
+                  textShadow: '0 0 6px rgba(255, 191, 0, 0.5)',
+                }}
+              >
+                COMBO x{popup.combo}
+              </div>
+            )}
           </div>
+        );
+      })}
 
-          {/* Multiplier labels */}
-          {popup.multiplier && (
-            <div
-              className="font-bold text-sm mt-0.5 px-3 py-0.5 rounded-full bg-black/60 border border-cyan-400/40"
-              style={{
-                color: '#00D2FF',
-                textShadow: '0 0 8px rgba(0, 210, 255, 0.5)',
-              }}
-            >
-              {popup.multiplier}
-            </div>
-          )}
-
-          {/* Combo indicator */}
-          {popup.combo > 1 && (
-            <div
-              className="text-amber-400 font-bold font-mono text-xs mt-0.5"
-              style={{
-                textShadow: '0 0 6px rgba(255, 191, 0, 0.5)',
-              }}
-            >
-              COMBO x{popup.combo}
-            </div>
-          )}
-        </div>
-      ))}
+      {/* INSANE DRIFT screen-edge flash (orange, similar to checkpoint flash pattern) */}
+      {insaneFlash && (
+        <div
+          className="absolute inset-0 pointer-events-none z-20"
+          style={{
+            boxShadow: 'inset 0 0 80px 25px rgba(255, 100, 0, 0.45), inset 0 0 160px 40px rgba(255, 60, 0, 0.2)',
+            animation: 'insane-drift-flash 400ms ease-out forwards',
+          }}
+        />
+      )}
 
       {/* Total drift score: top-right area */}
       {totalDriftScore > 0 && (

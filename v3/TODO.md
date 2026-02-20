@@ -492,7 +492,7 @@ Comprehensive research into AI in games beyond self-driving, with concrete imple
 - Three approaches (easy to hard): (1) alpha-blend crossfade between consecutive frames, (2) velocity-based pixel shifting using telemetry speed+steering to compute 2D motion vector, (3) small optical flow network in ONNX Runtime Web.
 - DLSS Frame Generation creates up to 3 extra frames per rendered frame; Oasis (Decart + Etched) generates entire game worlds at 20fps via Diffusion Transformer -- but both require dedicated GPU hardware.
 - **Feasibility**: 4/10 for neural approach, 6/10 for motion-compensated blending.
-- [ ] Implement simple alpha-blend crossfade at 60fps in VideoCanvas.tsx
+- [x] Implement simple alpha-blend crossfade at 60fps in VideoCanvas.tsx
 - [ ] Implement velocity-based pixel shifting using telemetry motion vector
 - [ ] Benchmark and evaluate visual quality vs native 30fps
 
@@ -796,8 +796,8 @@ See `LEARNINGS.md` section "What Makes Racing Games Fun" for full rationale behi
 #### Audio Enhancements
 - [x] **Tire screech frequency modulation**: In `useEngineSound.ts`, modulate the screech bandpass center frequency based on steer magnitude: `3500 - Math.abs(steer) * 1500` Hz. Mild turns = clean high squeal (3500 Hz). Aggressive turns = rough low scrub (2000 Hz). Gives audio feedback about traction state.
 - [x] **Engine load differentiation**: In `useEngineSound.ts` update function, when throttle > 0.5, boost 2nd harmonic gain by 30% and increase lowpass filter frequency by 20%. Makes acceleration SOUND effortful vs coasting.
-- [ ] **Passing whoosh sound**: When gap_seconds changes sign (overtake or get overtaken), play a 200ms shaped white noise burst through bandpass at 800 Hz, volume 0.3. Triggers from `triggerEvent('overtake')` in `useEngineSound.ts`. Creates the Burnout Paradise close-racing feel.
-- [ ] **Downshift blip**: On gear decrease event, play a 30ms sine burst at 250 Hz. Add to the gear change detection in `useEngineSound.ts`. Simulates the rev-match downshift sound.
+- [x] **Passing whoosh sound**: When gap_seconds changes sign (overtake or get overtaken), play a 200ms shaped white noise burst through bandpass at 800 Hz, volume 0.3. Triggers from `triggerEvent('overtake')` in `useEngineSound.ts`. Creates the Burnout Paradise close-racing feel.
+- [x] **Downshift blip**: On gear decrease event, play a 30ms sine burst at 250 Hz. Add to the gear change detection in `useEngineSound.ts`. Simulates the rev-match downshift sound.
 - [ ] **Client-side impact pre-trigger**: In `Race.tsx`, track speed between frames. If `Math.abs(speed_now - speed_prev) > 20`, immediately play a short 30ms click sound (high-freq noise burst) BEFORE the server collision event arrives. Creates two-stage impact: instant click + delayed thud.
 
 #### Game Flow / Retention
@@ -810,8 +810,8 @@ See `LEARNINGS.md` section "What Makes Racing Games Fun" for full rationale behi
 #### Visual Juice
 - [ ] **Directional screen shake**: Modify collision shake to use collision direction. Head-on impact = camera jolts back (translateY +). Side impact = camera jolts laterally. Currently shake is random jitter; make it directional using the collision normal or the relative position of AI car. In `SpeedEffects.tsx` or `Race.tsx`.
 - [ ] **Drift exit speed boost**: When a drift ends (DriftEndEvent with score > 200), apply a 5% speed boost for 1.5 seconds (server-side in `carla_manager.py`: temporarily increase throttle multiplier). Show "DRIFT BOOST!" text popup. Makes drifting feel like a rewarding SKILL, not just style (Ridge Racer lesson).
-- [ ] **Tiered drift celebrations**: In `DriftScore.tsx`, add text tiers based on score: <200 = "DRIFT!", 200-500 = "GREAT DRIFT!", 500-1000 = "AMAZING DRIFT!", >1000 = "INSANE DRIFT!" with escalating visual effects (larger text, brighter glow, screen flash at 1000+). Sound sting at 500+ points.
-- [ ] **Near-miss visual effect**: Compare player and AI positions from telemetry. If distance < 3m and relative speed > 30 km/h, flash white streaks across screen edges for 100ms. "CLOSE CALL!" text popup. Burnout Paradise's signature mechanic -- makes close racing feel dangerous.
+- [x] **Tiered drift celebrations**: In `DriftScore.tsx`, add text tiers based on score: <200 = "DRIFT!", 200-500 = "GREAT DRIFT!", 500-1000 = "AMAZING DRIFT!", >1000 = "INSANE DRIFT!" with escalating visual effects (larger text, brighter glow, screen flash at 1000+). Sound sting at 500+ points.
+- [x] **Near-miss visual effect**: Compare player and AI positions from telemetry. If distance < 3m and relative speed > 30 km/h, flash white streaks across screen edges for 100ms. "CLOSE CALL!" text popup. Burnout Paradise's signature mechanic -- makes close racing feel dangerous.
 - [x] **Crash desaturation**: On large collisions (intensity > 2000), briefly apply CSS `filter: grayscale(50%)` for 200ms with increased shake. Makes big crashes feel cinematic (Burnout lesson) rather than just a frustrating bump.
 
 ### TIER 2: High Impact, Medium Effort (build this week)

@@ -93,6 +93,8 @@ export interface UseEngineSoundReturn {
   update: (rpm: number, throttle: number, speed: number, steer: number) => void;
   playCountdownBeeps: () => void;
   playImpact: (intensity: number) => void;
+  playDownshiftBlip: () => void;
+  playPassingWhoosh: () => void;
   triggerEvent: (event: 'overtake' | 'close_gap' | 'final_lap' | 'collision_hit') => void;
   stopCloseGapTension: () => void;
   setMuted: (muted: boolean) => void;
@@ -503,6 +505,65 @@ export function useEngineSound(): UseEngineSoundReturn {
     }
   }, []);
 
+  // Play a brief rev-match blip on downshift: 30ms sine burst at 250Hz
+  // Simulates the rev-match downshift sound. Volume 0.2 (subtle).
+  const playDownshiftBlip = useCallback(() => {
+    const nodes = nodesRef.current;
+    if (!nodes || nodes.ctx.state !== 'running') return;
+
+    const ctx = nodes.ctx;
+    const now = ctx.currentTime;
+
+    const blipOsc = ctx.createOscillator();
+    blipOsc.type = 'sine';
+    blipOsc.frequency.value = 250;
+
+    const blipOscGain = ctx.createGain();
+    // Quick attack (~2ms), sustain at 0.2, sharp cutoff at 30ms
+    blipOscGain.gain.setValueAtTime(0, now);
+    blipOscGain.gain.linearRampToValueAtTime(0.2, now + 0.002);
+    blipOscGain.gain.setValueAtTime(0.2, now + 0.025);
+    blipOscGain.gain.linearRampToValueAtTime(0, now + 0.03);
+
+    blipOsc.connect(blipOscGain);
+    blipOscGain.connect(nodes.masterGain);
+    blipOsc.start(now);
+    blipOsc.stop(now + 0.035);
+  }, []);
+
+  // Play a passing whoosh: 200ms shaped white noise burst through bandpass at 800Hz, volume 0.3
+  // Triggered when gap_seconds changes sign (overtake or get overtaken)
+  const playPassingWhoosh = useCallback(() => {
+    const nodes = nodesRef.current;
+    if (!nodes || nodes.ctx.state !== 'running' || !noiseBufferRef.current) return;
+
+    const ctx = nodes.ctx;
+    const now = ctx.currentTime;
+
+    const source = ctx.createBufferSource();
+    source.buffer = noiseBufferRef.current;
+    source.loop = false;
+
+    // Bandpass filter centered at 800Hz
+    const bpFilter = ctx.createBiquadFilter();
+    bpFilter.type = 'bandpass';
+    bpFilter.frequency.value = 800;
+    bpFilter.Q.value = 1.5;
+
+    const whooshGain = ctx.createGain();
+    // Quick attack (10ms), sustain at 0.3, quick decay -- 200ms total
+    whooshGain.gain.setValueAtTime(0, now);
+    whooshGain.gain.linearRampToValueAtTime(0.3, now + 0.01);
+    whooshGain.gain.setValueAtTime(0.3, now + 0.15);
+    whooshGain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+
+    source.connect(bpFilter);
+    bpFilter.connect(whooshGain);
+    whooshGain.connect(nodes.masterGain);
+    source.start(now);
+    source.stop(now + 0.21);
+  }, []);
+
   // --- Adaptive music event triggers ---
   // These create momentary audio effects layered on top of the engine sound
   const triggerEvent = useCallback((event: 'overtake' | 'close_gap' | 'final_lap' | 'collision_hit') => {
@@ -691,7 +752,7 @@ export function useEngineSound(): UseEngineSoundReturn {
     };
   }, []);
 
-  return { update, playCountdownBeeps, playImpact, triggerEvent, stopCloseGapTension, setMuted, isMuted };
+  return { update, playCountdownBeeps, playImpact, playDownshiftBlip, playPassingWhoosh, triggerEvent, stopCloseGapTension, setMuted, isMuted };
 }
 
 export default useEngineSound;

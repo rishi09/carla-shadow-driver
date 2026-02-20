@@ -10,6 +10,7 @@ import { useLeaderboard } from '../hooks/useLeaderboard.ts';
 import { usePersonalBests } from '../hooks/usePersonalBests.ts';
 import { useGamepad } from '../hooks/useGamepad.ts';
 import { useStreak } from '../hooks/useStreak.ts';
+import { useAdaptiveDifficulty } from '../hooks/useAdaptiveDifficulty.ts';
 import { useCrowdAmbiance } from '../hooks/useCrowdAmbiance.ts';
 import { getDailyChallenge, saveDailyChallengeResult } from '../hooks/useDailyChallenge.ts';
 import type { PersonalBestResult } from '../hooks/usePersonalBests.ts';
@@ -86,6 +87,7 @@ export function Race() {
   const personalBests = usePersonalBests();
   const gamepad = useGamepad();
   const streak = useStreak();
+  const adaptiveDifficulty = useAdaptiveDifficulty();
   const steeringPrediction = useSteeringPrediction(keysRef, view === 'racing', gpu.raceState?.player?.speed_kmh ?? 0);
   const frameExtrapolation = useFrameExtrapolation(
     gpu.raceState?.player?.speed_kmh ?? 0,
@@ -115,6 +117,9 @@ export function Race() {
 
   // Track previous race_status for countdown detection
   const prevRaceStatusRef = useRef<string | null>(null);
+
+  // Track previous gear for downshift blip detection
+  const prevGearRef = useRef<number>(0);
 
   // Countdown rev engine: track W key during countdown for rev sound
   const countdownRevRef = useRef(false);
@@ -151,6 +156,10 @@ export function Race() {
 
   // --- Comeback mechanic: slipstream boost visual when >3s behind ---
   const [slipstreamBoost, setSlipstreamBoost] = useState(false);
+
+  // --- Near-miss detection: "CLOSE CALL!" popup when cars pass within 3m at relative speed > 30 km/h ---
+  const [nearMiss, setNearMiss] = useState(false);
+  const nearMissCooldownRef = useRef(false);
 
   // --- Split time delta tracking ---
   // Stores lap_time at each checkpoint crossing during the current lap
@@ -387,8 +396,13 @@ export function Race() {
       if (prevGapSignRef.current > 0 && currentSign < 0) {
         // Player just overtook the AI
         engineSound.triggerEvent('overtake');
+        engineSound.playPassingWhoosh();
         crowd.cheer();
         bgMusic.triggerMusicEvent('overtake');
+      }
+      if (prevGapSignRef.current < 0 && currentSign > 0) {
+        // AI just overtook the player
+        engineSound.playPassingWhoosh();
       }
       prevGapSignRef.current = currentSign;
 
@@ -428,7 +442,7 @@ export function Race() {
       ? player.checkpoint / player.total_checkpoints
       : 0;
     bgMusic.setFinalLapTension(absGap, isFinalLap, checkpointProgress);
-  }, [view, gpu.raceState?.player?.gap_seconds, gpu.raceState?.player?.lap, gpu.raceState?.player?.total_laps, gpu.raceState?.player?.checkpoint, gpu.raceState?.player?.total_checkpoints, engineSound.triggerEvent, engineSound.stopCloseGapTension, crowd.cheer, crowd.setAnticipation, bgMusic.triggerMusicEvent, bgMusic.setFinalLapTension]);
+  }, [view, gpu.raceState?.player?.gap_seconds, gpu.raceState?.player?.lap, gpu.raceState?.player?.total_laps, gpu.raceState?.player?.checkpoint, gpu.raceState?.player?.total_checkpoints, engineSound.triggerEvent, engineSound.stopCloseGapTension, engineSound.playPassingWhoosh, crowd.cheer, crowd.setAnticipation, bgMusic.triggerMusicEvent, bgMusic.setFinalLapTension]);
 
   // Collision hit sound (percussive white noise burst, layered on top of existing impact)
   useEffect(() => {
@@ -437,6 +451,17 @@ export function Race() {
     engineSound.triggerEvent('collision_hit');
     crowd.gasp();
   }, [gpu.raceState?.collisions, engineSound.triggerEvent, crowd.gasp]);
+
+  // --- Downshift blip: play rev-match sound when gear decreases ---
+  useEffect(() => {
+    if (view !== 'racing') return;
+    const gear = gpu.raceState?.player?.gear;
+    if (gear == null) return;
+    if (prevGearRef.current > 0 && gear < prevGearRef.current) {
+      engineSound.playDownshiftBlip();
+    }
+    prevGearRef.current = gear;
+  }, [view, gpu.raceState?.player?.gear, engineSound.playDownshiftBlip]);
 
   // --- Checkpoint celebration flash ---
   useEffect(() => {
@@ -551,6 +576,33 @@ export function Race() {
       }
     }
   }, [view, gpu.raceState?.player?.speed_kmh]);
+
+  // --- Near-miss detection: "CLOSE CALL!" when player and AI pass within 3m at relative speed > 30 km/h ---
+  useEffect(() => {
+    if (view !== 'racing') return;
+    const player = gpu.raceState?.player;
+    const ai = gpu.raceState?.ai;
+    if (!player || !ai) return;
+    if (player.x == null || player.y == null || ai.x == null || ai.y == null) return;
+
+    const dx = player.x - ai.x;
+    const dy = player.y - ai.y;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    const relativeSpeed = Math.abs(player.speed_kmh - ai.speed_kmh);
+
+    if (distance < 3 && relativeSpeed > 30 && !nearMissCooldownRef.current) {
+      nearMissCooldownRef.current = true;
+      setNearMiss(true);
+      // Animation: scale in + hold 0.8s + fade out 0.5s = ~1.3s total
+      const hideTimeout = setTimeout(() => setNearMiss(false), 1300);
+      // 3-second cooldown before next trigger
+      const cooldownTimeout = setTimeout(() => { nearMissCooldownRef.current = false; }, 3000);
+      return () => {
+        clearTimeout(hideTimeout);
+        clearTimeout(cooldownTimeout);
+      };
+    }
+  }, [view, gpu.raceState?.player?.x, gpu.raceState?.player?.y, gpu.raceState?.ai?.x, gpu.raceState?.ai?.y, gpu.raceState?.player?.speed_kmh, gpu.raceState?.ai?.speed_kmh]);
 
   // --- Background music + crowd ambiance + AI engine sound lifecycle ---
   useEffect(() => {
@@ -823,6 +875,10 @@ export function Race() {
       // Record streak (consecutive days played)
       const streakRes = streak.recordRace();
       setStreakResult(streakRes);
+
+      // Record adaptive difficulty (hidden win/loss tracking)
+      const playerWon = gpu.raceFinished.winner === 'player';
+      adaptiveDifficulty.recordResult(playerWon);
 
       // Mark player as having played before (for first-time overlay)
       try { localStorage.setItem('shadow_driver_has_played', 'true'); } catch { /* ignore */ }
@@ -1225,6 +1281,35 @@ export function Race() {
             </div>
           )}
 
+          {/* CLOSE CALL! near-miss popup: white streak flash + text when cars pass within 3m at speed */}
+          {nearMiss && (
+            <>
+              <div
+                className="absolute inset-0 pointer-events-none z-20"
+                style={{
+                  boxShadow: 'inset 0 0 40px 10px rgba(255,255,255,0.2)',
+                  animation: 'nearMissGlow 100ms ease-out forwards',
+                }}
+              />
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-30" style={{ paddingTop: '15vh' }}>
+                <div
+                  className="text-center"
+                  style={{ animation: 'closeCall 1.3s ease-out forwards' }}
+                >
+                  <div
+                    className="text-2xl sm:text-4xl font-black tracking-wider"
+                    style={{
+                      color: '#ffffff',
+                      textShadow: '0 0 20px rgba(255,255,255,0.5), 0 0 40px rgba(255,255,255,0.2), 0 2px 6px rgba(0,0,0,0.8)',
+                    }}
+                  >
+                    CLOSE CALL!
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+
           <style>{`
             @keyframes checkpointFlash {
               from { opacity: 1; }
@@ -1247,6 +1332,18 @@ export function Race() {
             @keyframes slipstreamPulse {
               0%, 100% { opacity: 0.5; }
               50% { opacity: 1.0; }
+            }
+            @keyframes closeCall {
+              0% { opacity: 0; transform: scale(0.3); }
+              10% { opacity: 1; transform: scale(1.1); }
+              18% { transform: scale(1.0); }
+              62% { opacity: 1; transform: scale(1.0); }
+              100% { opacity: 0; transform: scale(1.0) translateY(-15px); }
+            }
+            @keyframes nearMissGlow {
+              0% { opacity: 0; }
+              50% { opacity: 1; }
+              100% { opacity: 0; }
             }
           `}</style>
 

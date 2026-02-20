@@ -26,6 +26,8 @@ in vec2 v_uv;
 out vec4 fragColor;
 
 uniform sampler2D u_frame;
+uniform sampler2D u_prevFrame;
+uniform float u_blend;      // 0.5 = crossfade, 1.0 = current only
 uniform float u_time;       // seconds since start
 uniform float u_intensity;  // 0..1 speed-based effect intensity
 uniform float u_chromatic;  // 0..1 chromatic aberration intensity (120-300 km/h)
@@ -36,6 +38,11 @@ uniform float u_radialBlur; // 0..1 radial motion blur intensity (speed-based)
 // Hash for film grain
 float hash(vec2 p) {
   return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+}
+
+// Sample with crossfade: blend between previous and current frame
+vec4 sampleBlended(vec2 uv) {
+  return mix(texture(u_prevFrame, uv), texture(u_frame, uv), u_blend);
 }
 
 // Radial blur: samples along direction from center, weighted by distance
@@ -61,6 +68,24 @@ vec3 sampleRadialBlur(sampler2D tex, vec2 uv, float blurAmount) {
   return sum / totalWeight;
 }
 
+// Radial blur with crossfade blending between prev and current frames
+vec3 sampleRadialBlurBlended(vec2 uv, float blurAmount) {
+  vec2 dir = uv - 0.5;
+  float dist = length(dir);
+  float strength = dist * blurAmount * 0.04;
+
+  vec3 sum = vec3(0.0);
+  float totalWeight = 0.0;
+  for (int i = -3; i <= 3; i++) {
+    float offset = float(i) / 3.0;
+    vec2 sampleUV = clamp(uv - dir * strength * offset, 0.0, 1.0);
+    float w = 1.0 - abs(offset) * 0.4;
+    sum += sampleBlended(sampleUV).rgb * w;
+    totalWeight += w;
+  }
+  return sum / totalWeight;
+}
+
 void main() {
   vec2 uv = v_uv;
   float t = u_intensity; // 0 = slow, 1 = fast
@@ -79,9 +104,9 @@ void main() {
   // --- 2. Radial motion blur (applied before CA so aberration splits blurred image) ---
   vec3 blurredColor;
   if (u_radialBlur > 0.0) {
-    blurredColor = sampleRadialBlur(u_frame, uv, u_radialBlur);
+    blurredColor = sampleRadialBlurBlended(uv, u_radialBlur);
   } else {
-    blurredColor = texture(u_frame, uv).rgb;
+    blurredColor = sampleBlended(uv).rgb;
   }
 
   // --- 3. Chromatic aberration ---
@@ -98,14 +123,14 @@ void main() {
   // Sample R and B channels with CA offset, using radial blur when active
   vec3 color;
   if (u_radialBlur > 0.0) {
-    float r = sampleRadialBlur(u_frame, clamp(uv + caDir * caAmount, 0.0, 1.0), u_radialBlur).r;
+    float r = sampleRadialBlurBlended(clamp(uv + caDir * caAmount, 0.0, 1.0), u_radialBlur).r;
     float g = blurredColor.g;
-    float b = sampleRadialBlur(u_frame, clamp(uv - caDir * caAmount, 0.0, 1.0), u_radialBlur).b;
+    float b = sampleRadialBlurBlended(clamp(uv - caDir * caAmount, 0.0, 1.0), u_radialBlur).b;
     color = vec3(r, g, b);
   } else {
-    float r = texture(u_frame, clamp(uv + caDir * caAmount, 0.0, 1.0)).r;
-    float g = texture(u_frame, uv).g;
-    float b = texture(u_frame, clamp(uv - caDir * caAmount, 0.0, 1.0)).b;
+    float r = sampleBlended(clamp(uv + caDir * caAmount, 0.0, 1.0)).r;
+    float g = sampleBlended(uv).g;
+    float b = sampleBlended(clamp(uv - caDir * caAmount, 0.0, 1.0)).b;
     color = vec3(r, g, b);
   }
 
@@ -202,7 +227,14 @@ export function WebGLCanvas({ onBinaryFrame, className = '', speedKmh = 0, exter
   const glRef = useRef<WebGL2RenderingContext | null>(null);
   const programRef = useRef<WebGLProgram | null>(null);
   const textureRef = useRef<WebGLTexture | null>(null);
-  const uniformsRef = useRef<{ time: WebGLUniformLocation | null; intensity: WebGLUniformLocation | null; chromatic: WebGLUniformLocation | null; radialBlur: WebGLUniformLocation | null }>({ time: null, intensity: null, chromatic: null, radialBlur: null });
+  const prevTextureRef = useRef<WebGLTexture | null>(null);
+  const uniformsRef = useRef<{
+    time: WebGLUniformLocation | null;
+    intensity: WebGLUniformLocation | null;
+    chromatic: WebGLUniformLocation | null;
+    radialBlur: WebGLUniformLocation | null;
+    blend: WebGLUniformLocation | null;
+  }>({ time: null, intensity: null, chromatic: null, radialBlur: null, blend: null });
   const pendingFrameRef = useRef<ImageBitmap | null>(null);
   const rafIdRef = useRef<number>(0);
   const frameCountRef = useRef<number>(0);
@@ -212,6 +244,9 @@ export function WebGLCanvas({ onBinaryFrame, className = '', speedKmh = 0, exter
   const [hasFirstFrame, setHasFirstFrame] = useState(false);
   const firstFrameReceivedRef = useRef(false);
   const textureInitializedRef = useRef(false);
+  const prevTexInitRef = useRef(false);
+  const blendFrameRef = useRef(false);
+  const hasUploadedAnyFrameRef = useRef(false);
 
   // Keep speed ref in sync without triggering effect re-runs
   speedRef.current = speedKmh;
@@ -255,9 +290,10 @@ export function WebGLCanvas({ onBinaryFrame, className = '', speedKmh = 0, exter
       intensity: gl.getUniformLocation(prog, 'u_intensity'),
       chromatic: gl.getUniformLocation(prog, 'u_chromatic'),
       radialBlur: gl.getUniformLocation(prog, 'u_radialBlur'),
+      blend: gl.getUniformLocation(prog, 'u_blend'),
     };
 
-    // Texture
+    // Current frame texture (TEXTURE0)
     const tex = gl.createTexture();
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, tex);
@@ -268,7 +304,20 @@ export function WebGLCanvas({ onBinaryFrame, className = '', speedKmh = 0, exter
     textureRef.current = tex;
     textureInitializedRef.current = false;
 
+    // Previous frame texture (TEXTURE1)
+    const prevTex = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, prevTex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    prevTextureRef.current = prevTex;
+    prevTexInitRef.current = false;
+
     gl.uniform1i(gl.getUniformLocation(prog, 'u_frame'), 0);
+    gl.uniform1i(gl.getUniformLocation(prog, 'u_prevFrame'), 1);
+    gl.uniform1f(uniformsRef.current.blend, 1.0); // Start with current-only
 
     return true;
   }, []);
@@ -310,12 +359,45 @@ export function WebGLCanvas({ onBinaryFrame, className = '', speedKmh = 0, exter
           gl.viewport(0, 0, pending.width, pending.height);
         }
 
-        // Upload frame as texture
+        // Copy current texture -> previous texture before uploading new frame
+        if (textureInitializedRef.current && hasUploadedAnyFrameRef.current) {
+          // Use a framebuffer to read the current texture and copy to prev
+          // Simpler approach: re-upload via copyTexImage2D using an FBO
+          const fbo = gl.createFramebuffer();
+          gl.bindFramebuffer(gl.READ_FRAMEBUFFER, fbo);
+          gl.framebufferTexture2D(gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, textureRef.current, 0);
+
+          gl.activeTexture(gl.TEXTURE1);
+          gl.bindTexture(gl.TEXTURE_2D, prevTextureRef.current);
+          if (!prevTexInitRef.current) {
+            gl.copyTexImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 0, 0, pending.width, pending.height, 0);
+            prevTexInitRef.current = true;
+          } else {
+            gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 0, 0, pending.width, pending.height);
+          }
+
+          gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+          gl.deleteFramebuffer(fbo);
+        }
+
+        // Upload new frame to current texture
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, textureRef.current);
         if (!textureInitializedRef.current) {
           gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, pending);
           textureInitializedRef.current = true;
+
+          // Initialize prev texture with same frame (no blend on first frame)
+          gl.activeTexture(gl.TEXTURE1);
+          gl.bindTexture(gl.TEXTURE_2D, prevTextureRef.current);
+          // Can't re-use pending (already consumed), so use copyTexImage2D via FBO
+          const fbo = gl.createFramebuffer();
+          gl.bindFramebuffer(gl.READ_FRAMEBUFFER, fbo);
+          gl.framebufferTexture2D(gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, textureRef.current, 0);
+          gl.copyTexImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 0, 0, pending.width, pending.height, 0);
+          prevTexInitRef.current = true;
+          gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+          gl.deleteFramebuffer(fbo);
         } else {
           // texSubImage2D is faster if dimensions match; fall back to texImage2D on size change
           try {
@@ -325,7 +407,14 @@ export function WebGLCanvas({ onBinaryFrame, className = '', speedKmh = 0, exter
           }
         }
         pending.close();
+        hasUploadedAnyFrameRef.current = true;
 
+        // Set blend flag: next render tick will show 50/50 crossfade
+        blendFrameRef.current = true;
+      }
+
+      // Only render if we have at least one frame uploaded
+      if (hasUploadedAnyFrameRef.current) {
         // Update uniforms
         const elapsed = (performance.now() - startTimeRef.current) / 1000;
         gl.uniform1f(uniformsRef.current.time, elapsed);
@@ -342,6 +431,14 @@ export function WebGLCanvas({ onBinaryFrame, className = '', speedKmh = 0, exter
         // Radial motion blur: ramp from 0 at rest to 1 at >=200 km/h
         const radialBlur = Math.min(1.0, Math.max(0.0, speed / 200));
         gl.uniform1f(uniformsRef.current.radialBlur, radialBlur);
+
+        // Crossfade blend: 0.5 on first tick after new frame, 1.0 otherwise
+        if (blendFrameRef.current) {
+          gl.uniform1f(uniformsRef.current.blend, 0.5);
+          blendFrameRef.current = false;
+        } else {
+          gl.uniform1f(uniformsRef.current.blend, 1.0);
+        }
 
         // Draw
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
@@ -390,12 +487,17 @@ export function WebGLCanvas({ onBinaryFrame, className = '', speedKmh = 0, exter
       const gl = glRef.current;
       if (gl) {
         if (textureRef.current) gl.deleteTexture(textureRef.current);
+        if (prevTextureRef.current) gl.deleteTexture(prevTextureRef.current);
         if (programRef.current) gl.deleteProgram(programRef.current);
       }
       glRef.current = null;
       programRef.current = null;
       textureRef.current = null;
+      prevTextureRef.current = null;
       textureInitializedRef.current = false;
+      prevTexInitRef.current = false;
+      blendFrameRef.current = false;
+      hasUploadedAnyFrameRef.current = false;
     };
   }, [onBinaryFrame, initGL]);
 
