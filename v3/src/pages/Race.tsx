@@ -1822,17 +1822,80 @@ export function Race() {
 
       {/* Results view */}
       {view === 'results' && gpu.raceFinished && (
-        <RaceResults
-          result={gpu.raceFinished}
-          onPlayAgain={handlePlayAgain}
-          onMainMenu={handleMainMenu}
-          raceSettings={raceSettingsForResults}
-          onInstantReplay={handleInstantReplay}
-          personalBestResult={pbResult}
-          isDailyChallenge={isDailyChallenge}
-          dailyChallengePosition={dailyChallengePosition}
-          streakResult={streakResult}
-        />
+        <>
+          <RaceResults
+            result={gpu.raceFinished}
+            onPlayAgain={handlePlayAgain}
+            onMainMenu={handleMainMenu}
+            raceSettings={raceSettingsForResults}
+            onInstantReplay={handleInstantReplay}
+            personalBestResult={pbResult}
+            isDailyChallenge={isDailyChallenge}
+            dailyChallengePosition={dailyChallengePosition}
+            streakResult={streakResult}
+          />
+          {/* Photo Finish overlay on results screen (golden glow + text, auto-dismisses after 3s) */}
+          {photoFinish && (
+            <>
+              <div
+                className="fixed inset-0 pointer-events-none z-50"
+                style={{
+                  boxShadow: 'inset 0 0 120px 40px rgba(255,200,50,0.3)',
+                  animation: 'photoFinishGlow 3s ease-out forwards',
+                }}
+              />
+              <div className="fixed inset-0 flex items-center justify-center pointer-events-none z-50">
+                <div
+                  className="text-center"
+                  style={{ animation: 'photoFinishText 3s ease-out forwards' }}
+                >
+                  <div
+                    className="text-5xl sm:text-7xl lg:text-8xl font-black tracking-widest uppercase"
+                    style={{
+                      color: '#ffd700',
+                      textShadow: '0 0 40px rgba(255,215,0,0.6), 0 0 80px rgba(255,200,50,0.3), 0 0 120px rgba(255,180,0,0.15), 0 4px 12px rgba(0,0,0,0.9)',
+                      WebkitTextStroke: '1px rgba(255,240,200,0.3)',
+                    }}
+                  >
+                    PHOTO FINISH!
+                  </div>
+                  <div
+                    className="mt-2 text-lg sm:text-xl font-bold tracking-[0.4em] uppercase"
+                    style={{
+                      color: 'rgba(255,230,150,0.7)',
+                      textShadow: '0 0 15px rgba(255,215,0,0.4), 0 2px 6px rgba(0,0,0,0.8)',
+                      animation: 'photoFinishSubtext 3s ease-out forwards',
+                    }}
+                  >
+                    TOO CLOSE TO CALL
+                  </div>
+                </div>
+              </div>
+              <style>{`
+                @keyframes photoFinishGlow {
+                  0% { opacity: 0; }
+                  15% { opacity: 1; }
+                  70% { opacity: 0.8; }
+                  100% { opacity: 0; }
+                }
+                @keyframes photoFinishText {
+                  0% { opacity: 0; transform: scale(0.3) translateY(20px); }
+                  8% { opacity: 1; transform: scale(1.15) translateY(0); }
+                  16% { transform: scale(1.0) translateY(0); }
+                  60% { opacity: 1; transform: scale(1.0) translateY(0); }
+                  100% { opacity: 0; transform: scale(1.05) translateY(-30px); }
+                }
+                @keyframes photoFinishSubtext {
+                  0% { opacity: 0; transform: translateY(10px); }
+                  15% { opacity: 0; }
+                  25% { opacity: 0.7; transform: translateY(0); }
+                  60% { opacity: 0.7; }
+                  100% { opacity: 0; }
+                }
+              `}</style>
+            </>
+          )}
+        </>
       )}
     </div>
   );
