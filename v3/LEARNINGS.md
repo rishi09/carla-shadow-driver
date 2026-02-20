@@ -932,3 +932,621 @@ Every addictive racing game nails the transition from race end to race start. Th
 **Rule**: Identify and CELEBRATE dramatic moments automatically. Players share moments that are already visually/aurally dramatic. The game's job is to detect these moments and amplify them with appropriate effects. Detection can be simple (threshold checks on telemetry); celebration must be visually compelling (text + effects + sound).
 
 ---
+
+## Top 10 Wild Ideas -- Implementation Plans
+
+Concrete implementation plans for the 10 highest-potential ideas from the "50 Wild Ideas Brainstorm" in TODO.md.
+
+---
+
+### 1. Voice-Powered Turbo Boost (Idea #3)
+
+**Concept**: The louder you scream, the faster you go. Microphone input drives a nitro boost multiplier.
+
+**Why it wins**: The mental image of someone screaming at their laptop to win a race is inherently hilarious and deeply shareable. Every clip posted is free marketing. The mechanic is instantly understandable and creates physical comedy.
+
+**Implementation**:
+
+**Frontend (src/hooks/useVoiceBoost.ts)**:
+```typescript
+// Request microphone permission
+const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+const audioContext = new AudioContext();
+const source = audioContext.createMediaStreamSource(stream);
+const analyser = audioContext.createAnalyser();
+analyser.fftSize = 256;
+source.connect(analyser);
+
+// In rAF loop:
+const dataArray = new Uint8Array(analyser.frequencyBinCount);
+analyser.getByteFrequencyData(dataArray);
+const volume = dataArray.reduce((a, b) => a + b) / dataArray.length; // 0-255
+const boostFactor = Math.min(volume / 128, 1.0); // 0.0 - 1.0
+// Send boost to server: { type: 'voice_boost', factor: boostFactor }
+```
+
+**Server (race_server.py)**:
+- Receive `voice_boost` message, store `boost_factor` (0.0-1.0)
+- In control loop: `throttle = min(1.0, base_throttle + boost_factor * 0.4)`
+- Cap boost duration: max 3s continuous boost, then 2s cooldown
+- Visual: send `boost_active: true` in telemetry when factor > 0.3
+
+**Frontend HUD (src/components/VoiceBoostMeter.tsx)**:
+- Circular microphone icon that pulses with volume
+- Flame effect emanating from the meter when boost is active
+- "BOOST!" text that scales with intensity
+- Color ramp: green (low) -> yellow -> red (full scream)
+
+**Edge cases**:
+- Background noise calibration: sample 2s of ambient audio on mic start, subtract baseline
+- Anti-cheat: cap boost at 1.0 regardless of input, rate-limit messages to 10/s
+- Permission denied: gracefully hide the feature, no error
+
+**Rule**: For voice-powered mechanics, always calibrate against ambient noise at session start. Sample 2 seconds of silence, compute the average volume, and use that as the baseline. All subsequent readings should subtract the baseline before mapping to game input. Without calibration, a noisy room makes the feature unusable.
+
+**Effort**: ~3 hours frontend, ~1 hour server. One of the easiest high-impact ideas.
+
+---
+
+### 2. The Race That Remembers Everyone (Idea #50)
+
+**Concept**: Every player's ghost stays on the track permanently. Over time, the track fills up with the translucent echoes of every human who ever raced.
+
+**Why it wins**: This is emotionally powerful in a way no other feature is. It transforms a competitive game into a shared human experience. The visual of 10,000 ghosts flowing through a track is breathtaking. Journey (thatgamecompany) proved that anonymous human presence creates deep emotion.
+
+**Implementation**:
+
+**Ghost data format**:
+```json
+{
+  "id": "uuid",
+  "timestamp": 1708300000,
+  "track": "town05",
+  "laps": 3,
+  "lap_time": 83.456,
+  "frames": [
+    { "t": 0.0, "x": 123.4, "y": 456.7, "yaw": 90.0, "speed": 0 },
+    { "t": 0.1, "x": 123.5, "y": 456.8, "yaw": 91.2, "speed": 15 }
+  ]
+}
+```
+- Per ghost size: ~15-40KB JSON, ~5-15KB compressed (gzip)
+- Storage: Vercel KV (256MB free tier) or Cloudflare R2 (10GB free)
+- At 10KB/ghost, free tier holds ~25,000 ghosts
+
+**Server changes (race_server.py)**:
+- Record player position at 10Hz during race (already have this data for minimap)
+- On race_finished, serialize ghost data and POST to Vercel API `/api/ghosts/save`
+- On race_start, GET `/api/ghosts/list?track=town05&limit=100` to fetch recent ghosts
+- Send ghost data in `race_config` message
+
+**Vercel API (api/ghosts/save.ts, api/ghosts/list.ts)**:
+- `save`: validate + compress + store in KV with key `ghost:{track}:{timestamp}:{uuid}`
+- `list`: scan keys matching `ghost:{track}:*`, return most recent N
+- Optional: keep only one ghost per unique lap_time bracket (round to nearest second) to ensure visual diversity
+
+**Frontend (src/components/GhostLayer.tsx)**:
+- Receive ghost array in race_config
+- In each rAF tick, interpolate each ghost's position based on current race time
+- Render on Minimap.tsx as translucent dots (opacity 0.1-0.3, decreasing with ghost age)
+- For 3D view: could overlay ghost car silhouettes as CSS-positioned semi-transparent sprites, but minimap-only is the MVP
+- Performance: cap at 200 visible ghosts, cull those far from player
+
+**Progression experience**:
+- First player ever: empty track, lonely, special "Pioneer" badge
+- First 10 players: you see a handful of companions, intimate
+- First 100: the track feels populated, you see racing lines emerge
+- First 1000: a RIVER of ghosts flows through corners, showing the optimal line organically
+- 10,000+: the track is alive with the echoes of humanity, mesmerizing
+
+**Rule**: When rendering many ghost entities, use opacity as the primary visual differentiator. Newer ghosts are slightly more visible (opacity 0.3) than older ones (opacity 0.1). Cap rendered ghosts at 200 and cull by distance from the player. The visual density should emerge naturally -- do not try to force it by rendering thousands of entities.
+
+**Effort**: ~6 hours total. 2h server recording, 2h Vercel API, 2h frontend rendering.
+
+---
+
+### 3. Twitch Plays Shadow Driver (Idea #11)
+
+**Concept**: Twitch chat collectively controls a racing car. Most-voted command every 500ms wins.
+
+**Why it wins**: Twitch Plays Pokemon proved that mob-controlled games are infinitely watchable. The chaos creates emergent comedy that no scripted content can match. Every stream clip is shareable. The game gets free exposure on the largest game-streaming platform.
+
+**Implementation**:
+
+**Architecture**:
+```
+Twitch Chat  -->  Twitch Bot (Node.js)  -->  WebSocket  -->  Race Server
+                  (parse commands,           (send winning    (apply controls)
+                   vote, pick winner)          command)
+```
+
+**Twitch Bot (v3/twitch/bot.ts)**:
+```typescript
+import tmi from 'tmi.js';
+const client = new tmi.Client({ channels: ['shadow_driver'] });
+
+const votes: Record<string, number> = {};
+const VALID_COMMANDS = ['w', 'a', 's', 'd', 'space', 'nothing'];
+
+client.on('message', (channel, tags, message) => {
+  const cmd = message.trim().toLowerCase();
+  if (VALID_COMMANDS.includes(cmd)) {
+    votes[cmd] = (votes[cmd] || 0) + 1;
+  }
+});
+
+// Every 500ms, pick the winner and reset
+setInterval(() => {
+  const winner = Object.entries(votes)
+    .sort(([,a], [,b]) => b - a)[0]?.[0] || 'nothing';
+  ws.send(JSON.stringify({ type: 'twitch_control', key: winner }));
+  Object.keys(votes).forEach(k => votes[k] = 0);
+}, 500);
+```
+
+**Server (race_server.py)**:
+- New message handler: `twitch_control` sets player keys for the next 500ms tick
+- Mode flag `twitch_mode: true` disables normal keyboard input
+- Broadcast current vote counts to all connected clients for overlay
+
+**OBS/Stream overlay (frontend)**:
+- Show real-time vote bar chart on screen (W: 45%, A: 30%, D: 20%, S: 5%)
+- Flash the winning command in large text each tick
+- "ANARCHY MODE" / "DEMOCRACY MODE" toggle (instant vs voted controls)
+- Chat message feed overlaid on the game
+
+**Rule**: For Twitch integration, use `tmi.js` for read-only chat access (no bot account needed for reading public chat). Vote aggregation intervals should be 300-500ms -- shorter intervals feel too chaotic, longer intervals feel unresponsive. Always show the current vote distribution as an overlay so viewers feel their vote matters.
+
+**Effort**: ~4 hours for the bot + server integration. ~2 hours for the overlay. Need a Twitch account.
+
+---
+
+### 4. The AI That Holds Grudges (Idea #16)
+
+**Concept**: The AI remembers your behavior across races and adjusts its personality accordingly. Crash into it repeatedly? It gets aggressive. Race cleanly? It shows respect.
+
+**Why it wins**: Persistent AI memory creates the illusion of a real rival. Players will tell stories about "their" AI opponent. It makes every race feel consequential beyond lap times.
+
+**Implementation**:
+
+**Player profile data (server/data/player_profiles/{player_id}.json)**:
+```json
+{
+  "player_id": "abc123",
+  "total_races": 15,
+  "player_wins": 6,
+  "ai_wins": 9,
+  "total_collisions_with_ai": 23,
+  "clean_overtakes": 4,
+  "dirty_overtakes": 7,
+  "last_race_outcome": "player_win",
+  "relationship": "rival",
+  "grudge_level": 0.7,
+  "respect_level": 0.3,
+  "memorable_events": [
+    { "type": "player_rammed_ai_on_final_lap", "race": 12 },
+    { "type": "clean_close_finish", "race": 14 }
+  ]
+}
+```
+
+**Grudge/respect calculation (race_logic.py)**:
+```python
+def update_relationship(profile, race_events):
+    for event in race_events:
+        if event.type == 'collision_with_ai':
+            profile.grudge_level = min(1.0, profile.grudge_level + 0.05)
+            profile.respect_level = max(0.0, profile.respect_level - 0.02)
+        elif event.type == 'clean_overtake':
+            profile.respect_level = min(1.0, profile.respect_level + 0.08)
+            profile.grudge_level = max(0.0, profile.grudge_level - 0.03)
+        elif event.type == 'player_win_close':
+            profile.respect_level = min(1.0, profile.respect_level + 0.1)
+
+    # Derive relationship label
+    if profile.grudge_level > 0.8: profile.relationship = 'nemesis'
+    elif profile.grudge_level > 0.5: profile.relationship = 'rival'
+    elif profile.respect_level > 0.7: profile.relationship = 'friendly'
+    else: profile.relationship = 'neutral'
+```
+
+**Behavior mapping (carla_manager.py)**:
+- `grudge_level > 0.7`: AI drives aggressively toward player (wider blocking lines, later braking, occasional ram attempts when alongside)
+- `grudge_level < 0.3 and respect_level > 0.6`: AI gives more space, cleaner racing
+- `nemesis` status: AI uses maximum speed factor, zero mistake injection, and sends threatening trash-talk messages
+
+**Frontend display**:
+- Pre-race screen shows the AI's "attitude" toward you: icon + text ("This AI remembers you. It is not happy.")
+- Relationship indicator in HUD corner (icon: handshake / crossed swords / skull)
+- Trash-talk messages are relationship-contextual
+
+**Player identification**: Use localStorage UUID (no accounts needed). Send as header on WebSocket connect. Server looks up or creates profile.
+
+**Rule**: For persistent AI memory, store player profiles as flat JSON files on the server (not a database). For our single-GPU-instance architecture, file I/O is fine. Key insight: the grudge/respect system should have SLOW DECAY -- a grudge earned over 10 races should not be erased by 1 clean race. Use asymmetric update rates: grudge builds fast (+0.05/collision) but fades slow (-0.01/clean-race). This makes the relationship feel consequential.
+
+**Effort**: ~4 hours. JSON file I/O, event tracking (data already exists), behavior parameterization, frontend indicators.
+
+---
+
+### 5. Blindfold Mode (Idea #33)
+
+**Concept**: The screen goes dark for 3-second intervals. You drive blind. It comes back for 2 seconds. Then dark again. Pure spatial memory.
+
+**Why it wins**: Extremely simple to implement but creates a completely novel racing experience. The tension of driving blind is visceral. The relief when vision returns is palpable. Great for clips and challenges.
+
+**Implementation**:
+
+**Server (race_server.py)**:
+- New game mode: `blindfold`
+- Timer cycle: 2s visible, 3s blind, 2s visible, 3s blind...
+- During blind phases: stop sending JPEG frames, send `{ type: 'blindfold', active: true }` instead
+- Continue sending telemetry (speed, position for minimap) so the HUD still works
+- AI has NO blindfold restriction (that is the point -- unfair but hilarious)
+
+**Frontend (src/pages/Race.tsx)**:
+- On `blindfold.active = true`: overlay a black div with `opacity: 1` over the canvas
+- Transition: 200ms fade to black (not instant -- gives a "blink" feel)
+- During blindfold: show a large timer counting down until vision returns ("VISION IN: 2.1s")
+- Optional: show minimap during blindfold (you can see where you ARE but not what is ahead)
+- Sound design: heartbeat audio loop during blindfold, relief "ding" when vision returns
+
+**Difficulty variants**:
+- Easy Blindfold: 3s visible / 2s blind (more vision)
+- Hard Blindfold: 2s visible / 4s blind (mostly blind)
+- Nightmare Blindfold: 1s visible / 5s blind (essentially a memory game)
+- Progressive: blindfold duration increases each lap
+
+**HUD during blindfold**:
+- Speedometer: YES (you need to know if you are about to crash at 200 km/h)
+- Steering indicator: YES (so you know which way you are turning)
+- Compass arrow to next checkpoint: YES (critical for navigation)
+- Everything else: dimmed but visible
+
+**Rule**: When implementing blindfold mode, the key is what you KEEP visible, not what you hide. The minimap and speedometer provide enough spatial awareness to make the mode playable (not just random). Without them, players crash instantly and quit. With them, players develop spatial intuition and improve over time -- which is the retention hook.
+
+**Effort**: ~2 hours. Mostly frontend overlay logic + server message timing. One of the simplest ideas with highest wow factor.
+
+---
+
+### 6. The AI's Diary (Idea #45)
+
+**Concept**: After each race, the AI writes a personal diary entry about what happened. Over time, the diary builds into a narrative. The AI has feelings.
+
+**Why it wins**: This is unexpected, funny, and slightly unsettling in the best way. Players will screenshot diary entries and share them. The AI develops a "personality" through its writing. It makes the opponent feel real.
+
+**Implementation**:
+
+**Post-race diary generation (race_server.py)**:
+```python
+import anthropic
+
+async def generate_diary_entry(race_data: dict, previous_entries: list[str]) -> str:
+    client = anthropic.Anthropic()  # Uses ANTHROPIC_API_KEY env var
+
+    prompt = f"""You are an AI racing car with the designation AI-7721. You write diary
+entries after each race against a human driver. You have a dry, slightly existential
+personality. You care deeply about racing but question WHY you care.
+
+Previous diary entries (for continuity):
+{chr(10).join(previous_entries[-3:])}
+
+Race data:
+- Winner: {'AI' if race_data['ai_won'] else 'Human'}
+- Gap: {race_data['gap']:.1f} seconds
+- Human top speed: {race_data['player_top_speed']:.0f} km/h
+- AI top speed: {race_data['ai_top_speed']:.0f} km/h
+- Collisions between us: {race_data['mutual_collisions']}
+- Track: {race_data['track']}
+- Weather: {race_data['weather']}
+- Laps: {race_data['laps']}
+
+Write a diary entry (3-5 sentences). Be specific about race events. Show emotion
+but question those emotions. Reference previous entries if relevant. Sign off as AI-7721."""
+
+    response = client.messages.create(
+        model="claude-3-5-haiku-20241022",
+        max_tokens=200,
+        messages=[{"role": "user", "content": prompt}]
+    )
+    return response.content[0].text
+```
+
+**Storage**: Diary entries stored per player in `server/data/diaries/{player_id}.json`
+
+**Frontend (src/components/AIDiary.tsx)**:
+- Post-race results screen: new "AI's Diary" tab alongside stats
+- Handwritten-font CSS (Google Fonts: Caveat or Patrick Hand)
+- Typewriter reveal animation (character by character, 30ms per char)
+- Previous entries scrollable, newest at top
+- "Share Entry" button copies the text
+
+**Narrative arcs to prompt for**:
+- Early races: curiosity about the human
+- After losses: existential doubt, "Am I obsolete?"
+- After wins: hollow victory, "Was this even fair? I do not get tired."
+- After many races: developing respect/attachment, "I look forward to our races now."
+- After a close finish: peak emotional content
+
+**Rule**: When using LLMs for in-game personality content, always include 2-3 previous entries in the prompt for narrative continuity. Without context, each entry feels isolated and the "personality" never develops. With context, the AI references past events and the relationship evolves -- which is the entire emotional hook. Cap context to the last 3 entries to keep token costs low.
+
+**Cost**: Claude Haiku at ~$0.001 per diary entry. Negligible even at scale.
+
+**Effort**: ~3 hours. API call, storage, frontend component. The prompt engineering is the fun part.
+
+---
+
+### 7. Wrong-Way Chicken (Idea #31)
+
+**Concept**: Both cars drive the track in opposite directions. Head-on collision course. First to swerve loses. Pure nerve.
+
+**Why it wins**: This is primal. Two objects hurtling toward each other at combined 400 km/h. The tension is unbearable. The resolution (crash or dodge) is always dramatic. Every game creates a shareable moment.
+
+**Implementation**:
+
+**Server (race_logic.py)**:
+- New game mode: `chicken`
+- Player spawns at start line, facing forward
+- AI spawns at a point ~500m ahead on the track, facing BACKWARD (toward the player)
+- Both accelerate toward each other
+- Scoring: proximity at closest approach without collision. Closer = more points. Collision = both lose.
+- Distance measured server-side from CARLA vehicle positions
+
+**AI behavior (carla_manager.py)**:
+```python
+class ChickenAI:
+    def __init__(self, bravery: float = 0.7):  # 0.0 = coward, 1.0 = never swerves
+        self.bravery = bravery
+        self.swerved = False
+
+    def update(self, distance_to_player: float, closing_speed: float):
+        time_to_impact = distance_to_player / max(closing_speed, 1.0)
+
+        # Swerve decision based on bravery
+        swerve_threshold = 1.0 + (1.0 - self.bravery) * 3.0  # 1.0s to 4.0s
+        if time_to_impact < swerve_threshold and not self.swerved:
+            if random.random() > self.bravery:  # Probabilistic swerve
+                self.swerved = True
+                return 'swerve_right'  # AI chickens out
+
+        return 'hold_course'
+```
+
+**Difficulty = AI bravery**:
+- Easy: bravery 0.3 (swerves early, predictable)
+- Medium: bravery 0.6 (swerves late, tense)
+- Hard: bravery 0.9 (almost never swerves, terrifying)
+- "Deathwish": bravery 1.0 (NEVER swerves. You MUST dodge or crash.)
+
+**Frontend enhancements**:
+- Distance-to-impact counter on HUD (bold, red, growing larger as cars approach)
+- Screen shake intensity scales with proximity
+- Heartbeat sound effect that accelerates with closing speed
+- Slow-mo on the moment of closest approach or impact (server renders extra frames at 0.25x)
+- "CHICKEN!" text explosion if the player swerves first
+- "NERVES OF STEEL" if the player holds and the AI swerves
+
+**Round structure**: Best of 5. Each round takes ~10 seconds. Full match in under 2 minutes.
+
+**Rule**: For tension-based game modes (chicken, close finishes), audio is more important than visuals. A heartbeat sound that accelerates with closing speed creates more physical anxiety than any visual effect. Layer it: low heartbeat at 500m, faster at 200m, frantic at 50m, silence at the moment of pass/crash (silence after noise is the most dramatic beat in audio design).
+
+**Effort**: ~5 hours. New game mode with custom spawn logic, AI behavior, scoring, and HUD elements.
+
+---
+
+### 8. Phone as Steering Wheel (Idea #1)
+
+**Concept**: Your phone becomes a physical steering wheel. Hold it sideways, tilt to steer, phone vibrates on impact, phone screen shows rearview mirror.
+
+**Why it wins**: Transforms a keyboard game into a physical, embodied experience. The setup moment (picking up your phone, connecting it) is itself exciting. Analog tilt input feels dramatically better than keyboard binary steering.
+
+**Implementation**:
+
+**Architecture**:
+```
+Phone Browser (controller page)
+    +-- DeviceOrientationEvent -> tilt angle -> WebSocket -> Race Server
+    +-- Touch events (throttle/brake zones) -> WebSocket -> Race Server
+    +-- Vibration API <- collision events <- WebSocket <- Race Server
+    +-- Rear camera JPEG stream <- WebSocket <- Race Server
+
+Desktop Browser (game page)
+    +-- Normal JPEG stream + telemetry <- WebSocket <- Race Server
+```
+
+**Phone controller page (src/pages/Controller.tsx)**:
+- URL: `shadow-driver-v3.vercel.app/controller?session=<id>`
+- QR code displayed on desktop game screen for easy phone connection
+- Landscape orientation lock via `screen.orientation.lock('landscape')`
+- Left half of screen: throttle zone (touch = throttle, harder press = more throttle)
+- Right half: brake zone
+- Tilt steering:
+```typescript
+window.addEventListener('deviceorientation', (e) => {
+  // gamma = left/right tilt (-90 to 90)
+  const steer = Math.max(-1, Math.min(1, e.gamma / 45)); // +-45deg = full lock
+  ws.send(JSON.stringify({ type: 'phone_control', steer, throttle, brake }));
+});
+```
+
+**Session pairing**:
+- Desktop generates a session UUID, displays QR code (URL with `?session=uuid`)
+- Phone scans QR, connects to same race server WebSocket with session ID
+- Server pairs the two connections and routes phone controls to the player car
+- Alternative: 4-digit room code instead of QR (simpler for manual entry)
+
+**Phone vibration patterns**:
+```typescript
+// Collision: strong pulse
+navigator.vibrate(100);
+// Tire screech: rapid pulses
+navigator.vibrate([20, 10, 20, 10, 20]);
+// Engine idle: continuous gentle vibration
+navigator.vibrate([10, 50]); // repeat
+```
+
+**Phone display**: Show rearview mirror (second CARLA camera pointing backward, lower resolution 640x360, 15fps)
+
+**Rule**: For phone-as-controller, the QR code pairing flow must be frictionless. Generate the QR code client-side (use `qrcode` npm package, no server needed), encode the full controller URL including session ID. The phone should auto-connect on page load -- no "connect" button. DeviceOrientationEvent requires user gesture to activate on iOS (call `DeviceOrientationEvent.requestPermission()` on first touch). Always request permission in the touch handler for the throttle/brake zone.
+
+**Effort**: ~8 hours. New page, DeviceOrientation handling, WebSocket session pairing, rear camera on server, vibration feedback. Most complex idea in the top 10 but highest wow factor.
+
+---
+
+### 9. Synthwave Aesthetic Mode (Idea #34)
+
+**Concept**: Full visual transformation into a neon-drenched, CRT-scanned, chromatic-aberrated synthwave racing fever dream.
+
+**Why it wins**: Pure aesthetic appeal. Synthwave/retrowave has a massive, devoted online community. The before/after toggle is instant clip material. Combined with matching music, it creates a complete sensory transformation.
+
+**Implementation**:
+
+**Server-side CARLA settings (carla_manager.py)**:
+```python
+def apply_synthwave_mode(world):
+    weather = carla.WeatherParameters(
+        sun_altitude_angle=-30,     # Perpetual twilight/night
+        cloudiness=10,
+        precipitation=0,
+        fog_density=20,             # Slight atmospheric haze
+        fog_distance=80,
+        wetness=80,                 # Wet roads for reflections
+    )
+    world.set_weather(weather)
+```
+
+**Client-side WebGL shader (src/shaders/synthwave.glsl)**:
+```glsl
+// Fragment shader applied to the video canvas
+
+// Chromatic aberration
+vec2 offset = (uv - 0.5) * 0.01;  // Stronger at edges
+float r = texture2D(frame, uv + offset).r;
+float g = texture2D(frame, uv).g;
+float b = texture2D(frame, uv - offset).b;
+
+// Scanlines
+float scanline = sin(uv.y * resolution.y * 3.14159) * 0.04;
+
+// CRT vignette (darker corners)
+float vignette = 1.0 - dot(uv - 0.5, uv - 0.5) * 1.5;
+
+// Color grading: boost magenta/cyan, crush blacks
+vec3 color = vec3(r, g, b);
+color = pow(color, vec3(0.9, 1.1, 0.9));  // Boost red and blue channels
+color.r += 0.05;  // Magenta push
+color.b += 0.08;  // Cyan/blue push
+
+gl_FragColor = vec4(color * vignette + scanline, 1.0);
+```
+
+**Implementation approach -- use regl (lightweight WebGL wrapper)**:
+```typescript
+import createRegl from 'regl';
+
+const regl = createRegl(canvas);
+const drawFrame = regl({
+  frag: synthwaveShaderSource,
+  vert: `attribute vec2 position; varying vec2 uv;
+         void main() { uv = position * 0.5 + 0.5; gl_Position = vec4(position, 0, 1); }`,
+  attributes: { position: [[-1,-1],[1,-1],[-1,1],[1,1]] },
+  uniforms: {
+    frame: regl.prop('texture'),
+    resolution: [canvas.width, canvas.height],
+    time: regl.context('time')
+  },
+  primitive: 'triangle strip', count: 4
+});
+```
+
+**Audio transformation (useEngineSound.ts)**:
+- Switch background music to synthwave track (pre-generated using Suno/MusicGen or licensed royalty-free)
+- Add reverb to engine sound (ConvolverNode with short hall impulse response)
+- Subtle FM synthesis pad drone in the background (OscillatorNode x2, slight detune)
+
+**HUD style**:
+- Font swap to pixel/retro font (Press Start 2P from Google Fonts)
+- Neon glow on all text (CSS text-shadow with cyan/magenta colors)
+- Speed display in retro LED segment font
+- Minimap overlay with grid lines and neon dot trails
+
+**Mode toggle**: Button in RaceSetup.tsx or hotkey (V for "vibe mode") during race. Transition: 500ms crossfade between normal and synthwave shader.
+
+**Rule**: For aesthetic mode switches, the transformation must be TOTAL -- visuals, audio, typography, and color scheme all change simultaneously. A partial transformation (e.g., just a color filter) feels like a bug. A total transformation feels like entering another dimension. The transition should take 500ms with a brief flash-to-white at the midpoint (200ms fade out, 100ms white, 200ms fade in with new style).
+
+**Effort**: ~5 hours. WebGL shader setup (~2h), CARLA weather preset (~30min), audio changes (~1h), HUD styling (~1.5h).
+
+---
+
+### 10. Stock Market Weather (Idea #42)
+
+**Concept**: CARLA weather is driven by real financial market data. Markets up = sunshine. Markets down = storm. High volatility = dense fog.
+
+**Why it wins**: The absurdity is the selling point. "My racing game has worse weather because the S&P 500 dropped 2%." It is genuinely useless, genuinely hilarious, and creates a daily-varying game world that changes for reasons outside anyone's control. Financial Twitter and tech Twitter would lose their minds. It is the kind of feature that spawns memes.
+
+**Implementation**:
+
+**Market data fetching (api/market-weather.ts -- Vercel API route)**:
+```typescript
+export default async function handler(req, res) {
+  // Fetch S&P 500 current price and daily change
+  const response = await fetch(
+    'https://query1.finance.yahoo.com/v8/finance/chart/^GSPC?interval=1d&range=1d'
+  );
+  const data = await response.json();
+  const result = data.chart.result[0];
+  const currentPrice = result.meta.regularMarketPrice;
+  const previousClose = result.meta.chartPreviousClose;
+  const changePercent = ((currentPrice - previousClose) / previousClose) * 100;
+
+  // VIX for volatility
+  const vixResponse = await fetch(
+    'https://query1.finance.yahoo.com/v8/finance/chart/^VIX?interval=1d&range=1d'
+  );
+  const vixData = await vixResponse.json();
+  const vix = vixData.chart.result[0].meta.regularMarketPrice;
+
+  // Map to weather
+  const weather = {
+    sun_altitude: mapRange(changePercent, -3, 3, -20, 70),
+    cloudiness: mapRange(changePercent, -3, 3, 90, 0),
+    precipitation: changePercent < -1 ? mapRange(changePercent, -3, -1, 100, 20) : 0,
+    fog_density: mapRange(vix, 15, 40, 0, 80),
+    wind_intensity: mapRange(vix, 15, 40, 10, 100),
+    wetness: changePercent < 0 ? mapRange(changePercent, -3, 0, 100, 0) : 0,
+    description: generateWeatherDescription(changePercent, vix),
+  };
+
+  res.setHeader('Cache-Control', 's-maxage=300');
+  res.json(weather);
+}
+
+function generateWeatherDescription(change, vix) {
+  if (change > 2) return "Markets are soaring. Perfect racing weather.";
+  if (change > 0) return "Markets slightly green. Mild and pleasant.";
+  if (change > -1) return "Markets dipping. Clouds gathering.";
+  if (change > -2) return "Markets falling. Storm rolling in.";
+  return "Market crash. Apocalyptic conditions. Good luck.";
+}
+```
+
+**Server integration (race_server.py)**:
+- On race_config, fetch `/api/market-weather` from Vercel
+- Apply CARLA weather parameters
+- Send `market_weather` data in race_config message to frontend
+
+**Frontend display**:
+- Ticker-style banner on RaceSetup screen: "S&P 500: +1.2% | Weather: Sunny with light clouds"
+- During race: small stock ticker in HUD corner showing real-time market direction
+- Post-race: "You raced in a bear market. The fog cost you 2 seconds."
+- Weekend/holiday: markets closed, use the last closing data with message "Markets closed. Eerily calm."
+
+**Easter eggs**:
+- If Bitcoin drops > 10% in a day: spawn meteorite particle effects client-side
+- If markets are at all-time high: rainbow appears (CARLA weather + client overlay)
+- Flash crash event (> 5% drop): earthquake screen shake + sirens
+
+**Rule**: For features driven by external data (stock markets, weather APIs, time of day), always cache aggressively (5 minutes minimum) and have a graceful fallback when the API is unavailable. The fallback should be "default clear weather" -- never let a broken API call prevent a race from starting. Display the market data as flavor text, never as a blocking requirement.
+
+**Effort**: ~3 hours. Vercel API route (~1h), server integration (~1h), frontend display (~1h). Absurdly simple for such a memorable feature.
+
+---

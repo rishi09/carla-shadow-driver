@@ -156,6 +156,8 @@ export function useGPUConnection(): UseGPUConnectionReturn {
       ws.onopen = () => {
         if (!isMountedRef.current) { ws.close(); return; }
         console.log('[v3] WebSocket connected');
+        // Expose for E2E testing / browser console debugging
+        (window as unknown as Record<string, unknown>).__gameWs = ws;
         setConnectionState('connected');
         setError(null);
         wsRetryCountRef.current = 0;

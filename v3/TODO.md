@@ -779,6 +779,90 @@ The idea that AI can replace a traditional game engine entirely has exploded:
 
 ---
 
+## Racing Game Fun Factor Implementations
+
+Concrete implementation items derived from deep research into what makes racing games fun (Feb 2026). Cross-referenced from Forza Horizon 5, Mario Kart 8, Trackmania, Gran Turismo 7, Need for Speed, Burnout Paradise, Wipeout, Ridge Racer, Slow Roads, and GeoGuessr. Ordered by impact-to-effort ratio. Each item is buildable in under a day by a 2-person team.
+
+See `LEARNINGS.md` section "What Makes Racing Games Fun" for full rationale behind each item.
+
+### TIER 1: High Impact, Low Effort (build today)
+
+#### Speed Perception
+- [ ] **Aggressive FOV curve**: Change FOV scaling from current linear 1.0-1.05 to exponential: `scale = 1.0 + 0.08 * Math.pow(Math.min(speed/200, 1), 1.5)`. Starts subtle, ramps aggressively above 150 km/h. Max 1.08. In `Race.tsx` where CSS transform is applied.
+- [ ] **Camera G-force shift**: On hard throttle (>0.8), apply `translateY(+2px)` that eases to 0 over 200ms. On hard brake (>0.8), `translateY(-2px)`. Creates a visceral "pushed back in seat" / "thrown forward" feel. Implement in `Race.tsx` alongside existing steering prediction transforms.
+- [ ] **Wind/air rush noise at speed**: Add a white noise layer to `useEngineSound.ts`. Highpass filter at `1000 + speed * 5` Hz, volume `Math.min(0.15, (speed - 80) / 800)`. Start at 80 km/h. Creates the constant backdrop that makes high speed feel intense and silence feel peaceful.
+- [ ] **Camera tilt on brake/accelerate (GT7 weight feel)**: On braking, apply `rotateX(0.3deg)` (camera dips forward). On acceleration, `rotateX(-0.2deg)` (camera leans back). Very subtle -- more than 0.5deg looks wrong. CSS transform in `Race.tsx`, smoothed with 150ms transition.
+
+#### Audio Enhancements
+- [ ] **Tire screech frequency modulation**: In `useEngineSound.ts`, modulate the screech bandpass center frequency based on steer magnitude: `3500 - Math.abs(steer) * 1500` Hz. Mild turns = clean high squeal (3500 Hz). Aggressive turns = rough low scrub (2000 Hz). Gives audio feedback about traction state.
+- [ ] **Engine load differentiation**: In `useEngineSound.ts` update function, when throttle > 0.5, boost 2nd harmonic gain by 30% and increase lowpass filter frequency by 20%. Makes acceleration SOUND effortful vs coasting.
+- [ ] **Passing whoosh sound**: When gap_seconds changes sign (overtake or get overtaken), play a 200ms shaped white noise burst through bandpass at 800 Hz, volume 0.3. Triggers from `triggerEvent('overtake')` in `useEngineSound.ts`. Creates the Burnout Paradise close-racing feel.
+- [ ] **Downshift blip**: On gear decrease event, play a 30ms sine burst at 250 Hz. Add to the gear change detection in `useEngineSound.ts`. Simulates the rev-match downshift sound.
+- [ ] **Client-side impact pre-trigger**: In `Race.tsx`, track speed between frames. If `Math.abs(speed_now - speed_prev) > 20`, immediately play a short 30ms click sound (high-freq noise burst) BEFORE the server collision event arrives. Creates two-stage impact: instant click + delayed thud.
+
+#### Game Flow / Retention
+- [ ] **Live PB split at checkpoints**: When passing a checkpoint, show "+0.3s" or "-0.2s" vs personal best for that checkpoint. Store per-checkpoint split times in `usePersonalBests.ts`. Display as a brief toast near the checkpoint arrow that fades after 1.5s. This is Trackmania's core retention mechanic.
+- [ ] **Checkpoint celebration flash**: On checkpoint hit, brief green edge flash (100ms, reuse collision flash code but green, lower intensity 0.15). Play a short ascending "ding" tone (800 Hz, 50ms). Turn every checkpoint into a micro-reward.
+- [ ] **"PHOTO FINISH!" effect**: When gap < 1.0s on final checkpoint, trigger special treatment: screen-edge golden glow, dramatic audio swell (engine volume 1.5x, add chord), and "PHOTO FINISH!" text overlay. If final gap < 0.3s, show gap to 3 decimal places on results screen.
+- [ ] **Time improvement trajectory**: On RaceResults screen, show last 5 race times as a simple sparkline/list: "1:23 -> 1:21 -> 1:19 -> 1:18". Stored in localStorage per track. Seeing the downward trend is deeply satisfying.
+- [ ] **Hidden difficulty adaptation**: Track win/loss ratio in localStorage. If player wins >60% at current difficulty, subtly boost AI performance next race (+5% speed factor). If winning <30%, reduce by 5%. Separate from the explicit difficulty selector. Target: 40% win rate.
+
+#### Visual Juice
+- [ ] **Directional screen shake**: Modify collision shake to use collision direction. Head-on impact = camera jolts back (translateY +). Side impact = camera jolts laterally. Currently shake is random jitter; make it directional using the collision normal or the relative position of AI car. In `SpeedEffects.tsx` or `Race.tsx`.
+- [ ] **Drift exit speed boost**: When a drift ends (DriftEndEvent with score > 200), apply a 5% speed boost for 1.5 seconds (server-side in `carla_manager.py`: temporarily increase throttle multiplier). Show "DRIFT BOOST!" text popup. Makes drifting feel like a rewarding SKILL, not just style (Ridge Racer lesson).
+- [ ] **Tiered drift celebrations**: In `DriftScore.tsx`, add text tiers based on score: <200 = "DRIFT!", 200-500 = "GREAT DRIFT!", 500-1000 = "AMAZING DRIFT!", >1000 = "INSANE DRIFT!" with escalating visual effects (larger text, brighter glow, screen flash at 1000+). Sound sting at 500+ points.
+- [ ] **Near-miss visual effect**: Compare player and AI positions from telemetry. If distance < 3m and relative speed > 30 km/h, flash white streaks across screen edges for 100ms. "CLOSE CALL!" text popup. Burnout Paradise's signature mechanic -- makes close racing feel dangerous.
+- [ ] **Crash desaturation**: On large collisions (intensity > 2000), briefly apply CSS `filter: grayscale(50%)` for 200ms with increased shake. Makes big crashes feel cinematic (Burnout lesson) rather than just a frustrating bump.
+
+### TIER 2: High Impact, Medium Effort (build this week)
+
+#### Speed Perception (Shader-Based)
+- [ ] **Chromatic aberration at speed**: WebGL shader on video canvas (or CSS filter workaround). Separate RGB channels radially from center: red shifts outward 1-2px, blue shifts inward 1-2px. Intensity: `Math.max(0, (speed - 120) / 180)`. Start at 120 km/h, max effect at 300 km/h. Strongest at horizontal edges. Implement in `WebGLCanvas.tsx`.
+- [ ] **Radial motion blur shader**: Replace uniform CSS `filter: blur()` with a WebGL radial blur from screen center. Blur amount per pixel = `distance_from_center * speed_factor`. This single change transforms "looks out of focus" into "looks fast." Implement as a fragment shader in `WebGLCanvas.tsx`.
+
+#### Controls & Physics Feel
+- [ ] **Speed-dependent steering ramp time**: In `carla_manager.py`, scale steering ramp duration with speed: `ramp_ms = 40 + speed * 0.3`. At 0 km/h: 40ms (snappy). At 200 km/h: 100ms (weighty). Makes high-speed steering feel deliberate and solid (GT7 "weight" feel).
+- [ ] **Two-layer input bars**: In `RaceHUD.tsx` InputBar component, show two overlapping bars: background bar = local input (instant, from keyboard state), foreground bar = server-confirmed input (delayed, from telemetry). Gives visual feedback that "the car is catching up to my input." Helps players understand the latency.
+- [ ] **Auto-brake assist for Easy mode**: On Easy difficulty, when approaching a sharp turn (next checkpoint bearing > 60 degrees from heading) at speed > 100 km/h, auto-apply 30% brake. Server-side in `carla_manager.py`. Makes Easy mode genuinely playable for beginners (Forza Horizon lesson).
+
+#### Dramatic Moments Detection
+- [ ] **"NICE SAVE!" detection and popup**: Track speed history. If speed drops >50% then recovers within 2 seconds, OR car goes >5m off racing line then returns, show "NICE SAVE!" text popup with a brief cyan flash. These moments feel heroic and are clip-worthy.
+- [ ] **"LAST LAP OVERTAKE!" celebration**: If player position changes from P2 to P1 in the final 20% of the last lap, show dramatic "LAST LAP OVERTAKE!" overlay with screen glow and audio sting. The most shareable moment in racing.
+- [ ] **Race drama music adaptation**: In `useEngineSound.ts` or `useBackgroundMusic.ts`, when gap < 1.0s in the final lap, add a tension layer: low pulsing bass at 2 Hz (mimicking heartbeat), increasing in volume as gap decreases. Drop all music to just bass drone on final checkpoint approach (Mario Kart "clutch moment" audio design).
+
+#### HUD Improvements
+- [ ] **Split-time delta at every checkpoint**: Show "+0.2s" or "-0.1s" vs PB at each checkpoint as a color-coded floating number (green = ahead, red = behind). Appears at checkpoint position on screen, floats up and fades over 1.5s. Requires storing per-checkpoint PB times. This is the micro-drama that makes Trackmania's time-trial mode so engaging.
+- [ ] **Speedometer needle bounce on gear shift**: In `ArcSpeedometer.tsx`, on gear change event, briefly overshoot the needle position by 5% then spring back (CSS transition with bounce easing). Syncs with the gear shift flash and audio pop for triple-feedback gear changes.
+- [ ] **Close-gap warning pulse**: When gap decreases to < 2.0s (AI catching up), add a subtle pulsing border glow on the gap timer HUD element. Orange at 2.0s, red at 1.0s. Creates urgency. Disappears when gap widens. Visual equivalent of the audio tension layer.
+
+### TIER 3: Medium Impact, Low Effort (polish items)
+
+- [ ] **Speed-dependent vignette shape**: Modify SpeedEffects.tsx vignette to darken top and sides more than bottom. Change ellipse from `70% 60%` to `70% 50%` (taller, keeping bottom lighter). Maintains road readability while enhancing tunnel vision.
+- [ ] **Speed line vanishing point offset**: In SpeedLines.tsx, move the radial center from dead center to 40% from top (slightly above center). Matches visual perspective of looking down a road. Change `centerY = h / 2` to `centerY = h * 0.4`.
+- [ ] **Emphasize hood cam for speed**: When player switches to first-person/hood cam (C key), increase speed line intensity by 50% and lower the FOV curve threshold. Hood cam should feel MUCH faster than chase cam because road is closer (Wipeout lesson).
+- [ ] **Victory/defeat results enhancements**: Show gap to 3 decimal places when < 1.0s. Show improvement vs previous attempt. Add "Best Improvement" stat (e.g., "1.3s faster than your first race on this track!"). Show time progression chart of last 5 attempts.
+- [ ] **Slipstream/drafting visual**: When player is within 10m behind AI car, show faint blue-white speed streaks converging toward center (drafting visual). Even if no actual speed boost, the visual cue makes close following feel intentional and skill-based. If combining with actual draft speed boost, becomes a visible mechanic.
+- [ ] **AI blocking behavior on Hard**: On Hard difficulty, when player is within 5m behind AI, have AI take a defensive line (move toward the inside of the next turn). Creates "I need to outbrake them!" moments. Server-side in AI autopilot parameters.
+- [ ] **Comeback mechanic ("drafting boost")**: When player is >3 seconds behind, grant a subtle 3% speed boost with a faint blue-white screen-edge glow labeled "SLIPSTREAM". Frame rubber-banding as a physics mechanic (drafting) so it feels earned, not gifted. Mario Kart lesson: invisible help feels patronizing; visible help feels like a feature.
+- [ ] **Post-race sharing text (Wordle-style)**: Generate copy-pasteable text block: "Shadow Driver v3 - Town05 | 1:23.456 | Beat AI by 2.3s | Top Speed: 187 km/h | Hard | shadow-driver-v3.vercel.app". One "Copy" button. Plain text travels everywhere.
+
+### Implementation Priority (Top 10 for Maximum Fun-Per-Hour-Invested)
+
+| # | Item | Time | Why |
+|---|------|------|-----|
+| 1 | Wind/air rush noise | 30 min | Constant speed backdrop transforms silence into intensity |
+| 2 | Checkpoint celebration flash + ding | 30 min | Every checkpoint becomes a micro-reward |
+| 3 | Camera G-force shift | 30 min | Instant "weight" feel with 4 lines of CSS |
+| 4 | Live PB split at checkpoints | 1 hr | Trackmania's #1 retention mechanic |
+| 5 | Tire screech frequency modulation | 30 min | Audio traction feedback players learn subconsciously |
+| 6 | Aggressive FOV curve | 15 min | One line change, immediate speed perception boost |
+| 7 | Directional screen shake | 45 min | Crashes feel physical instead of random |
+| 8 | Client-side impact pre-trigger | 30 min | Eliminates perceived collision audio delay |
+| 9 | Tiered drift celebrations | 30 min | Big drifts get big reactions = clip-worthy moments |
+| 10 | Near-miss visual effect | 45 min | Close racing feels dangerous and exciting |
+
+---
+
 ## 50 Wild Ideas Brainstorm
 
 Volume over quality. Some of these are genius. Some are unhinged. All are worth considering.
