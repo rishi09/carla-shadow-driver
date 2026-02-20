@@ -507,6 +507,19 @@ export function Race() {
     gpu.sendAmbientWeather(weatherParams.sun_altitude, weatherParams.cloudiness, weatherParams.precipitation);
   }, [view, ambientLight.isActive, ambientLight.weatherZone, gpu.sendAmbientWeather]);
 
+  // --- Synthwave mode: force nighttime (sun_altitude = -30) for maximum neon effect ---
+  const synthwaveNightSentRef = useRef(false);
+  useEffect(() => {
+    if (view !== 'racing' || !synthwave.enabled) {
+      synthwaveNightSentRef.current = false;
+      return;
+    }
+    if (synthwaveNightSentRef.current) return;
+    synthwaveNightSentRef.current = true;
+    // sun_altitude -30 = deep night, minimal cloudiness, no precipitation
+    gpu.sendAmbientWeather(-30, 0, 0);
+  }, [view, synthwave.enabled, gpu.sendAmbientWeather]);
+
   // --- Race commentary updates ---
   useEffect(() => {
     if (view !== 'racing') return;

@@ -838,6 +838,9 @@ export function RaceSetup({ onStartRace, onBack, onStartDailyChallenge, quicksta
                   ? 'bg-fuchsia-500/10 border-fuchsia-500/40'
                   : 'bg-black/60 border-white/10 hover:border-white/20'
               }`}
+              style={synthwaveEnabled ? {
+                boxShadow: '0 0 20px rgba(255,0,255,0.1), inset 0 0 20px rgba(255,0,255,0.05)',
+              } : undefined}
             >
               {/* Retro sun/grid icon */}
               <div className="shrink-0">
@@ -881,11 +884,20 @@ export function RaceSetup({ onStartRace, onBack, onStartDailyChallenge, quicksta
                 </p>
               </div>
               {/* Toggle indicator */}
-              <div className={`w-10 h-5 rounded-full relative transition-colors ${synthwaveEnabled ? 'bg-fuchsia-500/40' : 'bg-white/10'}`}>
+              <div
+                className="w-10 h-5 rounded-full relative transition-colors"
+                style={{
+                  backgroundColor: synthwaveEnabled ? 'rgba(255,0,255,0.4)' : 'rgba(255,255,255,0.1)',
+                  boxShadow: synthwaveEnabled ? '0 0 8px rgba(255,0,255,0.3)' : 'none',
+                }}
+              >
                 <div
-                  className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${
-                    synthwaveEnabled ? 'left-[22px] bg-fuchsia-400' : 'left-0.5 bg-white/40'
-                  }`}
+                  className="absolute top-0.5 w-4 h-4 rounded-full transition-all"
+                  style={{
+                    left: synthwaveEnabled ? '22px' : '2px',
+                    backgroundColor: synthwaveEnabled ? '#ff00ff' : 'rgba(255,255,255,0.4)',
+                    boxShadow: synthwaveEnabled ? '0 0 6px rgba(255,0,255,0.6)' : 'none',
+                  }}
                 />
               </div>
             </button>
