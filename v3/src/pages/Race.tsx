@@ -344,6 +344,7 @@ export function Race() {
         // Player just overtook the AI
         engineSound.triggerEvent('overtake');
         crowd.cheer();
+        bgMusic.triggerMusicEvent('overtake');
       }
       prevGapSignRef.current = currentSign;
 
@@ -352,6 +353,7 @@ export function Race() {
         if (!closeGapTriggeredRef.current) {
           closeGapTriggeredRef.current = true;
           engineSound.triggerEvent('close_gap');
+          bgMusic.triggerMusicEvent('close_gap_start');
         }
         // Crowd anticipation scales with proximity (0.5s gap = max tension)
         crowd.setAnticipation(1 - Math.abs(gap));
@@ -359,6 +361,7 @@ export function Race() {
         if (closeGapTriggeredRef.current) {
           closeGapTriggeredRef.current = false;
           engineSound.stopCloseGapTension();
+          bgMusic.triggerMusicEvent('close_gap_end');
         }
         crowd.setAnticipation(0);
       }
@@ -367,9 +370,10 @@ export function Race() {
     // Final lap detection
     if (player.total_laps > 1 && player.lap === player.total_laps && prevLapRef.current !== player.total_laps) {
       engineSound.triggerEvent('final_lap');
+      bgMusic.triggerMusicEvent('final_lap');
     }
     prevLapRef.current = player.lap;
-  }, [view, gpu.raceState?.player?.gap_seconds, gpu.raceState?.player?.lap, gpu.raceState?.player?.total_laps, engineSound.triggerEvent, engineSound.stopCloseGapTension, crowd.cheer, crowd.setAnticipation]);
+  }, [view, gpu.raceState?.player?.gap_seconds, gpu.raceState?.player?.lap, gpu.raceState?.player?.total_laps, engineSound.triggerEvent, engineSound.stopCloseGapTension, crowd.cheer, crowd.setAnticipation, bgMusic.triggerMusicEvent]);
 
   // Collision hit sound (percussive white noise burst, layered on top of existing impact)
   useEffect(() => {

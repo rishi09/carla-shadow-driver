@@ -70,6 +70,8 @@ export interface UseBackgroundMusicReturn {
   start: () => void;
   stop: () => void;
   updateIntensity: (intensity: number) => void;
+  /** Trigger event-driven music changes (overtake celebration, close-gap drums, final-lap intensity) */
+  triggerMusicEvent: (event: 'overtake' | 'close_gap_start' | 'close_gap_end' | 'final_lap') => void;
   setMuted: (muted: boolean) => void;
   isMuted: boolean;
 }
@@ -81,6 +83,10 @@ export function useBackgroundMusic(): UseBackgroundMusicReturn {
   const playingRef = useRef(false);
   const intensityRef = useRef(0);
   const hihatIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Event-driven music layer refs
+  const closeGapDrumRef = useRef<{ osc: OscillatorNode; gain: GainNode } | null>(null);
+  const finalLapBoostRef = useRef(false);
 
   // Build the audio graph (lazy, called once)
   const ensureNodes = useCallback((): MusicNodes | null => {
@@ -263,6 +269,96 @@ export function useBackgroundMusic(): UseBackgroundMusicReturn {
     }
   }, [stopHihatLoop, triggerHihat]);
 
+  // --- Event-driven music layer changes ---
+  const triggerMusicEvent = useCallback((event: 'overtake' | 'close_gap_start' | 'close_gap_end' | 'final_lap') => {
+    const nodes = nodesRef.current;
+    if (!nodes || nodes.ctx.state !== 'running') return;
+
+    const ctx = nodes.ctx;
+    const now = ctx.currentTime;
+
+    switch (event) {
+      case 'overtake': {
+        // Brief volume boost + chord shift to major (celebratory)
+        // Shift pad chord from Am (A, C, E) to A major (A, C#, E) for 3 seconds
+        if (nodes.padOscs.length >= 3) {
+          // C3 (131Hz) -> C#3 (139Hz)
+          nodes.padOscs[1].frequency.setValueAtTime(139, now);
+          nodes.padOscs[1].frequency.setValueAtTime(131, now + 3.0); // revert
+        }
+        // Temporary master boost
+        nodes.masterGain.gain.cancelScheduledValues(now);
+        nodes.masterGain.gain.setValueAtTime(MASTER_VOLUME * 1.4, now);
+        nodes.masterGain.gain.linearRampToValueAtTime(MASTER_VOLUME, now + 3.0);
+        break;
+      }
+
+      case 'close_gap_start': {
+        // Add a driving drum layer (square wave at 2x tempo, bandpass filtered)
+        if (closeGapDrumRef.current) return; // already active
+
+        const drumOsc = ctx.createOscillator();
+        drumOsc.type = 'square';
+        const currentTempo = TEMPO_MIN + intensityRef.current * (TEMPO_MAX - TEMPO_MIN);
+        drumOsc.frequency.value = currentTempo * 2; // double-time
+
+        const drumFilter = ctx.createBiquadFilter();
+        drumFilter.type = 'lowpass';
+        drumFilter.frequency.value = 200;
+        drumFilter.Q.value = 5;
+
+        const drumGain = ctx.createGain();
+        drumGain.gain.setValueAtTime(0, now);
+        drumGain.gain.linearRampToValueAtTime(0.25, now + 1.0); // fade in over 1s
+
+        drumOsc.connect(drumFilter);
+        drumFilter.connect(drumGain);
+        drumGain.connect(nodes.masterGain);
+        drumOsc.start(now);
+
+        closeGapDrumRef.current = { osc: drumOsc, gain: drumGain };
+        break;
+      }
+
+      case 'close_gap_end': {
+        // Fade out and stop the drum layer
+        const drum = closeGapDrumRef.current;
+        if (!drum) return;
+
+        drum.gain.gain.linearRampToValueAtTime(0, now + 0.5);
+        setTimeout(() => {
+          try { drum.osc.stop(); } catch { /* ok */ }
+          closeGapDrumRef.current = null;
+        }, 600);
+        break;
+      }
+
+      case 'final_lap': {
+        if (finalLapBoostRef.current) return;
+        finalLapBoostRef.current = true;
+
+        // Permanent: raise bass, add more rhythm, increase tempo by 15%
+        const newTempo = (TEMPO_MIN + intensityRef.current * (TEMPO_MAX - TEMPO_MIN)) * 1.15;
+        nodes.bassLfo.frequency.setTargetAtTime(newTempo, now, 0.3);
+        nodes.rhythmOsc.frequency.setTargetAtTime(newTempo, now, 0.3);
+
+        // Boost bass by 30%
+        const bassVal = nodes.bassGain.gain.value;
+        nodes.bassGain.gain.setTargetAtTime(bassVal * 1.3, now, 0.5);
+
+        // Boost rhythm by 30%
+        const rhythmVal = nodes.rhythmGain.gain.value;
+        nodes.rhythmGain.gain.setTargetAtTime(Math.max(rhythmVal, 0.3) * 1.3, now, 0.5);
+
+        // Boost master slightly
+        nodes.masterGain.gain.cancelScheduledValues(now);
+        nodes.masterGain.gain.setValueAtTime(nodes.masterGain.gain.value, now);
+        nodes.masterGain.gain.linearRampToValueAtTime(MASTER_VOLUME * 1.25, now + 2.0);
+        break;
+      }
+    }
+  }, []);
+
   // Start music playback (fade in over 2 seconds)
   const start = useCallback(() => {
     if (playingRef.current) return;
@@ -288,8 +384,15 @@ export function useBackgroundMusic(): UseBackgroundMusicReturn {
   const stop = useCallback(() => {
     if (!playingRef.current) return;
     playingRef.current = false;
+    finalLapBoostRef.current = false;
 
     stopHihatLoop();
+
+    // Stop close-gap drum if active
+    if (closeGapDrumRef.current) {
+      try { closeGapDrumRef.current.osc.stop(); } catch { /* ok */ }
+      closeGapDrumRef.current = null;
+    }
 
     const nodes = nodesRef.current;
     if (!nodes || nodes.ctx.state === 'closed') return;
@@ -341,7 +444,7 @@ export function useBackgroundMusic(): UseBackgroundMusicReturn {
     };
   }, [stopHihatLoop]);
 
-  return { start, stop, updateIntensity, setMuted, isMuted };
+  return { start, stop, updateIntensity, triggerMusicEvent, setMuted, isMuted };
 }
 
 export default useBackgroundMusic;
