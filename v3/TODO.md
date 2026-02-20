@@ -341,12 +341,12 @@ Comprehensive research into AI in games beyond self-driving, with concrete imple
 - **Feasibility**: 9/10. Zero VRAM cost (API call). All data already exists. Just need a prompt template and one API call after race_finished. Claude Haiku processes full lap data in <1s.
 - **Impressiveness**: 8/10. Creates a retention loop -- "I'll try that tip on my next lap." Makes players feel like they have a personal coach.
 - **Implementation plan**:
-  - [ ] Collect sector split times (time between each checkpoint) for player and AI -- data already in race_logic.py
+  - [x] Collect sector split times (time between each checkpoint) for player and AI -- data already in race_logic.py
   - [ ] Compute per-corner metrics: braking point (position where brake first applied), apex position (closest point to inside of corner), exit speed
-  - [ ] Build analysis prompt: sector data + track layout + player vs AI comparison
+  - [x] Build analysis prompt: sector data + track layout + player vs AI comparison
   - [ ] Call Claude Haiku API from race_server.py after race_finished event
-  - [ ] Return coaching tips (3-5 bullet points) in race_finished WebSocket message
-  - [ ] Display tips in RaceResults.tsx below the racing line visualization
+  - [x] Return coaching tips (3-5 bullet points) in race_finished WebSocket message
+  - [x] Display tips in RaceResults.tsx below the racing line visualization
   - [ ] Color-code racing line sections: green (faster than AI), red (slower than AI), with time delta labels
 
 #### :star: 3. Ghost Car AI Clone (Imitation Learning) -- The Unique Differentiator

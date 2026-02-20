@@ -8,6 +8,8 @@ import json
 import os
 from typing import List, Tuple, Dict, Optional
 
+from coach import generate_coaching_tips
+
 
 class DriftDetector:
     """Detects drifting by comparing vehicle heading vs velocity direction.
@@ -393,6 +395,24 @@ class RaceState:
         self._ai_prev_x: Optional[float] = None
         self._ai_prev_y: Optional[float] = None
 
+        # Sector split time tracking: records the absolute timestamp
+        # when each car reaches each checkpoint. Used for post-race coaching.
+        # Key: (lap_index, checkpoint_index) -> timestamp
+        self._player_sector_timestamps: Dict[tuple, float] = {}
+        self._ai_sector_timestamps: Dict[tuple, float] = {}
+
+        # Speed at each checkpoint crossing for coaching analysis
+        # Key: (lap_index, checkpoint_index) -> speed_kmh
+        self._player_sector_speeds: Dict[tuple, float] = {}
+        self._ai_sector_speeds: Dict[tuple, float] = {}
+
+        # Track which sectors had collisions (for coaching tips)
+        # Each entry is (lap_index, checkpoint_index_entering)
+        self._player_collision_sectors: List[tuple] = []
+        # Speed at last known position (for recording at checkpoint hit)
+        self._player_current_speed: float = 0.0
+        self._ai_current_speed: float = 0.0
+
         # Ghost replay recording
         self._player_recording: List[Dict] = []  # all recorded positions across laps
         self._current_lap_recording: List[Dict] = []
@@ -530,8 +550,11 @@ class RaceState:
         return dist <= radius
 
     def report_player_collision(self):
-        """Increment the player collision counter."""
+        """Increment the player collision counter and record the sector."""
         self.player_collisions_count += 1
+        # Track which sector the collision happened in
+        cp_in_lap = self.player_checkpoint % len(self.checkpoints)
+        self._player_collision_sectors.append((self.player_lap, cp_in_lap))
 
     def update_drift(self, heading_deg: float, velocity_x: float, velocity_y: float,
                       speed_kmh: float, steer: float) -> Optional[Dict]:
@@ -573,6 +596,7 @@ class RaceState:
         """Update player position and check checkpoints."""
         self.player_x = x
         self.player_y = y
+        self._player_current_speed = speed_kmh
         if self.status not in ("racing", "finishing") or self.player_finished:
             return
 
@@ -597,6 +621,12 @@ class RaceState:
         next_cp = self.player_checkpoint % len(self.checkpoints)
         if self._check_checkpoint(x, y, next_cp):
             self.player_checkpoint += 1
+
+            # Record sector timestamp and speed for coaching analysis
+            now = time.time()
+            cp_in_lap = (self.player_checkpoint - 1) % len(self.checkpoints)
+            self._player_sector_timestamps[(self.player_lap, cp_in_lap)] = now
+            self._player_sector_speeds[(self.player_lap, cp_in_lap)] = speed_kmh
 
             # Check if completed a lap
             if self.player_checkpoint % len(self.checkpoints) == 0 and self.player_checkpoint > 0:
@@ -631,6 +661,7 @@ class RaceState:
         """Update AI position and check checkpoints."""
         self.ai_x = x
         self.ai_y = y
+        self._ai_current_speed = speed_kmh
         if self.status not in ("racing", "finishing") or self.ai_finished:
             return
 
@@ -649,6 +680,12 @@ class RaceState:
         next_cp = self.ai_checkpoint % len(self.checkpoints)
         if self._check_checkpoint(x, y, next_cp):
             self.ai_checkpoint += 1
+
+            # Record sector timestamp and speed for coaching analysis
+            now = time.time()
+            cp_in_lap = (self.ai_checkpoint - 1) % len(self.checkpoints)
+            self._ai_sector_timestamps[(self.ai_lap, cp_in_lap)] = now
+            self._ai_sector_speeds[(self.ai_lap, cp_in_lap)] = speed_kmh
 
             # Check if completed a lap
             if self.ai_checkpoint % len(self.checkpoints) == 0 and self.ai_checkpoint > 0:
@@ -740,6 +777,152 @@ class RaceState:
             'ai': [[x, y] for x, y in self._ai_path],
         }
 
+    def get_sector_times(self) -> Dict:
+        """Compute per-sector times for player and AI across all laps.
+
+        A "sector" is the time between two consecutive checkpoint crossings.
+        Returns lists of average sector times (averaged across all laps).
+
+        Returns:
+            Dict with 'player' and 'ai' keys, each containing a list of
+            average sector times (one per checkpoint/sector).
+        """
+        num_cps = len(self.checkpoints)
+        num_laps = min(len(self.player_lap_times), len(self.ai_lap_times))
+        if num_laps == 0:
+            # Use however many laps we have data for
+            num_laps = max(len(self.player_lap_times), len(self.ai_lap_times))
+        if num_laps == 0 or num_cps < 2:
+            return {'player': [], 'ai': []}
+
+        def _compute_sector_times(timestamps: Dict[tuple, float], laps_completed: int) -> List[float]:
+            """Compute average sector time per sector across all laps."""
+            sector_totals = [0.0] * num_cps
+            sector_counts = [0] * num_cps
+
+            for lap in range(laps_completed):
+                for cp in range(num_cps):
+                    # Time to reach this checkpoint from the previous one
+                    current_ts = timestamps.get((lap, cp))
+                    if current_ts is None:
+                        continue
+
+                    if cp == 0:
+                        # First checkpoint in lap: measure from race start or previous lap end
+                        if lap == 0:
+                            prev_ts = self.race_start_time
+                        else:
+                            # End of previous lap = timestamp of last checkpoint
+                            prev_ts = timestamps.get((lap - 1, num_cps - 1))
+                    else:
+                        prev_ts = timestamps.get((lap, cp - 1))
+
+                    if prev_ts is not None:
+                        sector_time = current_ts - prev_ts
+                        if sector_time > 0:
+                            sector_totals[cp] += sector_time
+                            sector_counts[cp] += 1
+
+            # Compute averages
+            result = []
+            for i in range(num_cps):
+                if sector_counts[i] > 0:
+                    result.append(round(sector_totals[i] / sector_counts[i], 2))
+                else:
+                    result.append(0.0)
+            return result
+
+        player_sectors = _compute_sector_times(
+            self._player_sector_timestamps,
+            len(self.player_lap_times),
+        )
+        ai_sectors = _compute_sector_times(
+            self._ai_sector_timestamps,
+            len(self.ai_lap_times),
+        )
+
+        return {'player': player_sectors, 'ai': ai_sectors}
+
+    def get_sector_speeds(self) -> Dict:
+        """Compute average speed at each checkpoint for player and AI.
+
+        Returns:
+            Dict with 'player' and 'ai' keys, each containing a list of
+            average speeds (one per checkpoint/sector).
+        """
+        num_cps = len(self.checkpoints)
+
+        def _compute_avg_speeds(speeds: Dict[tuple, float], laps_completed: int) -> List[float]:
+            speed_totals = [0.0] * num_cps
+            speed_counts = [0] * num_cps
+
+            for lap in range(laps_completed):
+                for cp in range(num_cps):
+                    spd = speeds.get((lap, cp))
+                    if spd is not None:
+                        speed_totals[cp] += spd
+                        speed_counts[cp] += 1
+
+            result = []
+            for i in range(num_cps):
+                if speed_counts[i] > 0:
+                    result.append(round(speed_totals[i] / speed_counts[i], 1))
+                else:
+                    result.append(0.0)
+            return result
+
+        return {
+            'player': _compute_avg_speeds(
+                self._player_sector_speeds, len(self.player_lap_times)
+            ),
+            'ai': _compute_avg_speeds(
+                self._ai_sector_speeds, len(self.ai_lap_times)
+            ),
+        }
+
+    def get_collision_sectors(self) -> Dict[int, int]:
+        """Return a mapping of sector_index -> collision_count for the player."""
+        counts: Dict[int, int] = {}
+        for _lap, cp in self._player_collision_sectors:
+            counts[cp] = counts.get(cp, 0) + 1
+        return counts
+
+    def get_coaching_tips(self) -> Dict:
+        """Generate post-race coaching analysis.
+
+        Returns a dict with:
+          - coaching_tips: list of tip dicts (sector, delta, tip, severity)
+          - sector_splits: {player: [...], ai: [...]} average sector times
+        """
+        sector_times = self.get_sector_times()
+        sector_speeds = self.get_sector_speeds()
+        collision_sectors = self.get_collision_sectors()
+        stats = self.get_stats()
+
+        tips = generate_coaching_tips(
+            sector_times=sector_times,
+            sector_speeds=sector_speeds,
+            collision_sectors=collision_sectors,
+            player_max_speed=stats['player_max_speed'],
+            ai_max_speed=stats['ai_max_speed'],
+            player_collisions=stats['player_collisions'],
+        )
+
+        # Clean up internal keys from tips before sending to client
+        clean_tips = []
+        for tip in tips:
+            clean_tips.append({
+                'sector': tip['sector'],
+                'delta': tip['delta'],
+                'tip': tip['tip'],
+                'severity': tip['severity'],
+            })
+
+        return {
+            'coaching_tips': clean_tips,
+            'sector_splits': sector_times,
+        }
+
     def to_dict(self) -> Dict:
         """Serialize race state for WebSocket transmission."""
         positions = self.get_position()
@@ -798,6 +981,105 @@ class RaceState:
         result["total_drift_score"] = round(self.drift_detector.total_drift_score)
 
         return result
+
+
+def compute_coaching_tips(race_state: 'RaceState') -> List[Dict]:
+    """Generate 3-5 specific, actionable coaching tips from post-race telemetry.
+
+    Uses coach.generate_coaching_tips() for sector-level analysis, then
+    supplements with outcome-based tips (race result, lap consistency).
+
+    Returns:
+        List of coaching tip dicts with keys:
+          sector (int), delta (float), tip (str), severity (str).
+    """
+    sector_times = race_state.get_sector_times()
+    sector_speeds = race_state.get_sector_speeds()
+    collision_sectors = race_state.get_collision_sectors()
+    stats = race_state.get_stats()
+
+    tips = generate_coaching_tips(
+        sector_times=sector_times,
+        sector_speeds=sector_speeds,
+        collision_sectors=collision_sectors,
+        player_max_speed=stats.get('player_max_speed', 0),
+        ai_max_speed=stats.get('ai_max_speed', 0),
+        player_collisions=stats.get('player_collisions', 0),
+    )
+
+    # --- Supplemental tips based on overall race outcome ---
+
+    # If player won easily, suggest harder difficulty
+    if race_state.winner == 'player':
+        if (race_state.player_finish_time is not None
+                and race_state.ai_finish_time is not None):
+            margin = race_state.ai_finish_time - race_state.player_finish_time
+            if margin > 5.0 and len(tips) < 5:
+                tips.append({
+                    'sector': 0,
+                    'delta': 0,
+                    'tip': (f"Great race! You beat the AI by {margin:.1f}s. "
+                            f"Try a harder difficulty to challenge yourself further."),
+                    'severity': 'minor',
+                })
+            elif 0 < margin <= 5.0 and len(tips) < 5:
+                tips.append({
+                    'sector': 0,
+                    'delta': 0,
+                    'tip': (f"Close race! You beat the AI by just {margin:.1f}s. "
+                            f"Tightening up your weakest sectors could make this "
+                            f"more comfortable."),
+                    'severity': 'minor',
+                })
+
+    # If player lost, encourage
+    if race_state.winner == 'ai':
+        if (race_state.player_finish_time is not None
+                and race_state.ai_finish_time is not None):
+            margin = race_state.player_finish_time - race_state.ai_finish_time
+            if len(tips) < 5:
+                tips.append({
+                    'sector': 0,
+                    'delta': round(margin, 1),
+                    'tip': (f"The AI beat you by {margin:.1f}s. Focus on the sectors "
+                            f"highlighted above -- fixing your worst 2-3 sectors "
+                            f"would close this gap."),
+                    'severity': 'minor',
+                })
+
+    # Lap consistency tip
+    if len(tips) < 3:
+        if race_state.player_best_lap is not None and race_state.ai_best_lap is not None:
+            if race_state.player_best_lap < race_state.ai_best_lap:
+                tips.append({
+                    'sector': 0,
+                    'delta': 0,
+                    'tip': (f"Your best lap ({race_state.player_best_lap:.1f}s) was "
+                            f"faster than the AI's ({race_state.ai_best_lap:.1f}s). "
+                            f"Now work on consistency -- match that pace every lap."),
+                    'severity': 'minor',
+                })
+            else:
+                lap_gap = race_state.player_best_lap - race_state.ai_best_lap
+                tips.append({
+                    'sector': 0,
+                    'delta': round(lap_gap, 1),
+                    'tip': (f"The AI's best lap was {lap_gap:.1f}s faster than yours. "
+                            f"Try to carry more speed through corners and brake later."),
+                    'severity': 'major',
+                })
+
+    # Ensure minimum 3 tips
+    if len(tips) < 3:
+        tips.append({
+            'sector': 0,
+            'delta': 0,
+            'tip': ("Focus on smooth inputs -- gradual steering and throttle "
+                    "transitions are faster than jerky corrections."),
+            'severity': 'minor',
+        })
+
+    return tips[:5]
 
 
 class RaceDirector:

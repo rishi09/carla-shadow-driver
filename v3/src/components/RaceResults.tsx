@@ -13,6 +13,7 @@ import { useCloudLeaderboard } from '../hooks/useCloudLeaderboard.ts';
 import type { CloudSubmitResult, CloudLeaderboardEntry } from '../hooks/useCloudLeaderboard.ts';
 import { CloudLeaderboard } from './CloudLeaderboard.tsx';
 import type { TournamentBadge } from '../hooks/useTournaments.ts';
+import { CoachingTips } from './CoachingTips.tsx';
 
 interface RaceResultsProps {
   result: RaceFinished;
@@ -938,6 +939,16 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
               playerPath={result.player_path}
               aiPath={result.ai_path}
               racingLine={result.racing_line}
+            />
+          </div>
+        )}
+
+        {/* AI Coaching Tips */}
+        {result.coaching_tips && result.coaching_tips.length > 0 && (
+          <div className="bg-dark-400/50 rounded-lg p-4 mb-6" style={revealStyle(10)}>
+            <CoachingTips
+              tips={result.coaching_tips}
+              sectorTimes={result.sector_times}
             />
           </div>
         )}

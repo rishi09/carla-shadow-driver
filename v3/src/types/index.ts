@@ -127,6 +127,22 @@ export interface RaceFinished {
   drift_count?: number;
   /** Number of training data frames recorded during this race (for AI clone) */
   training_frames?: number;
+  /** Heuristic coaching tips generated from sector analysis (3-5 tips) */
+  coaching_tips?: CoachingTip[];
+  /** Per-sector times for player and AI (averaged across all laps) */
+  sector_times?: { player: number[]; ai: number[] };
+}
+
+/** A single coaching tip from the AI driving coach */
+export interface CoachingTip {
+  /** Sector number (1-indexed), or 0 for general (non-sector-specific) tips */
+  sector: number;
+  /** Time delta in seconds (positive = player slower than AI) */
+  delta: number;
+  /** The coaching tip text */
+  tip: string;
+  /** Severity: 'critical' | 'major' | 'minor' */
+  severity: 'critical' | 'major' | 'minor';
 }
 
 /** Handshake ack from server */

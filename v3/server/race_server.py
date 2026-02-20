@@ -1250,6 +1250,8 @@ class RaceServer:
                         paths = self.race_state.get_paths()
                         stats = self.race_state.get_stats()
                         racing_line = self.race_state.get_racing_line()
+                        sector_times = self.race_state.get_sector_times()
+                        coaching_tips = compute_coaching_tips(self.race_state)
                         await self.ws_client.send(json.dumps({
                             'type': 'race_finished',
                             'winner': self.race_state.winner,
@@ -1271,6 +1273,8 @@ class RaceServer:
                             'highlights': self.highlight_buffer.get_highlights(),
                             'session_cost': self.cost_tracker.get_cost_summary(),
                             'training_frames': training_frames,
+                            'coaching_tips': coaching_tips,
+                            'sector_times': sector_times,
                         }))
 
                     # Report race completion for social presence feed
