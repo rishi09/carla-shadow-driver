@@ -40,6 +40,7 @@ import { RaceSetup } from '../components/RaceSetup.tsx';
 import { Minimap } from '../components/Minimap.tsx';
 import { ControlsHint } from '../components/ControlsHint.tsx';
 import { WeatherOverlay } from '../components/WeatherOverlay.tsx';
+import { WeatherEffects } from '../components/WeatherEffects.tsx';
 import { FirstTimeOverlay } from '../components/FirstTimeOverlay.tsx';
 import { PhotoMode } from '../components/PhotoMode.tsx';
 import { AsciiOverlay } from '../components/AsciiOverlay.tsx';
@@ -61,16 +62,25 @@ import { useVoiceBoost } from '../hooks/useVoiceBoost.ts';
 import { useVoiceCommands } from '../hooks/useVoiceCommands.ts';
 import { useGifExport } from '../hooks/useGifExport.ts';
 import { useCargoMode } from '../hooks/useCargoMode.ts';
+import { useBlindfoldMode } from '../hooks/useBlindfoldMode.ts';
 import { useAmbientLight, zoneToWeatherParams } from '../hooks/useAmbientLight.ts';
 import { useTwitchChat } from '../hooks/useTwitchChat.ts';
 import type { TwitchCommand } from '../hooks/useTwitchChat.ts';
+import { useHeadTracking } from '../hooks/useHeadTracking.ts';
 import { CargoMeter } from '../components/CargoMeter.tsx';
+import { BlindfoldOverlay } from '../components/BlindfoldOverlay.tsx';
 import { AmbientLightIndicator } from '../components/AmbientLightIndicator.tsx';
+import { HeadTrackingIndicator } from '../components/HeadTrackingIndicator.tsx';
 import { TwitchOverlay } from '../components/TwitchOverlay.tsx';
+import { useSynthwaveMode } from '../hooks/useSynthwaveMode.ts';
+import { SynthwaveOverlay } from '../components/SynthwaveOverlay.tsx';
 import { decodeGhostFromUrl } from '../utils/ghostUrl.ts';
 import { decodeChallenge, formatChallengeTime } from '../utils/challengeUrl.ts';
 import type { ChallengeData } from '../utils/challengeUrl.ts';
 import type { KeyState } from '../types/index.ts';
+import { getBrowserQuip, getBatteryQuip } from '../utils/browserQuips.ts';
+import { useTabPenalty } from '../hooks/useTabPenalty.ts';
+import { useBatteryDifficulty } from '../hooks/useBatteryDifficulty.ts';
 import { useEffect, useRef } from 'react';
 
 type RaceView = 'setup' | 'pre_race' | 'racing' | 'results';
@@ -187,7 +197,19 @@ export function Race() {
     },
   );
   const cargoMode = useCargoMode();
+  const blindfoldMode = useBlindfoldMode(gpu.raceState?.race_status ?? null);
   const ambientLight = useAmbientLight();
+  const headTracking = useHeadTracking();
+  const synthwave = useSynthwaveMode();
+  // Fourth-wall breaking meta features
+  const browserQuip = useMemo(() => getBrowserQuip(), []);
+  const batteryDifficulty = useBatteryDifficulty();
+  const batteryQuip = useMemo(() => {
+    if (!batteryDifficulty.battery.isAvailable || batteryDifficulty.battery.level === null) return '';
+    return getBatteryQuip(batteryDifficulty.battery.level, batteryDifficulty.battery.charging);
+  }, [batteryDifficulty.battery.level, batteryDifficulty.battery.charging, batteryDifficulty.battery.isAvailable]);
+  const isRacing = view === 'racing' && (gpu.raceState?.race_status === 'racing' || gpu.raceState?.race_status === 'finishing');
+  const tabPenalty = useTabPenalty(isRacing);
   const [twitchChannel, setTwitchChannel] = useState<string | null>(twitchChannelParam);
   const twitchChat = useTwitchChat(twitchChannel);
   const twitchCommandRef = useRef<TwitchCommand | ''>('');
@@ -1736,6 +1758,8 @@ export function Race() {
     aiPersonality.initPersonality(model);
     // Reset cargo integrity for the new race
     cargoMode.reset();
+    // Reset blindfold mode timing for the new race
+    blindfoldMode.reset();
     if (isDemo || directWsUrl) {
       pendingDemoRaceRef.current = { track, laps, weather, model, player_car: playerCar, time_of_day: timeOfDay };
       const wsUrl = directWsUrl || DEMO_WS_URL;
@@ -1836,6 +1860,8 @@ export function Race() {
           urlSettings={urlSettings}
           isCargoMode={cargoMode.isCargoMode}
           onToggleCargoMode={cargoMode.setCargoMode}
+          isBlindfoldMode={blindfoldMode.isBlindfoldMode}
+          onToggleBlindfoldMode={blindfoldMode.setBlindfoldMode}
           dareTime={effectiveDareTime}
           challengeData={challengeData}
           voiceCommandsSupported={voiceCommands.isSupported}
@@ -1849,17 +1875,19 @@ export function Race() {
           onToggleAmbientLight={(on) => on ? ambientLight.enable() : ambientLight.disable()}
           twitchChannel={twitchChannel}
           onSetTwitchChannel={setTwitchChannel}
+          isBlindfoldMode={blindfoldMode.isBlindfoldMode}
+          onToggleBlindfoldMode={blindfoldMode.setBlindfoldMode}
         />
       )}
 
       {/* Racing view */}
       {view === 'racing' && (
         <div
-          className="relative w-full h-screen overflow-hidden"
+          className={`relative w-full h-screen overflow-hidden${synthwave.enabled ? ' synthwave-active' : ''}`}
           style={{ transform: `translate(${shakeX}px, ${shakeY}px)` }}
         >
           {/* Video feed: prefer WebRTC, fall back to JPEG canvas */}
-          {/* Speed-based FOV scale + client-side steering prediction + frame extrapolation + motion blur + countdown zoom */}
+          {/* Speed-based FOV scale + client-side steering prediction + frame extrapolation + motion blur + countdown zoom + head tracking */}
           <div
             className="absolute inset-0"
             style={{
@@ -1867,10 +1895,13 @@ export function Race() {
               transform: isCountdown
                 ? countdownZoomStyle.transform
                 : [
-                    `scale(${speedFovScale})`,
+                    `scale(${speedFovScale + (headTracking.enabled ? headTracking.fovAdjust : 0)})`,
                     steeringPrediction.transform !== 'none' ? steeringPrediction.transform : '',
                     frameExtrapolation.transform !== 'none' ? frameExtrapolation.transform : '',
                     gForceTransform,
+                    headTracking.enabled && (headTracking.offsetX !== 0 || headTracking.offsetY !== 0)
+                      ? `translate(${headTracking.offsetX}px, ${headTracking.offsetY}px)`
+                      : '',
                   ].filter(Boolean).join(' '),
               filter: [
                 // Skip CSS blur when WebGL2 is active (radial blur shader handles it)
@@ -1970,6 +2001,13 @@ export function Race() {
           {/* Dynamic weather overlay (rain streaks, fog, lightning, wind) */}
           <WeatherOverlay
             weatherMood={gpu.raceState?.weather_mood}
+            speedKmh={gpu.raceState?.player.speed_kmh ?? 0}
+          />
+
+          {/* Canvas-based weather visual effects (rain particles, snow, thunder, fog blur) */}
+          <WeatherEffects
+            weatherMood={gpu.raceState?.weather_mood}
+            weatherPreset={raceWeather}
             speedKmh={gpu.raceState?.player.speed_kmh ?? 0}
           />
 
@@ -2228,6 +2266,16 @@ export function Race() {
             />
           )}
 
+          {/* Blindfold Mode overlay (screen goes black every 3 seconds) */}
+          {blindfoldMode.isBlindfoldMode && (gpu.raceState?.race_status === 'racing' || gpu.raceState?.race_status === 'finishing') && (
+            <BlindfoldOverlay
+              isBlind={blindfoldMode.isBlind}
+              blindTimeLeft={blindfoldMode.blindTimeLeft}
+              visibleTimeLeft={blindfoldMode.visibleTimeLeft}
+              totalBlindTime={blindfoldMode.totalBlindTime}
+            />
+          )}
+
           {/* Ambient Light indicator (room brightness -> weather) */}
           {ambientLight.isActive && (gpu.raceState?.race_status === 'racing' || gpu.raceState?.race_status === 'countdown') && (
             <div className="absolute top-4 left-4 z-30 pointer-events-none">
@@ -2239,6 +2287,17 @@ export function Race() {
             </div>
           )}
 
+          {/* Head Tracking indicator (face tracking status + webcam preview) */}
+          {headTracking.enabled && (gpu.raceState?.race_status === 'racing' || gpu.raceState?.race_status === 'countdown') && (
+            <div className="absolute bottom-20 right-4 z-30">
+              <HeadTrackingIndicator
+                faceDetected={headTracking.faceDetected}
+                offsetX={headTracking.offsetX}
+                offsetY={headTracking.offsetY}
+                videoElement={headTracking.videoElement}
+              />
+            </div>
+          )}
 
           {/* Phone steering overlay (gyroscope visual feedback) */}
           {phoneSteering.isActive && (
