@@ -476,8 +476,17 @@ export function Race() {
     window.addEventListener('blur', handleBlur);
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
+    // Expose keysRef for browser console debugging
+    (window as unknown as Record<string, unknown>).__keysRef = keysRef;
+
     // Send controls at 30Hz, merging keyboard + gamepad
     keyIntervalRef.current = setInterval(() => {
+      // E2E testing override: if window.__e2eKeys is set, use those keys
+      const e2eKeys = (window as unknown as Record<string, unknown>).__e2eKeys as KeyState | undefined;
+      if (e2eKeys) {
+        keysRef.current = e2eKeys;
+      }
+
       if (gamepad.connected) {
         // Gamepad connected: send analog controls
         // Also set keyboard keys based on gamepad for server compatibility
