@@ -29,6 +29,7 @@ import { WeatherOverlay } from '../components/WeatherOverlay.tsx';
 import { FirstTimeOverlay } from '../components/FirstTimeOverlay.tsx';
 import { PhotoMode } from '../components/PhotoMode.tsx';
 import { ClipPreview } from '../components/ClipPreview.tsx';
+import { RearMirror } from '../components/RearMirror.tsx';
 import { RecordingControls } from '../components/RecordingControls.tsx';
 import { useReplayRecorder } from '../hooks/useReplayRecorder.ts';
 import { useScreenRecorder } from '../hooks/useScreenRecorder.ts';
@@ -103,6 +104,9 @@ export function Race() {
   const [showControlsHint, setShowControlsHint] = useState(false);
   const controlsHintTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // --- Rear-view mirror state (toggled with M key) ---
+  const [showRearMirror, setShowRearMirror] = useState(true);
+
   // --- Photo Mode state ---
   const [photoModeActive, setPhotoModeActive] = useState(false);
   const photoCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -111,6 +115,9 @@ export function Race() {
   const replayCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const replayRecorder = useReplayRecorder(replayCanvasRef, gpu.raceState);
   const [showClipPreview, setShowClipPreview] = useState(false);
+
+  // --- Screen recorder (manual start/stop, full race recording) ---
+  const screenRecorder = useScreenRecorder(replayCanvasRef, gpu.raceState?.race_status);
 
   // --- Screen shake state ---
   const [shakeX, setShakeX] = useState(0);
@@ -405,11 +412,21 @@ export function Race() {
         gpu.sendCameraMode(CAMERA_MODES[cameraIndexRef.current]);
         return;
       }
+      if (key === 'm') {
+        // Toggle rear-view mirror
+        setShowRearMirror(prev => !prev);
+        return;
+      }
       if (key === 'v') {
         // Save replay clip (last 15 seconds)
         replayRecorder.saveClip().then(url => {
           if (url) setShowClipPreview(true);
         });
+        return;
+      }
+      if (key === 'g') {
+        // Toggle screen recording
+        screenRecorder.toggleRecording();
         return;
       }
       if (key === ' ') {
@@ -855,6 +872,9 @@ export function Race() {
           {/* Minimap */}
           <Minimap raceState={gpu.raceState} />
 
+          {/* Rear-view mirror (toggle with M key) */}
+          <RearMirror onRearFrame={gpu.onRearFrame} visible={showRearMirror} />
+
           {/* Mute/unmute button (controls both engine sound and background music) */}
           <button
             onClick={() => {
@@ -970,6 +990,20 @@ export function Race() {
                 document.body.removeChild(a);
               }
             }}
+          />
+
+          {/* Screen recording controls (G key to toggle) */}
+          <RecordingControls
+            isRecording={screenRecorder.isRecording}
+            recordingDuration={screenRecorder.recordingDuration}
+            lastRecordingUrl={screenRecorder.lastRecordingUrl}
+            autoRecordEnabled={screenRecorder.autoRecordEnabled}
+            isSupported={screenRecorder.isSupported}
+            onToggleRecording={screenRecorder.toggleRecording}
+            onDownload={screenRecorder.downloadRecording}
+            onShare={screenRecorder.shareRecording}
+            onToggleAutoRecord={screenRecorder.toggleAutoRecord}
+            onDismiss={screenRecorder.dismissRecording}
           />
 
           {/* Photo Mode overlay */}

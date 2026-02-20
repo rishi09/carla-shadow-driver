@@ -176,6 +176,10 @@ class AutoShutdownManager:
 class RaceServer:
     """WebSocket server that runs the CARLA race loop."""
 
+    # Vercel API URLs for social presence callbacks
+    CALLBACK_URL = os.environ.get('CALLBACK_URL', 'https://shadow-driver-v3.vercel.app/api/gpu/callback')
+    RACE_COMPLETE_URL = os.environ.get('RACE_COMPLETE_URL', 'https://shadow-driver-v3.vercel.app/api/gpu/race-complete')
+
     def __init__(self, config_path: str = "configs/race.yaml"):
         with open(config_path, 'r') as f:
             self.config = yaml.safe_load(f)
@@ -230,12 +234,84 @@ class RaceServer:
         # --- Rear mirror frame counter (send at 15fps = every 2nd frame of the 30fps loop) ---
         self._rear_frame_counter: int = 0
 
+        # --- Connection ID for session tracking ---
+        self._connection_counter: int = 0
+
+        # Instance ID for session reporting
+        container_label = os.environ.get("VAST_CONTAINERLABEL", "")
+        if container_label.startswith("C."):
+            self._instance_id = container_label[2:]
+        else:
+            self._instance_id = os.environ.get("INSTANCE_ID", "unknown")
+
+        # Player name (set by client on start_race)
+        self._player_name: str = "Anonymous"
+
+    def _report_callback(self, payload: dict):
+        """Fire-and-forget HTTP POST to the callback URL (runs in background thread)."""
+        def _do_post():
+            try:
+                data = json.dumps(payload).encode()
+                req = urllib.request.Request(
+                    self.CALLBACK_URL,
+                    method="POST",
+                    data=data,
+                    headers={"Content-Type": "application/json"},
+                )
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    resp.read()
+            except Exception as e:
+                print(f"[social] Callback report error: {e}")
+
+        import threading
+        threading.Thread(target=_do_post, daemon=True).start()
+
+    def _report_race_complete(self, name: str, track: str, player_time: float,
+                              beat_ai: bool, gap: float, difficulty: str):
+        """Fire-and-forget HTTP POST to report a completed race."""
+        def _do_post():
+            try:
+                payload = {
+                    "name": name,
+                    "track": track,
+                    "time": round(player_time, 2),
+                    "beat_ai": beat_ai,
+                    "gap": round(gap, 2),
+                    "difficulty": difficulty,
+                }
+                data = json.dumps(payload).encode()
+                req = urllib.request.Request(
+                    self.RACE_COMPLETE_URL,
+                    method="POST",
+                    data=data,
+                    headers={"Content-Type": "application/json"},
+                )
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    resp.read()
+                print(f"[social] Race completion reported: {name} on {track}")
+            except Exception as e:
+                print(f"[social] Race complete report error: {e}")
+
+        import threading
+        threading.Thread(target=_do_post, daemon=True).start()
+
     async def handle_client(self, websocket):
         """Handle a single WebSocket client connection."""
         print(f"Client connected: {websocket.remote_address}")
 
         # Track connection for auto-shutdown
         self.shutdown_manager.client_connected(websocket)
+
+        # Generate a unique connection ID for session tracking
+        self._connection_counter += 1
+        connection_id = f"{self._connection_counter}_{int(time.time())}"
+
+        # Report session start for live player count
+        self._report_callback({
+            "instance_id": self._instance_id,
+            "type": "session_start",
+            "connection_id": connection_id,
+        })
 
         # If there's an existing race running, stop it gracefully before accepting new client
         if self.running or self._race_task or self._telemetry_task:
@@ -306,6 +382,8 @@ class RaceServer:
                     model = data.get('model', 'carla_pilotnet')
                     player_car = data.get('player_car')
                     time_of_day = data.get('time_of_day')
+                    # Capture player name for race completion reporting
+                    self._player_name = data.get('player_name', 'Anonymous') or 'Anonymous'
                     self.current_model_name = model
                     await self._start_race(track, laps, weather, model, player_car=player_car, time_of_day=time_of_day)
 
@@ -336,6 +414,14 @@ class RaceServer:
                     # Reuses existing race setup without full cleanup
                     await self._restart_race(websocket)
 
+                elif msg_type == 'pause':
+                    # Photo mode: pause the race loop (stop ticking CARLA)
+                    await self._pause_race()
+
+                elif msg_type == 'resume':
+                    # Photo mode exit: resume the race loop
+                    await self._resume_race()
+
                 elif msg_type == 'webrtc_offer':
                     await self._handle_webrtc_offer(websocket, data)
 
@@ -348,6 +434,12 @@ class RaceServer:
             self.ws_client = None
             # Track disconnection for auto-shutdown timer
             self.shutdown_manager.client_disconnected(websocket)
+            # Report session end for live player count
+            self._report_callback({
+                "instance_id": self._instance_id,
+                "type": "session_end",
+                "connection_id": connection_id,
+            })
             print("Client disconnected, waiting for reconnect...")
 
     async def _handle_webrtc_offer(self, websocket, data):
@@ -502,7 +594,9 @@ class RaceServer:
         self._last_sent_time = 0.0
         self._frame_skip_count = 0
         self._delta_skip_count = 0
+        self._rear_frame_counter = 0
         self.encoder.reset_frame_hash()
+        self.rear_encoder.reset_frame_hash()
 
         # Reset FPS counters
         self.frame_count = 0
@@ -548,6 +642,42 @@ class RaceServer:
 
         print("Instant restart complete -- countdown started")
 
+    async def _pause_race(self):
+        """Pause the race loop for photo mode. Stops CARLA ticking but preserves all state."""
+        if not self.running:
+            return
+        print("Race paused (photo mode)")
+        self.running = False
+
+        # Cancel the race loop task
+        if self._race_task and not self._race_task.done():
+            self._race_task.cancel()
+            try:
+                await self._race_task
+            except asyncio.CancelledError:
+                pass
+        self._race_task = None
+
+        # Cancel the telemetry loop task
+        if self._telemetry_task and not self._telemetry_task.done():
+            self._telemetry_task.cancel()
+            try:
+                await self._telemetry_task
+            except asyncio.CancelledError:
+                pass
+        self._telemetry_task = None
+
+    async def _resume_race(self):
+        """Resume the race loop after photo mode. Restarts the CARLA tick and telemetry loops."""
+        if self.running:
+            return
+        if not self.race_state:
+            return
+        print("Race resumed (photo mode exit)")
+        self.running = True
+        self._race_task = asyncio.create_task(self._race_loop())
+        self._telemetry_task = asyncio.create_task(self._telemetry_loop())
+
     # Model ID -> difficulty mapping
     MODEL_DIFFICULTY_MAP = {
         'carla_pilotnet': 'easy',
@@ -557,6 +687,7 @@ class RaceServer:
 
     async def _start_race(self, track: str, laps: int, weather: str = 'clear', model: str = 'carla_pilotnet', player_car: str = None, time_of_day: str = None):
         """Initialize and start a race."""
+        self._current_track = track  # Store for race completion reporting
         difficulty = self.MODEL_DIFFICULTY_MAP.get(model, 'medium')
         self.difficulty = difficulty
         print(f"Starting race: track={track}, laps={laps}, weather={weather}, model={model}, difficulty={difficulty}, player_car={player_car}, time_of_day={time_of_day}")
@@ -907,6 +1038,23 @@ class RaceServer:
                             'best_single_drift': stats.get('best_single_drift', 0),
                             'drift_count': stats.get('drift_count', 0),
                         }))
+
+                    # Report race completion for social presence feed
+                    difficulty_label = {'easy': 'Easy', 'medium': 'Medium', 'hard': 'Hard'}.get(self.difficulty, 'Easy')
+                    player_time = self.race_state.player_finish_time or 0
+                    ai_time = self.race_state.ai_finish_time or 0
+                    beat_ai = self.race_state.winner == 'player'
+                    gap = ai_time - player_time if (player_time and ai_time) else 0
+                    track_name = getattr(self, '_current_track', 'Unknown')
+                    self._report_race_complete(
+                        name=self._player_name,
+                        track=track_name,
+                        player_time=player_time,
+                        beat_ai=beat_ai,
+                        gap=gap,
+                        difficulty=difficulty_label,
+                    )
+
                     self.running = False
                     break
 

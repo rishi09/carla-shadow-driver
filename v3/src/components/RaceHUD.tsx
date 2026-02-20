@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import type { RaceState } from '../types/index.ts';
+import type { RaceState, AIEmotion } from '../types/index.ts';
 import { RaceProgressBar } from './RaceProgressBar.tsx';
 import { ArcSpeedometer } from './ArcSpeedometer.tsx';
 
@@ -74,8 +74,12 @@ export function RaceHUD({ raceState, latencyMs, gamepadConnected = false, classN
 
         {/* Gap timer */}
         {(race_status === 'racing' || race_status === 'finishing') && player.gap_seconds != null && (
-          <div className="bg-black/60 backdrop-blur-sm rounded-lg px-4 py-2 border border-white/20 flex items-center">
+          <div className="bg-black/60 backdrop-blur-sm rounded-lg px-4 py-2 border border-white/20 flex items-center gap-3">
             <GapTimer gap={player.gap_seconds} />
+            {/* AI Emotion indicator next to gap */}
+            {raceState.ai_emotion && (
+              <AIEmotionBadge emotion={raceState.ai_emotion} />
+            )}
           </div>
         )}
 
@@ -569,5 +573,31 @@ function GamepadIcon() {
       <circle cx="17" cy="12" r="1" fill="currentColor" stroke="none" />
       <path d="M2 14.5A4 4 0 0 0 6.53 18L8 18a2 2 0 0 0 2-2V14h4v2a2 2 0 0 0 2 2h1.47A4 4 0 0 0 22 14.5v-2A4 4 0 0 0 18 8.5H6A4 4 0 0 0 2 12.5v2z" />
     </svg>
+  );
+}
+
+/** AI Emotion badge: shows the AI opponent's current emotional state with color-coded styling */
+function AIEmotionBadge({ emotion }: { emotion: AIEmotion }) {
+  // Map state to a pulsing animation for aggressive/desperate states
+  const isPulsing = emotion.state === 'aggressive' || emotion.state === 'desperate';
+
+  return (
+    <div
+      className={`flex items-center gap-1.5 px-2 py-0.5 rounded-md border transition-all duration-700 ease-out ${isPulsing ? 'animate-pulse' : ''}`}
+      style={{
+        borderColor: `${emotion.color}60`,
+        backgroundColor: `${emotion.color}20`,
+      }}
+    >
+      <span className="text-sm leading-none" role="img" aria-label={emotion.label}>
+        {emotion.emoji}
+      </span>
+      <span
+        className="text-[10px] font-mono font-bold uppercase tracking-wider leading-none"
+        style={{ color: emotion.color }}
+      >
+        {emotion.label}
+      </span>
+    </div>
   );
 }

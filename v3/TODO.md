@@ -776,3 +776,242 @@ The idea that AI can replace a traditional game engine entirely has exploded:
 4. **NVIDIA ACE games are shipping.** Total War Pharaoh, PUBG, inZOI, MIR5, and Dead Meat prove that on-device AI characters work in production. Our server-side approach (Claude API + Orpheus TTS) is architecturally simpler.
 
 5. **The browser is still the ultimate distribution channel.** None of these AAA AI features are accessible in a browser. That remains our key differentiator. "Wait, this runs in a BROWSER?!" is still the reaction we are optimizing for.
+
+---
+
+## 50 Wild Ideas Brainstorm
+
+Volume over quality. Some of these are genius. Some are unhinged. All are worth considering.
+
+### IMPOSSIBLE-SOUNDING BUT TECHNICALLY FEASIBLE
+
+**1. Haptic Steering Wheel via Phone Gyroscope**
+Hold your phone sideways as a steering wheel. DeviceOrientationEvent gives tilt angle, phone vibrates on collisions via Vibration API, and phone screen shows a rearview mirror (second WebSocket connection to same race). The phone becomes a controller AND a display.
+- Viral: 9/10 | Feasibility: 7/10 | Wow: 9/10
+
+**2. Eye-Tracking Steering via Webcam**
+Use TensorFlow.js face-mesh model to track where the player's eyes are looking. Look left to steer left. Look down to brake. Blink to honk. Sounds insane, actually works -- MediaPipe FaceMesh runs at 30fps in-browser, and gaze direction is just a vector from iris landmarks.
+- Viral: 10/10 | Feasibility: 5/10 | Wow: 10/10
+
+**3. Voice-Powered Turbo Boost**
+Microphone input via Web Audio API. The louder you scream, the faster you go. AnalyserNode gives you real-time volume (getByteFrequencyData). Map decibels to a nitro boost multiplier. Imagine the clips: person screaming at their laptop to win a race.
+- Viral: 10/10 | Feasibility: 8/10 | Wow: 9/10
+
+**4. Head-Tracking Camera Control**
+Use webcam + MediaPipe to track head position. Lean left and the camera pans left. Lean forward and the FOV narrows (like you're peering ahead). TrackIR for free, in a browser. Works with existing WebRTC getUserMedia.
+- Viral: 7/10 | Feasibility: 6/10 | Wow: 8/10
+
+**5. Ambient Light Racing**
+Use the Ambient Light Sensor API (or webcam brightness as fallback) to detect the player's room lighting. Dark room = nighttime race. Bright room = sunny day. Turn on a desk lamp and the sun comes out in-game. Changes CARLA weather in real-time.
+- Viral: 8/10 | Feasibility: 7/10 | Wow: 8/10
+
+**6. Browser Tab Rearview Mirror**
+Open a second browser tab that shows a rear-facing CARLA camera. Position it above your main game tab. Two synchronized WebSocket streams to the same race server. Ghetto dual-monitor racing sim, entirely in browser tabs.
+- Viral: 7/10 | Feasibility: 8/10 | Wow: 7/10
+
+**7. WebMIDI DJ Mode**
+Connect a MIDI controller via Web MIDI API. Map knobs to weather parameters (rain, fog, sun angle). One knob controls time of day. Another controls traffic density. You DJ the race conditions while your friend races. Twitch-ready.
+- Viral: 8/10 | Feasibility: 7/10 | Wow: 8/10
+
+**8. GPU-Rendered ASCII Art Mode**
+Server-side: convert CARLA frames to colored ASCII art using a GPU shader. Stream the ASCII as plain text via WebSocket. Render in a `<pre>` tag with syntax highlighting colors. Looks like the Matrix. Playable. Ridiculous. Uses almost zero bandwidth (text is tiny vs JPEG).
+- Viral: 9/10 | Feasibility: 8/10 | Wow: 8/10
+
+### SOCIAL / VIRAL MECHANICS
+
+**9. Bet-Your-Laptime Challenges**
+Player finishes a race. Gets a challenge URL with their time embedded (cryptographically signed to prevent cheating). Friend clicks it, sees "Can you beat 1:23.456?" before racing. Result is binary: BEAT or FAILED. The simplicity is the viral mechanic. No leaderboards, no accounts -- just a link and a dare.
+- Viral: 9/10 | Feasibility: 9/10 | Wow: 7/10
+
+**10. Split-Screen Couples Mode**
+Two players, one keyboard. Player 1: WASD. Player 2: arrow keys. Split the canvas in half, each showing their own CARLA camera. Two vehicles, one race server, one GPU. Date night racing. Server spawns two player cars and sends two JPEG streams (half-resolution each).
+- Viral: 8/10 | Feasibility: 6/10 | Wow: 8/10
+
+**11. Twitch Plays Shadow Driver**
+Twitch chat votes on controls every 500ms. "LEFT" "RIGHT" "GAS" -- most popular command wins. The car lurches around the track driven by mob rule. Integration via Twitch IRC WebSocket. The chaos IS the content.
+- Viral: 10/10 | Feasibility: 7/10 | Wow: 9/10
+
+**12. Race Roulette -- Random Stranger Matchmaking**
+Click "Race a Stranger." Matchmaking service (Vercel KV) pairs you with another player who also clicked. Both get assigned to the same GPU instance. Both race the AI. The person with the better time wins. Post-race: option to rematch. No accounts needed -- just ephemeral racing rivals.
+- Viral: 8/10 | Feasibility: 5/10 | Wow: 7/10
+
+**13. The Saddest Leaderboard**
+Show the WORST times alongside the best. "World's Slowest Lap: 14:32.891 by someone who spent the entire race in reverse." Players actively try to get on the worst leaderboard. Two leaderboards, double the competition.
+- Viral: 8/10 | Feasibility: 9/10 | Wow: 6/10
+
+**14. Commentary Soundboard for Spectators**
+Spectator mode where you don't drive but get a soundboard of air horns, cheers, boos, and meme sounds. Your sounds play in the racer's browser. WebSocket message from spectator -> audio trigger on racer's client. The racer hears random cheering mid-race.
+- Viral: 7/10 | Feasibility: 7/10 | Wow: 7/10
+
+**15. Daily Timelapse Video**
+Every day, auto-generate a 10-second timelapse video of all races run that day. Stitch together the best moments. Post to Twitter via a bot. "Today's Shadow Driver highlights: 47 races, 3 records broken." The game markets itself.
+- Viral: 7/10 | Feasibility: 4/10 | Wow: 6/10
+
+### AI-POWERED WEIRDNESS
+
+**16. The AI That Holds Grudges**
+AI remembers your past races (stored in a JSON per player). If you crashed into the AI last race, it drives aggressively toward you this race. If you let it pass cleanly, it respects your space. Persistent AI memory across sessions. It has opinions about you.
+- Viral: 9/10 | Feasibility: 7/10 | Wow: 9/10
+
+**17. AI Nemesis System (Shadow of Mordor meets Racing)**
+Each AI personality has a name, a backstory, and a grudge level. "Viktor" is cold and precise. "Reckless Rosa" crashes constantly but is fast. "The Phantom" plays fair until the last lap, then goes berserk. The AI remembers if it beat you -- and taunts you about it next time. Inspired by the Nemesis System from Middle-earth.
+- Viral: 9/10 | Feasibility: 6/10 | Wow: 9/10
+
+**18. AI That Narrates Its Own Thoughts**
+Real-time thought bubbles above the AI car: "Hmm, player is braking early... I'll take the inside." "OH NO the player is RIGHT BEHIND ME." "I calculated a 73% chance of winning. Recalculating... 31%." Generated by Claude Haiku from telemetry.
+- Viral: 8/10 | Feasibility: 7/10 | Wow: 8/10
+
+**19. Drunk AI Mode**
+The AI's neural network gets progressively "drunk" as the race goes on. Add random noise to its steering output that increases each lap. By lap 5, the AI is swerving wildly. The player has to beat a car that's falling apart mentally. Hilarious to watch.
+- Viral: 8/10 | Feasibility: 9/10 | Wow: 7/10
+
+**20. AI That Copies Your Mistakes**
+If you crash into a wall, 30 seconds later the AI crashes into the same wall. It's "learning" from you -- badly. Uses a replay buffer of player crash locations. The worse you drive, the worse the AI drives. A terrible mirror.
+- Viral: 8/10 | Feasibility: 8/10 | Wow: 7/10
+
+**21. AI Backseat Driver Mode**
+Instead of racing against you, the AI rides shotgun and gives commentary on YOUR driving. "You should have braked 20 meters earlier." "That was actually a clean apex, nice." "Oh no. Oh no no no." LLM-generated from your real-time telemetry. It's a driving instructor with opinions.
+- Viral: 9/10 | Feasibility: 7/10 | Wow: 8/10
+
+**22. AI Evolution -- Breed the Fastest Car**
+Run a genetic algorithm on AI driving parameters (aggression, braking distance, cornering speed, risk tolerance). Each "generation" is 10 AI variants racing each other. Players can watch the evolution. After 50 generations, the winner races the player. Darwin meets drag racing.
+- Viral: 7/10 | Feasibility: 5/10 | Wow: 8/10
+
+**23. AI That Reads Your Webcam and Comments**
+With webcam permission, run a facial expression classifier (TensorFlow.js) on the player's face. AI taunts based on detected emotion: "You look stressed!" (when frowning), "Ha, you smiled! Was that MY drifting?" (when smiling), "Are you even paying attention?" (when looking away).
+- Viral: 10/10 | Feasibility: 5/10 | Wow: 9/10
+
+### GAME MODE INSANITY
+
+**24. Reverse Race -- Start at the Finish**
+Both cars start at the finish line and race BACKWARD around the track. The course runs in reverse. All the turns you learned are now mirrored. Your muscle memory betrays you. Simple server-side change: reverse the checkpoint order and spawn point.
+- Viral: 5/10 | Feasibility: 9/10 | Wow: 5/10
+
+**25. Tag Mode**
+One car is "It." If you're It, you're on fire (literally -- CARLA particle effects). You lose health over time. Tag the other car by ramming into it to transfer the "It" status. Last car NOT on fire when the timer expires wins. Racing meets playground tag.
+- Viral: 8/10 | Feasibility: 6/10 | Wow: 8/10
+
+**26. Cops and Robbers**
+Player is the robber, AI is the cop (or vice versa). Robber must reach checkpoints while evading the cop. Cop has a speed boost but must get within 5m of the robber to "arrest" them. Robber can use handbrake turns to escape. Completely different vibe from regular racing.
+- Viral: 8/10 | Feasibility: 7/10 | Wow: 8/10
+
+**27. The Floor is Lava**
+Random sections of the road turn red (lava zones) and deal damage if you drive over them. Lava zones shift every 15 seconds. You must plan your racing line around the danger zones. Overlay rendered client-side using checkpoint/position data from server.
+- Viral: 7/10 | Feasibility: 6/10 | Wow: 7/10
+
+**28. Shrinking Track**
+Like a battle royale ring, the driveable road width shrinks over time. Drive outside the shrinking boundary and you take damage. By the final lap, you're threading a needle. Client-side overlay shows the boundary; server enforces collision damage.
+- Viral: 7/10 | Feasibility: 5/10 | Wow: 7/10
+
+**29. Cargo Delivery Mode**
+You're carrying fragile cargo. A "cargo integrity" meter starts at 100%. Every collision, hard brake, and sharp turn depletes it. Reach the destination before it hits 0%. Compete on a combined score: speed vs cargo integrity. The tension between "go fast" and "don't break the eggs" is sublime.
+- Viral: 6/10 | Feasibility: 8/10 | Wow: 7/10
+
+**30. Musical Chairs Racing**
+Multiple checkpoint zones on the map. Music plays. When the music stops, you must be inside a checkpoint zone within 5 seconds or you lose a life. Between stops, you race freely. Combines spatial awareness with speed.
+- Viral: 7/10 | Feasibility: 6/10 | Wow: 7/10
+
+**31. Wrong-Way Chicken**
+Both cars drive the track in OPPOSITE directions. You're on a collision course. First to swerve loses points. Play chicken with an AI at 200 km/h. The AI has adjustable "bravery" stats. Absolutely terrifying game of nerve.
+- Viral: 9/10 | Feasibility: 7/10 | Wow: 9/10
+
+**32. Photography Rally**
+Drive to scenic locations on the CARLA map and "photograph" them (trigger a high-res capture from a specific angle). Scored on composition (how close you are to the target framing) and time. Racing meets photography meets scavenger hunt.
+- Viral: 6/10 | Feasibility: 6/10 | Wow: 7/10
+
+**33. Blindfold Mode**
+Screen goes black for 3-second intervals. You drive from memory. The screen comes back for 2 seconds. Then black again. The AI has no such limitation. Pure spatial memory challenge. Terrifying and hilarious.
+- Viral: 9/10 | Feasibility: 9/10 | Wow: 8/10
+
+### SENSORY OVERLOAD
+
+**34. Synthwave Aesthetic Mode**
+Server renders CARLA at permanent night + neon lighting. Client applies chromatic aberration shader + scanline overlay + CRT curvature. Background music switches to synthwave. The whole game transforms into an Outrun/Retrowave fever dream. Pure vibes.
+- Viral: 8/10 | Feasibility: 7/10 | Wow: 9/10
+
+**35. Heartbeat Audio Scaling**
+Connect a heart rate monitor via Web Bluetooth API (or fake it with webcam-based pulse detection from face color changes). The faster your heart beats, the more intense the music, the narrower the FOV tunnel, the louder the engine. The game literally responds to your adrenaline.
+- Viral: 10/10 | Feasibility: 4/10 | Wow: 10/10
+
+**36. Earthquake Camera**
+When you're within 1 second of the AI, the entire screen starts shaking with increasing intensity. At 0.5s gap, the HUD elements start bouncing. At 0.1s gap, the screen is chaos. The visual intensity matches the competitive intensity. Your body FEELS how close the race is.
+- Viral: 6/10 | Feasibility: 9/10 | Wow: 7/10
+
+**37. Weather You Can Feel**
+Rain mode: CSS rain droplets fall down the screen with realistic splash physics. Thunder: screen flashes white + bass rumble via Web Audio sub-oscillator. Fog: progressive CSS blur from the edges in. Snow: white particle overlay + reduced grip notification. Full atmospheric immersion from client-side effects alone.
+- Viral: 6/10 | Feasibility: 8/10 | Wow: 7/10
+
+**38. Binaural 3D Audio Positioning**
+Use Web Audio API PannerNode with HRTF to position the AI car's engine sound in 3D space relative to the player. You can HEAR the AI approaching from behind-right. The Doppler shift kicks in as it passes. Close your eyes and you know exactly where the AI is. Spatial audio is criminally underused in browser games.
+- Viral: 6/10 | Feasibility: 7/10 | Wow: 8/10
+
+**39. Impact Replay Slow-Mo**
+On major collisions, time slows to 0.25x for 2 seconds. The server renders extra frames during the slow-mo (4x frame rate at 0.25x speed = same bandwidth). The camera pulls back slightly. A deep bass impact sound plays. Then time snaps back. Every crash feels cinematic.
+- Viral: 7/10 | Feasibility: 6/10 | Wow: 8/10
+
+### META / FOURTH-WALL BREAKING
+
+**40. The Game Knows Your Browser**
+Read `navigator.userAgent` and comment on it. "You're racing in Firefox? Bold choice." "Incognito mode? Trying to hide your lap times from yourself?" "Safari? Respect for the underdog." Display as an AI quip during countdown.
+- Viral: 8/10 | Feasibility: 10/10 | Wow: 7/10
+
+**41. Time-Zone-Aware Racing**
+The CARLA time of day matches YOUR local time. Play at 2 AM? Nighttime race with headlights. Play at noon? Bright sunny day. Play at sunset? Golden hour racing. Uses `new Date().getHours()` -- one line of code.
+- Viral: 6/10 | Feasibility: 10/10 | Wow: 7/10
+
+**42. Stock Market Weather**
+CARLA weather is driven by real stock market data. S&P 500 up? Clear skies. Down? Storm. Volatility high? Fog. Fetch from a free finance API. The game world reflects economic anxiety. Absurd. Wonderful.
+- Viral: 9/10 | Feasibility: 7/10 | Wow: 8/10
+
+**43. The Tab Penalty**
+If you switch browser tabs during a race (visibilitychange event), the AI gets a speed boost while you're away. When you come back, a message: "The AI trained while you were gone." Discourages tab-switching. Punishes alt-tabbers.
+- Viral: 7/10 | Feasibility: 10/10 | Wow: 6/10
+
+**44. Cursor Trail Racing Line**
+After the race, your mouse cursor leaves a trail as you move it around the screen. The trail matches your racing line color-coded by speed. You can "draw" your ideal racing line on the post-race screen, then compare it to your actual line. Interactive post-race analysis.
+- Viral: 5/10 | Feasibility: 8/10 | Wow: 6/10
+
+**45. The AI's Diary**
+After each race, the AI writes a diary entry about the experience. Generated by Claude. "Dear Diary, today a human tried to race me. They braked way too late into Turn 3. I won by 4 seconds but honestly it wasn't even close. I felt nothing. Is this all there is? -- AI #7721." Players can read previous diary entries. The AI develops an arc across races.
+- Viral: 9/10 | Feasibility: 7/10 | Wow: 9/10
+
+**46. Battery-Powered Difficulty**
+Read the Battery Status API (`navigator.getBattery()`). Low battery = Easy mode (the game has mercy). Full battery = Hard mode (no excuses). Below 10%: the AI lets you win with a message "You need this win more than I do. Go charge your laptop." Empathetic AI.
+- Viral: 8/10 | Feasibility: 8/10 | Wow: 7/10
+
+### TRULY UNHINGED
+
+**47. The NPCs Watch You**
+CARLA has pedestrians. Make them stop and stare when you drive past. Pedestrian heads track your car using CARLA's walker AI. At high speed, they jump out of the way. After a crash, they crowd around to look. The world reacts to you being there. Creepy and immersive.
+- Viral: 7/10 | Feasibility: 5/10 | Wow: 8/10
+
+**48. Speedrun the Internet**
+Race to load a real website faster than the AI loads its own website. Player car drives toward "google.com" checkpoint. When the car arrives, a real `fetch('https://google.com')` fires. The webpage loads in an iframe overlay. The AI does the same for a different site. First to "load" wins. Racing meets internet speed test. Utterly pointless. Absolutely hilarious.
+- Viral: 8/10 | Feasibility: 6/10 | Wow: 7/10
+
+**49. Infinite Procedural Highway**
+No laps. No finish line. An endless straight highway generated in CARLA. How far can you drive without crashing? Obstacles get denser, weather gets worse, the road gets narrower. Endless runner meets racing sim. Global leaderboard for distance. One mode. One metric. Addictive.
+- Viral: 8/10 | Feasibility: 4/10 | Wow: 8/10
+
+**50. The Race That Remembers Everyone**
+Every player's ghost stays on the track permanently. The first player ever sees an empty road. The 100th player sees 99 ghosts. The 10,000th player sees a HIGHWAY of ghosts. Over time, the track becomes a visualization of every human who ever raced here. Like Journey (thatgamecompany) meets racing. Profoundly beautiful.
+- Viral: 10/10 | Feasibility: 5/10 | Wow: 10/10
+
+---
+
+### TOP 10 IDEAS (ranked by Viral x Wow / Effort)
+
+| Rank | # | Idea | Viral | Feasibility | Wow | Score |
+|------|---|------|-------|-------------|-----|-------|
+| 1 | 3 | Voice-Powered Turbo (scream to boost) | 10 | 8 | 9 | 90 |
+| 2 | 50 | The Race That Remembers Everyone | 10 | 5 | 10 | 100 |
+| 3 | 11 | Twitch Plays Shadow Driver | 10 | 7 | 9 | 90 |
+| 4 | 16 | The AI That Holds Grudges | 9 | 7 | 9 | 81 |
+| 5 | 33 | Blindfold Mode | 9 | 9 | 8 | 72 |
+| 6 | 45 | The AI's Diary | 9 | 7 | 9 | 81 |
+| 7 | 31 | Wrong-Way Chicken | 9 | 7 | 9 | 81 |
+| 8 | 1 | Phone as Steering Wheel | 9 | 7 | 9 | 81 |
+| 9 | 34 | Synthwave Aesthetic Mode | 8 | 7 | 9 | 72 |
+| 10 | 42 | Stock Market Weather | 9 | 7 | 8 | 72 |
+
+See `LEARNINGS.md` for detailed implementation plans for these top 10.

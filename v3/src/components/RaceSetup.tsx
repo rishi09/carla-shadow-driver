@@ -174,7 +174,7 @@ export function RaceSetup({ onStartRace, onBack, onStartDailyChallenge, quicksta
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
       <div className="bg-dark-300 rounded-xl border border-white/10 max-w-lg w-full p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
         {/* Header */}
-        <div className="flex justify-between items-center mb-6">
+        <div className="flex justify-between items-center mb-4">
           <h2 className="text-xl font-bold text-white">Race Setup</h2>
           <button
             onClick={onBack}
@@ -183,6 +183,27 @@ export function RaceSetup({ onStartRace, onBack, onStartDailyChallenge, quicksta
             Back
           </button>
         </div>
+
+        {/* Live player count */}
+        {!social.loading && social.activePlayers > 0 && (
+          <div className="mb-4 flex justify-center">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-green-500/20 bg-green-500/[0.06]">
+              <span
+                className="w-1.5 h-1.5 rounded-full bg-green-400"
+                style={{ animation: 'live-pulse 2s ease-in-out infinite' }}
+              />
+              <span className="text-green-400/80 text-[11px] font-medium">
+                {social.activePlayers} racing now
+              </span>
+            </div>
+            <style>{`
+              @keyframes live-pulse {
+                0%,100% { opacity:1; }
+                50% { opacity:0.4; }
+              }
+            `}</style>
+          </div>
+        )}
 
         {/* Player Name + Streak Row */}
         <div className="flex items-center gap-3 mb-5">

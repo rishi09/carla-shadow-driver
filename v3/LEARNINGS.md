@@ -766,3 +766,169 @@ Deep research into the state of AI in gaming as of late 2025 / early 2026. Key f
 **Rule**: For adding pseudo-3D to a 2D video stream, run Depth Anything V2 small model server-side at 10Hz (every 3rd frame), send a low-res depth map (160x90, uint8, ~14KB) to the client, and use it as a WebGL displacement map. Max displacement should be subtle (5px) -- too much breaks the illusion.
 
 ---
+
+## What Makes Racing Games Fun (Research, Feb 2026)
+
+Deep research into what makes the best racing games in history feel amazing, broken down into specific, actionable mechanics. Cross-referenced across Forza Horizon 5, Mario Kart 8, Trackmania, Gran Turismo 7, Need for Speed (Underground/Most Wanted), Burnout Paradise, Wipeout, Ridge Racer, Slow Roads, and GeoGuessr. Focused on what a 2-person team can build in a day for Shadow Driver v3.
+
+---
+
+### 1. SPEED PERCEPTION: Making 100 km/h Feel Like 300 km/h
+
+The universal finding across all racing games: actual vehicle speed matters far less than *perceived* speed. Players rate a game as "fast" based on visual/audio cues, not the speedometer. Every great racing game uses multiple layered tricks simultaneously.
+
+**FOV widening at speed (the single most impactful speed trick).** Forza, Wipeout, and Burnout all widen the camera's field of view as speed increases. This stretches the periphery, creating the exact visual effect of real-world tunnel vision at speed. The effect should be subtle -- a 5-10% FOV increase from idle to top speed. Too much feels like a fisheye lens; too little is invisible. The current Shadow Driver implementation (1.0 to 1.05x scale, starting at 150 km/h) is in the right range but could be more aggressive: try 1.0 at 0 km/h ramping to 1.08 at 200+ km/h with an exponential curve that accelerates above 150.
+
+**Rule**: FOV widening should use an exponential curve, not linear. Speed perception is logarithmic -- the difference between 50 and 100 km/h should feel bigger than 200 and 250 km/h. Apply `scale = 1.0 + 0.08 * (speed/200)^1.5` capped at 1.08.
+
+**Peripheral darkening/vignette intensifies the tunnel vision effect.** Already implemented in SpeedEffects.tsx. The key insight from Wipeout's designers: the vignette should darken the top and sides more than the bottom. Players look slightly down at the road; keeping the bottom lighter maintains road readability while creating the tunnel effect.
+
+**Near objects matter more than far objects for speed perception.** Wipeout and F-Zero feel blindingly fast despite simple graphics because the track walls and barriers are CLOSE to the camera. Close objects streak past in the periphery at high apparent angular velocity, while distant mountains barely move. CARLA's third-person camera is already reasonably close, but the first-person (hood cam) view should feel much faster because road markings, curbs, and barriers are closer. If the game feels slow, the fix is not faster vehicles -- it is moving the camera closer to the ground and closer to the road edges.
+
+**Rule**: For perceived speed, camera proximity to nearby objects matters 10x more than actual vehicle speed. A car at 80 km/h with the camera 1m from the road surface feels faster than a car at 200 km/h with the camera 5m up.
+
+**Speed lines / radial streaks are the anime/arcade shortcut.** Already implemented in SpeedLines.tsx (starting at 80 km/h). The key finding from Trackmania and arcade racers: speed lines should emanate from a vanishing point slightly ABOVE center (about 40% from top), not dead center. This matches the visual perspective of looking down a road. Lines should be thicker and more opaque in the periphery, thinner near center.
+
+**Chromatic aberration at the edges increases speed feel.** A subtle RGB channel separation (1-3 pixels) at screen edges, increasing with speed, creates a lens-like distortion that the brain associates with motion. Currently not implemented in Shadow Driver. Can be done with a CSS filter or, better, a WebGL shader on the video canvas. The effect should be strongest at the horizontal edges (left/right) where peripheral motion is fastest.
+
+**Rule**: Chromatic aberration for speed should separate RGB channels radially from center. Red shifts outward 1-2px, blue shifts inward 1-2px, green stays. Start at 120 km/h, max at 250 km/h. Too much looks broken; the sweet spot is barely noticeable consciously but subconsciously registers as "fast."
+
+**Camera lag / camera pull-back on acceleration.** When the player accelerates hard, the camera should lag slightly behind the car (or, in our case, the video frame should shift down/back slightly). When braking, the camera shifts forward. This creates a visceral "G-force" feel. Gran Turismo 7 does this subtly; Burnout does it aggressively. Implementation for Shadow Driver: on hard throttle (>0.8), apply a subtle CSS `translateY(+2px)` that eases back to 0 over 200ms. On hard brake, `translateY(-2px)`.
+
+**Motion blur is critical but tricky with JPEG streaming.** CARLA supports server-side motion blur (already set to 0.3 intensity). The CSS `filter: blur()` overlay at speed (already implemented, 0-1.5px) helps hide JPEG artifacts. Finding: the blur should be DIRECTIONAL (radial from center), not uniform. Uniform blur looks like bad focus; radial blur looks like speed. CSS cannot do radial blur, but a WebGL shader can. This is a high-impact visual upgrade.
+
+**Rule**: Uniform blur reads as "out of focus." Radial blur from the screen center reads as "speed." For a browser game with JPEG streaming, radial blur is the single highest-impact shader effect to implement. Apply as a fragment shader: calculate distance from center for each pixel, blur amount proportional to distance * speed.
+
+---
+
+### 2. AUDIO: The Invisible 50% of Game Feel
+
+Players consistently underestimate how much audio contributes to satisfaction. In blind tests, the same racing game with good audio is rated as having "better controls" and "faster speed" than with mediocre audio, even though the visuals and controls are identical.
+
+**Engine pitch tracking RPM is the baseline (already implemented).** The layered oscillator approach in useEngineSound.ts (fundamental + 2nd/3rd harmonics + sub-bass) is solid. The key enhancement from Gran Turismo 7 and Forza: add a LOAD component. A car under throttle at 4000 RPM sounds different than a car coasting at 4000 RPM. The difference is intake/exhaust resonance. Implementation: when throttle > 0.5, boost the 2nd harmonic gain by 30% and increase the lowpass filter frequency by 20%. This makes acceleration SOUND more effortful.
+
+**Exhaust crackle/pop on throttle lift-off (already implemented).** The crackle burst in useEngineSound.ts triggers when throttle drops from >0.4 to <0.1 at high RPM. Enhancement from Need for Speed games: add a brief DOWNSHIFT BLIP sound between crackles. When the gear decreases (gear change event), play a very short (30ms) sine burst at a lower frequency (200-300 Hz) that simulates the rev-match downshift sound.
+
+**Tire screech modulation is more important than tire screech volume.** Currently, screech volume is proportional to steer angle. Enhancement from Ridge Racer: modulate the screech FILTER FREQUENCY based on slip angle. Low slip angle (mild turn) = higher-pitched screech (3000-4000 Hz). High slip angle (near-spin) = lower-pitched, rougher screech (1500-2500 Hz). This gives audio feedback about how close you are to losing control.
+
+**Rule**: For tire screech, modulate bandpass center frequency inversely with slip angle. Mild turns: 3500 Hz (clean squeal). Aggressive turns: 2000 Hz (rough scrub). This provides audio-only information about traction state that players learn subconsciously.
+
+**Wind/air rush noise at speed is universally present in great racing games.** Currently not implemented. At speeds above 80 km/h, add a filtered white noise layer that increases in volume and highpass frequency with speed. At 80 km/h: quiet, 1000 Hz highpass. At 200 km/h: louder, 2000 Hz highpass (thinner, windier). This is the constant backdrop that makes silence at low speed feel peaceful and high speed feel intense.
+
+**Impact sounds need a visual-audio sync tighter than 50ms.** The current playImpact() function has good layering (low thud + mid crunch + sine punch). Key finding: players perceive collisions as more impactful when the audio leads the visual by 10-20ms. Since our collision detection comes from the server (adding 30-100ms of latency), the collision sound is already "late" relative to the visual impact. Mitigation: trigger a shorter, sharper pre-impact sound on the client side when the player's speed changes rapidly (delta > 20 km/h between frames), even before the server confirms the collision.
+
+**Rule**: For collision audio in a streamed game, use client-side speed-delta detection as a pre-trigger. If `abs(speed_now - speed_prev) > 20`, play a short 30ms impact click immediately. When the server collision event arrives 50-100ms later, play the full thud. This creates a two-stage impact: click (client-predicted) + thud (server-confirmed) that feels instantaneous.
+
+**The "whoosh" on passing/being passed.** Burnout Paradise's signature sound: a dramatic wind whoosh when AI cars pass you or you pass them. Creates a visceral sense of close racing. Implementation: when the gap timer changes sign (you overtake or get overtaken), play a 200ms shaped white noise burst through a bandpass at 800 Hz, panned to the side the AI is on (left or right based on relative position).
+
+---
+
+### 3. CONTROLS: Tight vs. Floaty
+
+The #1 complaint about bad racing games is "floaty controls." The #1 praise for good ones is "tight, responsive controls." This is about input latency AND input feedback.
+
+**Input latency below 100ms feels "tight." Above 150ms feels "floaty."** Shadow Driver's current latency stack is 80-220ms depending on tunnel type. This means with Cloudflare tunnels, the game will always feel somewhat floaty. The client-side prediction (steering prediction overlay, frame extrapolation) is the correct mitigation. Key finding: visual prediction is more important than control prediction. If the SCREEN responds instantly to input even though the car takes 100ms to respond, the brain accepts it.
+
+**Rule**: When total input-to-visual latency exceeds 100ms, prioritize client-side visual prediction over server-side latency reduction. The brain's tolerance for visual-motor lag is ~100ms, but visual prediction (CSS transforms) effectively brings the visual response to <16ms while the actual control response stays at 100-200ms. Players perceive this as "tight."
+
+**Progressive input ramping with instant visual feedback is the gold standard.** Already implemented: throttle ramps over ~80ms, brake over ~60ms, steering over ~40ms. The HUD input bars (THR/BRK/STR) update instantly from local input. Key enhancement: the input bars should have a TWO-LAYER display: the background bar shows the LOCAL input (instant), and a foreground bar shows the SERVER-CONFIRMED input (delayed). This gives the player a visual sense of "the car is catching up to my input."
+
+**Countersteer assist makes keyboard racing viable.** Already implemented (smoothstep-scaled correction based on heading vs velocity divergence). This is the single most important physics feature for keyboard racing. Without it, keyboard steering is binary and overshoot-prone. Gran Turismo 7 and Forza both have aggressive stability control at lower difficulties.
+
+**Steering should feel HEAVIER at speed, not just less responsive.** The current speed-dependent steering limit (0.08 + 0.42 * exp(-speed/70)) reduces the maximum steer angle at speed. Enhancement from GT7: also slow the steering RAMP at speed. At 50 km/h, steering reaches full deflection in 40ms. At 200 km/h, it should take 80-100ms. This makes high-speed steering feel weighty and deliberate rather than just limited.
+
+**Rule**: Scale steering ramp time with speed: `ramp_ms = 40 + speed * 0.3` (40ms at idle, 100ms at 200 km/h). This creates a weight/inertia feel that players describe as "solid handling" rather than "digital steering."
+
+---
+
+### 4. GAME FLOW: The "One More Race" Loop
+
+Every addictive racing game nails the transition from race end to race start. The friction must be near-zero.
+
+**Trackmania's genius: instant restart.** The R key immediately resets the track. No menu, no confirmation, no loading screen. The time between "I messed up" and "I'm trying again" is under 500ms. This is the single most important retention mechanic in Trackmania, and it is why speedrunners can attempt a track 500 times in an hour. Shadow Driver has R-to-respawn during races but not instant-restart-from-beginning. The server needs a "reset race" command that teleports vehicles to start positions and resets timers WITHOUT full cleanup.
+
+**Rule**: The restart loop must be under 1 second. Every second of delay between "race over" and "racing again" costs players. Trackmania proves that instant restart > beautiful post-race screens. Offer both: instant restart (R or Enter) AND detailed results (click through).
+
+**Mario Kart's rubber-banding keeps every race competitive.** Players hate winning by 30 seconds or losing by 30 seconds. Close races are fun; blowouts are boring. The AI rubber-banding in Shadow Driver (distance-based speed adjustment, per-difficulty) is the right approach. Key finding from Mario Kart analysis: rubber-banding should be INVISIBLE. If players notice the AI slowing down for them, it feels patronizing. If they notice the AI catching up, it feels unfair. The solution: adjust AI MISTAKE FREQUENCY rather than AI speed. When the player is behind, the AI makes more mistakes (wider lines, late braking). When the player is ahead, the AI makes fewer mistakes. Mistakes feel organic; speed changes feel artificial.
+
+**Rule**: For rubber-banding, adjust AI mistake frequency and cornering precision, NOT speed. Speed-based rubber-banding is detectable and feels unfair. Mistake-based rubber-banding feels like the AI is "having a bad lap" or "finding its groove," which reads as natural variation.
+
+**The "photo finish" is the most memorable moment in any racing game.** When the gap is less than 0.5 seconds on the final straight, something special should happen. Burnout does slow-motion. Mario Kart does dramatic camera angles. For Shadow Driver: when gap < 1.0s on the last checkpoint, trigger a special audio/visual treatment: dramatic music swell, screen-edge glow, and a dramatic "PHOTO FINISH!" text overlay. If the final gap is < 0.3s, show it as a highlight in the results.
+
+**Personal best chasing is the deepest retention loop.** Trackmania players will run the same track 1000 times chasing their PB by 0.1 seconds. The key is IMMEDIATE FEEDBACK: show the time delta vs PB at every checkpoint (not just at the end). "You are 0.3s ahead of your best!" at each checkpoint creates tension and motivation throughout the lap. Currently, Shadow Driver shows personal bests on the results screen. Enhancement: show live PB comparison DURING the race, at each checkpoint.
+
+**Rule**: Show PB split times at every checkpoint during the race, not just total time at the end. The micro-drama of "I'm 0.2s ahead at checkpoint 3!" and "I lost 0.1s in that corner!" creates engagement that total-time-only comparison cannot.
+
+---
+
+### 5. VISUAL JUICE: The Small Things That Feel Big
+
+"Juice" is game designer shorthand for visual feedback that makes actions feel satisfying. Every action should produce a visible, audible reaction.
+
+**Screen shake on impact (already implemented, enhance it).** Current: 6px magnitude, 250ms duration on collision. Enhancement from Burnout: shake should be DIRECTIONAL. If you hit something on your left, the camera jolts right (and vice versa). If you hit something head-on, the camera jolts backward (translateY positive). Direction makes the impact feel physical rather than random. Also: reduce shake magnitude but increase frequency for small bumps (2px, 100ms, high-frequency jitter). Reserve large shakes (8px, 300ms) for serious crashes.
+
+**Rule**: Directional screen shake > random shake. Use the collision normal vector (direction of impact) to determine shake direction. Head-on = camera pulls back. Side = camera jolts sideways. Rear-end = camera pushes forward.
+
+**Gear shift flash (already implemented, enhance it).** Current: brief white flash overlay decaying over 150ms. Enhancement from Need for Speed Underground: add a matching AUDIO pop (already have engine crackle) and a brief RPM gauge needle bounce in the ArcSpeedometer. The visual-audio sync of gear shift is a major contributor to the "mechanical" feel of a car.
+
+**Drift sparks and smoke (already implemented).** ParticleOverlay.tsx handles collision sparks, tire smoke, and rain. Enhancement from Ridge Racer: during active drifts, add a TRAIL effect -- orange/yellow spark particles should emit from the REAR of the vehicle (bottom-center of screen) and persist for 0.5-1.0 seconds, creating a visual trail of the drift arc. This makes drifts LOOK spectacular even in replays.
+
+**Checkpoint flash: celebrate every checkpoint.** When hitting a checkpoint, briefly flash the screen edges green (similar to collision flash but green, 100ms, lower intensity). Play a short "ding" sound (already have countdown beeps infrastructure). Show "+0.3s" or "-0.2s" vs best lap at that checkpoint. This turns every checkpoint into a micro-reward moment.
+
+**Rule**: Every gameplay-significant event should produce at least TWO types of feedback: visual + audio. Checkpoint = green flash + ding. Collision = red flash + thud. Overtake = whoosh + score popup. Drift = sparks + tire screech. Double feedback makes events feel REAL.
+
+**Near-miss visual effect.** When the player passes within 3m of the AI car (or any static object at high speed), briefly flash white streaks across the screen edges for 100ms. This is the "near miss" effect from Burnout Paradise's "Near Miss" scoring system. It makes close racing feel dangerous and exciting. Can be detected client-side by comparing player and AI positions from telemetry data.
+
+---
+
+### 6. WHAT EACH GAME TEACHES US
+
+**Forza Horizon 5 -- Accessibility + Discovery.** Players love FH5 because it makes racing accessible to non-racing-game players. The open world, seasonal events, car collecting, and photo mode create multiple engagement loops beyond just racing. For Shadow Driver: we cannot replicate open world, but we CAN replicate the accessibility (easy difficulty that genuinely helps), the photo mode (pause + cinematic camera), and the post-race celebration (victory screen with stats and sharing).
+
+**Mario Kart 8 -- Fairness Through Chaos.** Items create "comeback moments" that keep losing players engaged. The genius is that losing players get BETTER items (blue shell, bullet bill), making every race feel winnable until the last second. For Shadow Driver: our rubber-banding serves the same purpose, but we should add VISIBLE comeback mechanics. When the player is far behind, give them a temporary speed boost (nitro) with a visual effect. Frame it as "drafting" or "slipstream" -- it is rubber-banding, but it feels earned.
+
+**Trackmania -- Purity of Repetition.** No items, no opponents in the traditional sense (ghosts only), no progression gates. Just you, the track, and your time. The genius is the FRICTION-FREE RETRY. Every millisecond of menu navigation is a player who might quit instead of retrying. For Shadow Driver: the instant restart (R key) and "Race Again" button are critical. Also: show the player their improvement trajectory. "Your times: 1:23, 1:21, 1:19, 1:18" -- seeing the downward trend is deeply satisfying.
+
+**Gran Turismo 7 -- The "Feel."** GT7 players use words like "weight," "connection," "feedback" to describe why it feels good. This comes from: (a) suspension compression visible in camera movement (camera dips on braking, rises on acceleration), (b) tire noise changing with surface (asphalt vs dirt vs curbs), (c) steering resistance increasing with lateral load. For Shadow Driver: we can approximate (a) with CSS transforms -- on braking, camera tilts forward 0.5-1 degree (rotate around X axis). On acceleration, tilts back. This is separate from the existing pitch tilt and should be very subtle.
+
+**Need for Speed (Underground/Most Wanted) -- Style Points.** NFS made driving LOOK cool with neon underglow, drift cameras, and dramatic pursuits. The key lesson: players want to feel like the STAR of an action movie. For Shadow Driver: the drift scoring system serves this purpose. Enhancement: when a drift score exceeds 1000 points, play a dramatic sound sting and flash "INSANE DRIFT!" instead of just showing the number. Tiered reactions make high scores feel celebrated.
+
+**Burnout Paradise -- Destruction as Fun.** Burnout proved that crashing can be as fun as racing. The Crash Mode camera (slow-mo, rotating camera around the wreck) turned failures into spectacular moments. For Shadow Driver: we cannot do slow-mo server-side easily, but we CAN make crashes more dramatic. On large collisions (intensity > 2000), briefly desaturate the screen (CSS grayscale filter, 50%, 200ms) and increase screen shake. This makes big crashes feel cinematic rather than just frustrating.
+
+**Wipeout -- Speed Through Proximity.** Wipeout's tracks have walls and barriers CLOSE to the vehicle, creating enormous apparent angular velocity in the periphery. The track design IS the speed illusion. For Shadow Driver: we cannot control CARLA's track geometry, but we CAN choose camera positions that are closer to the road surface. A bumper/hood camera will always feel faster than a chase camera because road markings streak past faster. Emphasize the hood cam option.
+
+**Ridge Racer -- Drift Satisfaction.** Ridge Racer made drifting feel EASY and REWARDING. Initiating a drift was simple (brake-turn-throttle), maintaining it was intuitive, and the reward was clear (speed boost on drift exit). For Shadow Driver: the drift system is already solid. Enhancement from Ridge Racer: add a brief SPEED BOOST when exiting a successful drift (5% speed increase for 1 second). This makes drifting feel like a SKILL that gives an ADVANTAGE, not just a style choice.
+
+**Slow Roads -- Zen Accessibility.** Slow Roads went viral because it loaded instantly in a browser, required no account, and was immediately enjoyable. The procedural terrain and chill vibes created a "digital screensaver you can drive through." For Shadow Driver: our browser-native advantage is the same. The lesson is: the fewer clicks between URL and gameplay, the more viral the game. Target: URL click to racing in under 5 seconds for returning players.
+
+**GeoGuessr -- Daily Ritual + Competition.** GeoGuessr's daily challenge creates a shared social experience (everyone plays the same challenge on the same day) and daily return visits. For Shadow Driver: the daily track challenge (already in TODO) is the direct equivalent. Enhancement: show a "X players have completed today's challenge" counter on the landing page. Social proof + competition + FOMO = retention.
+
+**Rule**: Every great racing game is great for a DIFFERENT reason. Shadow Driver should pick the most implementable lesson from each: instant restart (Trackmania), close racing drama (Mario Kart), camera weight (GT7), drift reward (Ridge Racer), crash spectacle (Burnout), speed proximity (Wipeout), style celebration (NFS), zen accessibility (Slow Roads), daily ritual (GeoGuessr).
+
+---
+
+### 7. DIFFICULTY CURVE AND FAIRNESS
+
+**Easy mode should be ACTUALLY easy.** Many racing games make "Easy" still too hard for casual players. Forza Horizon 5's assisted driving modes (auto-steer, auto-brake) let complete beginners enjoy the game. For Shadow Driver: Easy difficulty should have stronger countersteer assist (wider correction range, higher correction force), automatic braking before sharp turns (if speed > X and upcoming turn angle > Y, auto-apply 30% brake), and much more aggressive AI rubber-banding.
+
+**Hard mode should be UNFAIR in an exciting way.** Hard difficulty should not just make the AI faster -- it should make the AI AGGRESSIVE. Cut you off, take the inside line, brake late. This creates drama and clip-worthy moments. The current hard mode (55% over speed limit, aggressive lane changes) is good; enhance it with "AI blocks your pass" behavior when the player is within 5m behind.
+
+**The perfect difficulty is "I lost but I almost won."** Players quit when they either (a) win too easily (boring) or (b) lose by too much (hopeless). The ideal outcome distribution is: win 40% of races, lose by <2 seconds 30% of races, lose by >5 seconds 30% of races. The AI should adapt to target this distribution over multiple races.
+
+**Rule**: Track win/loss ratio across sessions (localStorage). If the player is winning >60% of races at current difficulty, subtly increase AI performance. If winning <30%, subtly decrease it. This hidden adaptation (separate from the explicit difficulty selector) keeps every race feeling competitive.
+
+---
+
+### 8. MOMENTS THAT MAKE PEOPLE SHARE CLIPS
+
+**Close finishes (gap < 1s).** The most shared racing game clips are photo finishes. Make them special: dramatic music, screen effects, slow-mo text. Show the gap to 3 decimal places ("You won by 0.034 seconds!").
+
+**Spectacular drifts.** Long drifts around multiple corners, especially at high speed. The drift scoring system creates these moments; the celebration (INSANE DRIFT!, screen effects) makes them clip-worthy.
+
+**Impossible saves.** When a player almost crashes but recovers. Detection: speed drops > 50% then recovers within 2 seconds, OR player goes off the racing line by > 5m then returns. Show "NICE SAVE!" text popup. These moments feel heroic.
+
+**Overtaking on the last corner.** Winning a position in the final moments of a race. Detection: player goes from P2 to P1 in the last 20% of the final lap. Show "LAST LAP OVERTAKE!" celebration.
+
+**Rule**: Identify and CELEBRATE dramatic moments automatically. Players share moments that are already visually/aurally dramatic. The game's job is to detect these moments and amplify them with appropriate effects. Detection can be simple (threshold checks on telemetry); celebration must be visually compelling (text + effects + sound).
+
+---

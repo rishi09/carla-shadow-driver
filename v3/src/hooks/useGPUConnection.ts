@@ -547,6 +547,13 @@ export function useGPUConnection(): UseGPUConnectionReturn {
     if (timeOfDay) {
       msg.time_of_day = timeOfDay;
     }
+    // Include player name for social presence reporting
+    try {
+      const storedName = localStorage.getItem('shadow_driver_player_name');
+      msg.player_name = storedName?.trim() || 'Anonymous';
+    } catch {
+      msg.player_name = 'Anonymous';
+    }
     wsRef.current.send(JSON.stringify(msg));
   }, []);
 

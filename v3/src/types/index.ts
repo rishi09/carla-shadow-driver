@@ -21,6 +21,22 @@ export interface GamepadControls {
   handbrake: boolean;
 }
 
+/** AI emotional state sent from server */
+export interface AIEmotion {
+  /** Internal state name: 'confident' | 'aggressive' | 'nervous' | 'desperate' | 'respectful' */
+  state: string;
+  /** Unicode emoji character */
+  emoji: string;
+  /** Short uppercase label (e.g. 'AGGRESSIVE') */
+  label: string;
+  /** Hex color string (e.g. '#f44336') */
+  color: string;
+  /** Current blended speed factor (1.0 = normal) */
+  speed_factor: number;
+  /** Current blended aggression level (0.0-1.0) */
+  aggression: number;
+}
+
 /** Race state received from server */
 export interface RaceState {
   type: 'race_state';
@@ -43,6 +59,7 @@ export interface RaceState {
     chain: number;
   };
   total_drift_score?: number;
+  ai_emotion?: AIEmotion;
   weather_mood?: {
     mood: 'CALM' | 'BUILDING' | 'TENSE' | 'DRAMATIC' | 'EPIC';
     intensity: number;
@@ -168,6 +185,21 @@ export type ServerMessage = RaceState | RaceFinished | HandshakeAck | PerfStats 
 
 /** GPU provisioning states */
 export type GPUProvisioningState = 'idle' | 'starting' | 'running' | 'stopping' | 'error';
+
+/** Client-to-server message types */
+export type ClientMessageType =
+  | 'handshake'
+  | 'control'
+  | 'start_race'
+  | 'switch_model'
+  | 'ping'
+  | 'respawn'
+  | 'camera_mode'
+  | 'restart_race'
+  | 'latency_report'
+  | 'webrtc_offer'
+  | 'pause'
+  | 'resume';
 
 /** WebSocket connection states */
 export type WebSocketConnectionState = 'disconnected' | 'connecting' | 'connected';
