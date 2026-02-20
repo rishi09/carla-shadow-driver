@@ -93,6 +93,14 @@ import { CursorTrail } from '../components/CursorTrail.tsx';
 import { useStockMarketWeather } from '../hooks/useStockMarketWeather.ts';
 import { useHeartbeatAudio } from '../hooks/useHeartbeatAudio.ts';
 import { useAICopycat } from '../hooks/useAICopycat.ts';
+import { useImpactReplay } from '../hooks/useImpactReplay.ts';
+import { useBackseatDriver } from '../hooks/useBackseatDriver.ts';
+import { useAINarration } from '../hooks/useAINarration.ts';
+import { useNPCSpectators } from '../hooks/useNPCSpectators.ts';
+import { useRaceMemory } from '../hooks/useRaceMemory.ts';
+import { useAIDiary } from '../hooks/useAIDiary.ts';
+import { useReverseRace } from '../hooks/useReverseRace.ts';
+import { useAIEvolution } from '../hooks/useAIEvolution.ts';
 import { useEffect, useRef } from 'react';
 
 type RaceView = 'setup' | 'pre_race' | 'racing' | 'results';
@@ -262,6 +270,50 @@ export function Race() {
     aiPosition: aiPos,
     isColliding: (gpu.raceState?.collisions?.length ?? 0) > 0,
   });
+
+  // Batch 7: Impact Replay, Backseat Driver, AI Narration, NPC Spectators, Race Memory, AI Diary, Reverse Race, AI Evolution
+  const impactReplay = useImpactReplay({ enabled: isRacing });
+  const [backseatEnabled, setBackseatEnabled] = useState(false);
+  const backseatDriver = useBackseatDriver({
+    enabled: backseatEnabled && isRacing,
+    speed: gpu.raceState?.player?.speed_kmh ?? 0,
+    isReversing: false,
+    collisionCount: gpu.raceState?.collisions?.length ?? 0,
+    isOffRoad: false,
+    gapToAI: gpu.raceState?.player?.gap_seconds ?? 0,
+    steeringInput: gpu.raceState?.player?.steer ?? 0,
+  });
+  const [narrationEnabled, setNarrationEnabled] = useState(false);
+  const aiNarration = useAINarration({
+    enabled: narrationEnabled && isRacing,
+    aiSpeed: gpu.raceState?.ai?.speed_kmh ?? 0,
+    aiPosition: (() => {
+      const gap = gpu.raceState?.player?.gap_seconds;
+      if (gap == null) return 'neck-and-neck' as const;
+      if (gap > 1) return 'behind' as const;
+      if (gap < -1) return 'ahead' as const;
+      return 'neck-and-neck' as const;
+    })(),
+    playerCollisions: gpu.raceState?.collisions?.length ?? 0,
+    currentLap: gpu.raceState?.player?.lap ?? 1,
+    totalLaps: gpu.raceState?.player?.total_laps ?? 3,
+    raceTimeMs: (gpu.raceState?.player?.race_time ?? 0) * 1000,
+  });
+  const [spectatorsEnabled, setSpectatorsEnabled] = useState(false);
+  const npcSpectators = useNPCSpectators({
+    enabled: spectatorsEnabled && isRacing,
+    speed: gpu.raceState?.player?.speed_kmh ?? 0,
+    collisionCount: gpu.raceState?.collisions?.length ?? 0,
+    gapToAI: gpu.raceState?.player?.gap_seconds ?? 0,
+    isLeading: (gpu.raceState?.player?.gap_seconds ?? 0) < 0,
+    currentLap: gpu.raceState?.player?.lap ?? 1,
+    isDrifting: (gpu.raceState?.drift?.isActive ?? false),
+  });
+  const raceMemory = useRaceMemory();
+  const aiDiary = useAIDiary();
+  const reverseRace = useReverseRace();
+  const [evolutionEnabled, setEvolutionEnabled] = useState(false);
+  const aiEvolution = useAIEvolution(evolutionEnabled);
 
   const [twitchChannel, setTwitchChannel] = useState<string | null>(twitchChannelParam);
   const twitchChat = useTwitchChat(twitchChannel);
@@ -745,6 +797,10 @@ export function Race() {
     // Use the strongest collision for shake intensity
     // sqrt scaling so even moderate collisions (200-500) produce noticeable shake
     const maxIntensity = Math.max(...collisions.map(c => c.intensity));
+
+    // Trigger slow-mo impact replay on big collisions
+    impactReplay.triggerImpact(maxIntensity);
+
     const magnitude = Math.min(15, Math.sqrt(maxIntensity) * 0.5);
     // Duration scales with magnitude: 200ms for light taps, up to 500ms for heavy impacts
     const shakeDuration = 200 + Math.min(300, magnitude * 20);
@@ -1676,6 +1732,43 @@ export function Race() {
       aiPersonality.triggerTrashTalk(playerWon ? 'lose' : 'win');
       aiPersonality.recordRaceResult(playerWon);
 
+      // Record race memory (persistent race history)
+      if (raceConfigRef.current && gpu.raceFinished.player_time != null) {
+        const memConfig = raceConfigRef.current;
+        const memSettings = lastRaceSettingsRef.current;
+        raceMemory.addMemory({
+          track: memConfig.track,
+          winner: playerWon ? 'player' : 'ai',
+          playerTime: gpu.raceFinished.player_time,
+          aiTime: gpu.raceFinished.ai_time ?? 0,
+          gap: Math.abs((gpu.raceFinished.player_time ?? 0) - (gpu.raceFinished.ai_time ?? 0)),
+          weather: memSettings?.weather ?? 'clear',
+          laps: memConfig.laps,
+          collisions: 0,
+          topSpeed: gpu.raceFinished.player_max_speed ?? 0,
+        });
+      }
+
+      // AI diary entry (AI writes about the race)
+      if (raceConfigRef.current) {
+        aiDiary.addRaceEntry({
+          track: raceConfigRef.current.track,
+          playerWon,
+          raceTimeMs: (gpu.raceFinished.player_time ?? 0) * 1000,
+          collisions: 0,
+          wasClose: gpu.raceFinished.ai_time != null && gpu.raceFinished.player_time != null
+            ? Math.abs(gpu.raceFinished.player_time - gpu.raceFinished.ai_time) < 2000
+            : false,
+          playerCrashed: false,
+          laps: raceConfigRef.current.laps,
+        });
+      }
+
+      // Evolve AI population (if evolution mode is enabled)
+      if (aiEvolution.autoEvolve) {
+        aiEvolution.evolve();
+      }
+
       // Win/loss commentary subtitle
       subtitleCommentary.triggerCommentary(playerWon ? 'win' : 'loss');
 
@@ -1999,6 +2092,18 @@ export function Race() {
           stockMarketMood={stockWeather.marketMood}
           copycatEnabled={copycatEnabled}
           onToggleCopycat={setCopycatEnabled}
+          backseatEnabled={backseatEnabled}
+          onToggleBackseat={setBackseatEnabled}
+          narrationEnabled={narrationEnabled}
+          onToggleNarration={setNarrationEnabled}
+          spectatorsEnabled={spectatorsEnabled}
+          onToggleSpectators={setSpectatorsEnabled}
+          reverseRaceEnabled={reverseRace.enabled}
+          onToggleReverseRace={reverseRace.setEnabled}
+          aiEvolutionGen={aiEvolution.currentGeneration}
+          evolutionEnabled={evolutionEnabled}
+          onToggleEvolution={setEvolutionEnabled}
+          totalRaces={raceMemory.totalRaces}
         />
       )}
 
@@ -2422,6 +2527,46 @@ export function Race() {
 
           {/* Cursor trail (post-race fun) */}
           <CursorTrail enabled={view === 'results'} />
+
+          {/* Impact replay slow-motion overlay */}
+          {impactReplay.isReplaying && (
+            <div className="absolute inset-0 pointer-events-none z-30" style={impactReplay.replayStyle} />
+          )}
+          {impactReplay.impactText && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-35">
+              <div style={impactReplay.impactTextStyle}>
+                <span className="text-3xl sm:text-5xl font-black tracking-wider">{impactReplay.impactText}</span>
+              </div>
+            </div>
+          )}
+
+          {/* Backseat driver commentary */}
+          {backseatDriver.currentComment && (
+            <div className="absolute bottom-40 left-1/2 -translate-x-1/2 z-40 pointer-events-none">
+              <div className="bg-black/70 backdrop-blur-sm rounded-lg px-4 py-2 border border-orange-500/30 max-w-sm">
+                <p className="text-sm text-orange-300 italic text-center">{backseatDriver.currentComment}</p>
+              </div>
+            </div>
+          )}
+
+          {/* AI inner monologue */}
+          {aiNarration.currentThought && (
+            <div className="absolute top-24 right-4 z-40 pointer-events-none max-w-xs">
+              <div className="bg-black/70 backdrop-blur-sm rounded-lg px-3 py-2 border border-purple-500/30">
+                <div className="text-[10px] text-purple-400/70 font-mono uppercase tracking-wider mb-0.5">AI Thinking...</div>
+                <p className="text-xs text-purple-300 italic">{aiNarration.currentThought}</p>
+              </div>
+            </div>
+          )}
+
+          {/* NPC Spectator crowd chant */}
+          {npcSpectators.chantText && (
+            <div className="absolute bottom-48 left-1/2 -translate-x-1/2 z-35 pointer-events-none">
+              <div className="bg-black/50 backdrop-blur-sm rounded-full px-4 py-1.5 border border-white/20">
+                <p className="text-xs text-white/70 font-bold uppercase tracking-widest text-center">{npcSpectators.chantText}</p>
+              </div>
+            </div>
+          )}
 
           {/* Ambient Light indicator (room brightness -> weather) */}
           {ambientLight.isActive && (gpu.raceState?.race_status === 'racing' || gpu.raceState?.race_status === 'countdown') && (

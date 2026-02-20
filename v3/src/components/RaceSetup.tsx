@@ -188,9 +188,21 @@ interface RaceSetupProps {
   copycatEnabled?: boolean;
   /** Toggle AI copycat mode on/off */
   onToggleCopycat?: (on: boolean) => void;
+  backseatEnabled?: boolean;
+  onToggleBackseat?: (on: boolean) => void;
+  narrationEnabled?: boolean;
+  onToggleNarration?: (on: boolean) => void;
+  spectatorsEnabled?: boolean;
+  onToggleSpectators?: (on: boolean) => void;
+  reverseRaceEnabled?: boolean;
+  onToggleReverseRace?: (on: boolean) => void;
+  aiEvolutionGen?: number;
+  evolutionEnabled?: boolean;
+  onToggleEvolution?: (on: boolean) => void;
+  totalRaces?: number;
 }
 
-export function RaceSetup({ onStartRace, onBack, onStartDailyChallenge, quickstart, isConnected, urlSettings, dareTime, challengeData, isCargoMode, onToggleCargoMode, isBlindfoldMode, onToggleBlindfoldMode, voiceCommandsSupported, voiceCommandsEnabled, onToggleVoiceCommands, ambientLightSupported, ambientLightEnabled, onToggleAmbientLight, headTrackingSupported, headTrackingEnabled, onToggleHeadTracking, twitchChannel, onSetTwitchChannel, phoneSteeringSupported, phoneSteeringEnabled, onTogglePhoneSteering, synthwaveEnabled, onToggleSynthwave, timeZoneEnabled, timeZoneLabel, onToggleTimeZone, drunkAIEnabled, onToggleDrunkAI, aiGrudgeMood, aiGrudgeMessage, binauralEnabled, onToggleBinaural, aiNemesisName, aiNemesisTaunt, stockWeatherEnabled, onToggleStockWeather, stockMarketMood, copycatEnabled, onToggleCopycat }: RaceSetupProps) {
+export function RaceSetup({ onStartRace, onBack, onStartDailyChallenge, quickstart, isConnected, urlSettings, dareTime, challengeData, isCargoMode, onToggleCargoMode, isBlindfoldMode, onToggleBlindfoldMode, voiceCommandsSupported, voiceCommandsEnabled, onToggleVoiceCommands, ambientLightSupported, ambientLightEnabled, onToggleAmbientLight, headTrackingSupported, headTrackingEnabled, onToggleHeadTracking, twitchChannel, onSetTwitchChannel, phoneSteeringSupported, phoneSteeringEnabled, onTogglePhoneSteering, synthwaveEnabled, onToggleSynthwave, timeZoneEnabled, timeZoneLabel, onToggleTimeZone, drunkAIEnabled, onToggleDrunkAI, aiGrudgeMood, aiGrudgeMessage, binauralEnabled, onToggleBinaural, aiNemesisName, aiNemesisTaunt, stockWeatherEnabled, onToggleStockWeather, stockMarketMood, copycatEnabled, onToggleCopycat, backseatEnabled, onToggleBackseat, narrationEnabled, onToggleNarration, spectatorsEnabled, onToggleSpectators, reverseRaceEnabled, onToggleReverseRace, aiEvolutionGen, evolutionEnabled, onToggleEvolution, totalRaces }: RaceSetupProps) {
   const [selectedTrack, setSelectedTrack] = useState(urlSettings?.track || DEFAULT_TRACK);
   const [selectedWeather, setSelectedWeather] = useState(urlSettings?.weather || DEFAULT_WEATHER);
   const [selectedLaps, setSelectedLaps] = useState(urlSettings?.laps || DEFAULT_LAPS);
@@ -1175,6 +1187,103 @@ export function RaceSetup({ onStartRace, onBack, onStartDailyChallenge, quicksta
             {aiNemesisTaunt && (
               <p className="text-white/50 text-xs italic">&ldquo;{aiNemesisTaunt}&rdquo;</p>
             )}
+          </div>
+        )}
+
+        {/* Backseat Driver toggle */}
+        {onToggleBackseat && (
+          <div className="mb-4">
+            <button onClick={() => onToggleBackseat(!backseatEnabled)} className={`w-full flex items-center gap-3 py-3 px-4 rounded-lg border text-left transition-all ${backseatEnabled ? 'bg-orange-500/10 border-orange-500/40' : 'bg-black/60 border-white/10 hover:border-white/20'}`}>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <span className={`text-sm font-medium ${backseatEnabled ? 'text-orange-400' : 'text-white'}`}>Backseat Driver</span>
+                  {backseatEnabled && <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded border border-orange-500/40 bg-orange-500/20 text-orange-400">ON</span>}
+                </div>
+                <p className="text-white/40 text-xs mt-0.5">A passenger critiques your every move</p>
+              </div>
+              <div className={`w-10 h-5 rounded-full relative transition-colors ${backseatEnabled ? 'bg-orange-500/40' : 'bg-white/10'}`}>
+                <div className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${backseatEnabled ? 'left-[22px] bg-orange-400' : 'left-0.5 bg-white/40'}`} />
+              </div>
+            </button>
+          </div>
+        )}
+
+        {/* AI Inner Monologue toggle */}
+        {onToggleNarration && (
+          <div className="mb-4">
+            <button onClick={() => onToggleNarration(!narrationEnabled)} className={`w-full flex items-center gap-3 py-3 px-4 rounded-lg border text-left transition-all ${narrationEnabled ? 'bg-purple-500/10 border-purple-500/40' : 'bg-black/60 border-white/10 hover:border-white/20'}`}>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <span className={`text-sm font-medium ${narrationEnabled ? 'text-purple-400' : 'text-white'}`}>AI Inner Monologue</span>
+                  {narrationEnabled && <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded border border-purple-500/40 bg-purple-500/20 text-purple-400">ON</span>}
+                </div>
+                <p className="text-white/40 text-xs mt-0.5">See what the AI is thinking during the race</p>
+              </div>
+              <div className={`w-10 h-5 rounded-full relative transition-colors ${narrationEnabled ? 'bg-purple-500/40' : 'bg-white/10'}`}>
+                <div className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${narrationEnabled ? 'left-[22px] bg-purple-400' : 'left-0.5 bg-white/40'}`} />
+              </div>
+            </button>
+          </div>
+        )}
+
+        {/* NPC Spectators toggle */}
+        {onToggleSpectators && (
+          <div className="mb-4">
+            <button onClick={() => onToggleSpectators(!spectatorsEnabled)} className={`w-full flex items-center gap-3 py-3 px-4 rounded-lg border text-left transition-all ${spectatorsEnabled ? 'bg-teal-500/10 border-teal-500/40' : 'bg-black/60 border-white/10 hover:border-white/20'}`}>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <span className={`text-sm font-medium ${spectatorsEnabled ? 'text-teal-400' : 'text-white'}`}>NPC Spectators</span>
+                  {spectatorsEnabled && <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded border border-teal-500/40 bg-teal-500/20 text-teal-400">ON</span>}
+                </div>
+                <p className="text-white/40 text-xs mt-0.5">Virtual crowd reacts during the race</p>
+              </div>
+              <div className={`w-10 h-5 rounded-full relative transition-colors ${spectatorsEnabled ? 'bg-teal-500/40' : 'bg-white/10'}`}>
+                <div className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${spectatorsEnabled ? 'left-[22px] bg-teal-400' : 'left-0.5 bg-white/40'}`} />
+              </div>
+            </button>
+          </div>
+        )}
+
+        {/* Reverse Race toggle */}
+        {onToggleReverseRace && (
+          <div className="mb-4">
+            <button onClick={() => onToggleReverseRace(!reverseRaceEnabled)} className={`w-full flex items-center gap-3 py-3 px-4 rounded-lg border text-left transition-all ${reverseRaceEnabled ? 'bg-rose-500/10 border-rose-500/40' : 'bg-black/60 border-white/10 hover:border-white/20'}`}>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <span className={`text-sm font-medium ${reverseRaceEnabled ? 'text-rose-400' : 'text-white'}`}>Reverse Race</span>
+                  {reverseRaceEnabled && <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded border border-rose-500/40 bg-rose-500/20 text-rose-400">ON</span>}
+                </div>
+                <p className="text-white/40 text-xs mt-0.5">Run the track backwards</p>
+              </div>
+              <div className={`w-10 h-5 rounded-full relative transition-colors ${reverseRaceEnabled ? 'bg-rose-500/40' : 'bg-white/10'}`}>
+                <div className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${reverseRaceEnabled ? 'left-[22px] bg-rose-400' : 'left-0.5 bg-white/40'}`} />
+              </div>
+            </button>
+          </div>
+        )}
+
+        {/* AI Evolution toggle */}
+        {onToggleEvolution && (
+          <div className="mb-4">
+            <button onClick={() => onToggleEvolution(!evolutionEnabled)} className={`w-full flex items-center gap-3 py-3 px-4 rounded-lg border text-left transition-all ${evolutionEnabled ? 'bg-lime-500/10 border-lime-500/40' : 'bg-black/60 border-white/10 hover:border-white/20'}`}>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <span className={`text-sm font-medium ${evolutionEnabled ? 'text-lime-400' : 'text-white'}`}>AI Evolution</span>
+                  {evolutionEnabled && aiEvolutionGen != null && <span className="text-[10px] font-mono px-1.5 py-0.5 rounded border border-lime-500/30 bg-lime-500/10 text-lime-400/70">Gen {aiEvolutionGen}</span>}
+                </div>
+                <p className="text-white/40 text-xs mt-0.5">AI evolves each race via genetic algorithm</p>
+              </div>
+              <div className={`w-10 h-5 rounded-full relative transition-colors ${evolutionEnabled ? 'bg-lime-500/40' : 'bg-white/10'}`}>
+                <div className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${evolutionEnabled ? 'left-[22px] bg-lime-400' : 'left-0.5 bg-white/40'}`} />
+              </div>
+            </button>
+          </div>
+        )}
+
+        {/* Race memory count */}
+        {totalRaces != null && totalRaces > 0 && (
+          <div className="mb-4 flex justify-center">
+            <span className="text-white/25 text-[10px] font-mono">{totalRaces} race{totalRaces !== 1 ? 's' : ''} in memory</span>
           </div>
         )}
 
