@@ -199,6 +199,9 @@ export function RaceHUD({ raceState, latencyMs, gamepadConnected = false, classN
               </span>
             </div>
           )}
+          {raceState.weather_mood && raceState.weather_mood.mood !== 'CALM' && (
+            <WeatherIndicator mood={raceState.weather_mood.mood} intensity={raceState.weather_mood.intensity} />
+          )}
           <div className="text-white/20 text-xs font-mono mt-1">WASD + Space | R=Respawn | C=Camera | G=GIF</div>
           {gamepadConnected && (
             <div className="flex items-center gap-1.5 mt-1">
@@ -650,14 +653,60 @@ function GamepadIcon() {
   );
 }
 
-/** AI Emotion badge: shows the AI opponent's current emotional state with color-coded styling */
+/** Weather mood indicator: small icon + label showing the current weather mood in the HUD corner */
+function WeatherIndicator({ mood, intensity }: { mood: string; intensity: number }) {
+  // Map mood to icon, label, and color
+  const config: Record<string, { icon: string; label: string; color: string }> = {
+    BUILDING: { icon: '\u2601', label: 'CLOUDY', color: '#90a4ae' },     // cloud
+    TENSE:    { icon: '\u26C8', label: 'TENSE', color: '#78909c' },      // thunder cloud
+    DRAMATIC: { icon: '\u26C8', label: 'STORM', color: '#546e7a' },      // thunder cloud
+    EPIC:     { icon: '\u26A1', label: 'EPIC', color: '#ffd54f' },       // lightning
+    FINALE:   { icon: '\u2600', label: 'GOLDEN', color: '#ffb74d' },     // sun
+    NIGHT_TENSE: { icon: '\u263D', label: 'NIGHT', color: '#7986cb' },   // crescent moon
+  };
+
+  const c = config[mood] ?? { icon: '\u2601', label: mood, color: '#90a4ae' };
+
+  return (
+    <div className="flex items-center gap-1.5 mt-1">
+      <span
+        className="text-sm leading-none"
+        style={{ color: c.color, opacity: 0.5 + intensity * 0.5 }}
+      >
+        {c.icon}
+      </span>
+      <span
+        className="text-[10px] font-mono uppercase tracking-wider leading-none"
+        style={{ color: c.color, opacity: 0.4 + intensity * 0.4 }}
+      >
+        {c.label}
+      </span>
+    </div>
+  );
+}
+
+/** AI Emotion badge: shows the AI opponent's current emotional state with color-coded styling.
+ *  Includes a tooltip on hover with details about how the emotion affects AI driving. */
 function AIEmotionBadge({ emotion }: { emotion: AIEmotion }) {
-  // Map state to a pulsing animation for aggressive/desperate states
-  const isPulsing = emotion.state === 'aggressive' || emotion.state === 'desperate';
+  // Map state to a pulsing animation for aggressive/desperate/frustrated states
+  const isPulsing = emotion.state === 'aggressive' || emotion.state === 'desperate' || emotion.state === 'frustrated';
+
+  // Tooltip descriptions for each emotional state
+  const tooltips: Record<string, string> = {
+    calm: 'AI is driving steadily',
+    aggressive: 'AI is pushing harder (+5% speed)',
+    nervous: 'AI is making mistakes (-3% speed)',
+    frustrated: 'AI is erratic (frequent mistakes)',
+    confident: 'AI is driving smoothly',
+    desperate: 'AI is going all-out (+8% speed)',
+    respectful: 'AI is impressed by your lead',
+  };
+
+  const tooltip = tooltips[emotion.state] || emotion.label;
 
   return (
     <div
-      className={`flex items-center gap-1.5 px-2 py-0.5 rounded-md border transition-all duration-700 ease-out ${isPulsing ? 'animate-pulse' : ''}`}
+      className={`relative group flex items-center gap-1.5 px-2 py-0.5 rounded-md border transition-all duration-700 ease-out pointer-events-auto ${isPulsing ? 'animate-pulse' : ''}`}
       style={{
         borderColor: `${emotion.color}60`,
         backgroundColor: `${emotion.color}20`,
@@ -672,6 +721,10 @@ function AIEmotionBadge({ emotion }: { emotion: AIEmotion }) {
       >
         {emotion.label}
       </span>
+      {/* Tooltip on hover */}
+      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2 py-1 bg-black/90 text-white/80 text-[10px] font-mono rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-50">
+        {tooltip}
+      </div>
     </div>
   );
 }

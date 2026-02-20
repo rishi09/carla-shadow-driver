@@ -34,7 +34,7 @@ export interface GamepadControls {
 
 /** AI emotional state sent from server */
 export interface AIEmotion {
-  /** Internal state name: 'confident' | 'aggressive' | 'nervous' | 'desperate' | 'respectful' */
+  /** Internal state name: 'calm' | 'aggressive' | 'nervous' | 'frustrated' | 'confident' | 'desperate' | 'respectful' */
   state: string;
   /** Unicode emoji character */
   emoji: string;
@@ -72,12 +72,13 @@ export interface RaceState {
   total_drift_score?: number;
   ai_emotion?: AIEmotion;
   weather_mood?: {
-    mood: 'CALM' | 'BUILDING' | 'TENSE' | 'DRAMATIC' | 'EPIC';
+    mood: 'CALM' | 'BUILDING' | 'TENSE' | 'DRAMATIC' | 'EPIC' | 'FINALE' | 'NIGHT_TENSE';
     intensity: number;
     precipitation: number;
     fog_density: number;
     wind_intensity: number;
     cloudiness: number;
+    wetness?: number;
   };
 }
 

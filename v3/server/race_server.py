@@ -23,6 +23,7 @@ from model_manager import ModelManager
 from frame_encoder import FrameEncoder
 from race_logic import RaceState, generate_checkpoints_from_waypoints, RaceDirector, AIMistakeGenerator, TrashTalkManager, WeatherMoodManager
 from weather_transitions import WeatherTransitionManager
+from weather_manager import WeatherManager
 from ai_personality import AIPersonality
 
 
@@ -215,6 +216,7 @@ class RaceServer:
         self.mistake_generator: Optional[AIMistakeGenerator] = None
         self.weather_manager: Optional[WeatherTransitionManager] = None
         self.weather_mood: Optional[WeatherMoodManager] = None
+        self.weather_event_manager: Optional[WeatherManager] = None
         self.trash_talk: Optional[TrashTalkManager] = None
         self.ai_personality: Optional[AIPersonality] = None
         self.pc: Optional[RTCPeerConnection] = None
@@ -525,6 +527,7 @@ class RaceServer:
         self.mistake_generator = None
         self.weather_manager = None
         self.weather_mood = None
+        self.weather_event_manager = None
         self.trash_talk = None
         self.ai_personality = None
         self.difficulty = 'easy'
@@ -630,6 +633,11 @@ class RaceServer:
         self.weather_mood = WeatherMoodManager(total_laps=old_laps)
         self.trash_talk = TrashTalkManager()
         self.ai_personality = AIPersonality()
+
+        # Re-create event-driven weather manager
+        if self.carla.world:
+            self.weather_event_manager = WeatherManager(self.carla.world, is_night=False)
+            self.weather_event_manager.set_target_mood('CALM', transition_time=5.0)
 
         self.running = True
 
@@ -783,6 +791,11 @@ class RaceServer:
         self.trash_talk = TrashTalkManager()
         self.ai_personality = AIPersonality()
 
+        # Event-driven weather manager: smooth lerp transitions based on race events
+        is_night = time_of_day == 'night' or weather == 'night'
+        self.weather_event_manager = WeatherManager(self.carla.world, is_night=is_night)
+        self.weather_event_manager.set_target_mood('CALM', transition_time=5.0)
+
         # Run the frame loop (30fps) and telemetry loop (30Hz) concurrently
         self._race_task = asyncio.create_task(self._race_loop())
         self._telemetry_task = asyncio.create_task(self._telemetry_loop())
@@ -878,11 +891,18 @@ class RaceServer:
 
                     # 4c. AI Personality: update emotional state based on race conditions
                     if self.ai_personality and self.race_state:
-                        self.ai_personality.update(self.race_state)
+                        personality_progress = 0.0
+                        if self.race_director:
+                            personality_progress = self.race_director.get_race_progress(self.race_state)
+                        self.ai_personality.update(self.race_state, race_progress=personality_progress)
                         # Apply personality speed modifier on top of race director adjustments
                         personality_speed_mod = self.ai_personality.get_speed_modifier()
                         if abs(personality_speed_mod) > 0.5 and self.carla._ai_autopilot:
                             self.carla.adjust_ai_speed(personality_speed_mod)
+
+                    # 4d. AI Blocking: on Hard, defensively slow when player is close behind
+                    if self.race_state and self.carla._ai_autopilot:
+                        self.carla.update_ai_blocking(self.difficulty, self.race_state)
 
                     # Race Director: dynamically adjust AI speed (distance-based rubber banding)
                     if self.race_director and self.carla._ai_autopilot:
@@ -989,6 +1009,34 @@ class RaceServer:
                             mood_params = self.weather_mood.update(self.race_state)
                             if mood_params:
                                 self.carla.set_weather_params(**mood_params)
+
+                    # 8b. Event-driven weather mood transitions (close gap, final lap, etc.)
+                    if self.weather_event_manager and self.race_state:
+                        gap = self.race_state.get_gap_seconds()
+                        # Determine if we are on the final lap
+                        is_final_lap = (
+                            self.race_state.player_lap >= self.race_state.total_laps - 1
+                            or self.race_state.ai_lap >= self.race_state.total_laps - 1
+                        )
+                        # Compute progress through the final lap (0.0-1.0)
+                        final_lap_progress = 0.0
+                        if is_final_lap:
+                            num_cps = len(self.race_state.checkpoints)
+                            if num_cps > 0:
+                                # Use the leader's checkpoint within the final lap
+                                leader_cp = max(
+                                    self.race_state.player_checkpoint % num_cps,
+                                    self.race_state.ai_checkpoint % num_cps,
+                                )
+                                final_lap_progress = leader_cp / num_cps
+
+                        self.weather_event_manager.evaluate_race_events(
+                            self.race_state,
+                            is_final_lap=is_final_lap,
+                            final_lap_progress=final_lap_progress,
+                            gap_seconds=gap,
+                        )
+                        self.weather_event_manager.update(1.0 / 30.0)
 
                     # 9. Send chase camera frame to browser
                     await self._send_frame()
@@ -1395,6 +1443,26 @@ class RaceServer:
         # Weather mood info for frontend overlay effects
         if self.weather_mood:
             state['weather_mood'] = self.weather_mood.get_mood()
+
+        # Event-driven weather mood (merges with intensity-based mood)
+        if self.weather_event_manager:
+            event_weather = self.weather_event_manager.get_weather_state()
+            if 'weather_mood' in state:
+                # Merge: use the more intense mood between intensity-based and event-based
+                existing = state['weather_mood']
+                if event_weather['intensity'] > existing.get('intensity', 0):
+                    state['weather_mood']['mood'] = event_weather['mood']
+                    state['weather_mood']['intensity'] = event_weather['intensity']
+                # Take the max of each weather effect for overlay
+                for key in ('precipitation', 'fog_density', 'wind_intensity', 'cloudiness'):
+                    state['weather_mood'][key] = max(
+                        existing.get(key, 0),
+                        event_weather.get(key, 0),
+                    )
+                # Include wetness from event manager
+                state['weather_mood']['wetness'] = event_weather.get('wetness', 0)
+            else:
+                state['weather_mood'] = event_weather
 
         try:
             await self.ws_client.send(json.dumps(state))

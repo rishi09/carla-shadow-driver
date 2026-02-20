@@ -95,6 +95,10 @@ class RaceManager:
         self._drift_boost_multiplier = 1.0
         self._drift_boost_end_time = 0.0
 
+        # --- AI blocking behavior state (Hard difficulty) ---
+        self._ai_blocking_active = False
+        self._ai_blocking_log_counter = 0
+
         # Camera mode
         self._camera_mode = 'chase'
         self._camera_transforms = {
@@ -1136,6 +1140,95 @@ class RaceManager:
         except Exception as e:
             pass  # Don't crash on TM errors
 
+    def update_ai_blocking(self, difficulty: str, race_state) -> bool:
+        """AI blocking behavior: on Hard difficulty, when the player is close
+        behind the AI, slightly slow the AI to create a defensive 'blocking'
+        feel and force the player to outbrake or find an alternative line.
+
+        The mechanic works by:
+        1. Computing the Euclidean distance between player and AI.
+        2. Determining if the player is *behind* the AI (AI is ahead by
+           checkpoint progress).
+        3. When the player is within 5m behind the AI, reducing the AI
+           speed by 2-3% via the traffic manager. This makes the AI
+           appear to 'hold its line' defensively and creates exciting
+           'I need to outbrake them!' moments.
+        4. Disabling auto lane changes so the AI doesn't dodge out of
+           the way.
+
+        Only active on Hard difficulty. On other difficulties, ensures
+        blocking state is cleared.
+
+        Args:
+            difficulty: Current difficulty level ('easy', 'medium', 'hard').
+            race_state: RaceState object with current positions and progress.
+
+        Returns:
+            True if blocking is currently active.
+        """
+        if difficulty != 'hard' or not self.ai_car or not self.client or not self._ai_autopilot:
+            if self._ai_blocking_active:
+                self._ai_blocking_active = False
+                # Restore normal lane change behavior
+                try:
+                    tm = self.client.get_trafficmanager()
+                    tm.auto_lane_change(self.ai_car, True)
+                except Exception:
+                    pass
+            return False
+
+        if not race_state or not hasattr(race_state, 'player_x'):
+            return False
+
+        # Compute distance between player and AI
+        dx = race_state.player_x - race_state.ai_x
+        dy = race_state.player_y - race_state.ai_y
+        distance = math.sqrt(dx * dx + dy * dy)
+
+        # Determine who is ahead based on checkpoint/lap progress
+        player_progress = (race_state.player_lap * len(race_state.checkpoints)
+                           + (race_state.player_checkpoint % len(race_state.checkpoints)))
+        ai_progress = (race_state.ai_lap * len(race_state.checkpoints)
+                       + (race_state.ai_checkpoint % len(race_state.checkpoints)))
+        ai_is_ahead = ai_progress > player_progress
+
+        # Blocking condition: player within 5m AND AI is ahead
+        should_block = distance < 5.0 and ai_is_ahead
+
+        if should_block and not self._ai_blocking_active:
+            # Activate blocking: slow AI by 3%, disable lane changes
+            self._ai_blocking_active = True
+            try:
+                tm = self.client.get_trafficmanager()
+                base = getattr(self, '_base_speed_difference', -55)
+                # Add 3 percentage points (makes AI ~3% slower)
+                tm.vehicle_percentage_speed_difference(self.ai_car, base + 3.0)
+                # Lock lane so AI doesn't dodge out of the way
+                tm.auto_lane_change(self.ai_car, False)
+            except Exception as e:
+                print(f"[AI-BLOCK] Failed to activate blocking: {e}")
+
+            self._ai_blocking_log_counter += 1
+            if self._ai_blocking_log_counter % 10 == 1:
+                print(f"[AI-BLOCK] Blocking activated: distance={distance:.1f}m, "
+                      f"player_progress={player_progress}, ai_progress={ai_progress}")
+
+        elif not should_block and self._ai_blocking_active:
+            # Deactivate blocking: restore normal speed and lane changes
+            self._ai_blocking_active = False
+            try:
+                tm = self.client.get_trafficmanager()
+                base = getattr(self, '_base_speed_difference', -55)
+                tm.vehicle_percentage_speed_difference(self.ai_car, base)
+                tm.auto_lane_change(self.ai_car, True)
+            except Exception as e:
+                print(f"[AI-BLOCK] Failed to deactivate blocking: {e}")
+
+            if self._ai_blocking_log_counter % 10 == 0:
+                print(f"[AI-BLOCK] Blocking deactivated: distance={distance:.1f}m")
+
+        return self._ai_blocking_active
+
     def apply_ai_mistake(self, mistake: dict):
         """Apply a temporary mistake to the AI car by reducing its speed.
 
@@ -1270,6 +1363,10 @@ class RaceManager:
             self._handbrake_was_active = False
             self._drift_boost_multiplier = 1.0
             self._drift_boost_end_time = 0.0
+
+            # Reset AI blocking state
+            self._ai_blocking_active = False
+            self._ai_blocking_log_counter = 0
 
             # Clear collision buffer
             with self._collision_lock:
@@ -1443,6 +1540,10 @@ class RaceManager:
         self._drift_boost_multiplier = 1.0
         self._drift_boost_end_time = 0.0
         self._original_rear_friction = None
+
+        # Reset AI blocking state
+        self._ai_blocking_active = False
+        self._ai_blocking_log_counter = 0
 
         print("Cleanup complete")
 
