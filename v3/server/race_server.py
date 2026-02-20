@@ -481,7 +481,35 @@ class RaceServer:
                         player_telem['x'], player_telem['y'], yaw, lap_time
                     )
 
-                    # 6. Send chase camera frame to browser
+                    # 6. Drift detection: compare heading vs velocity direction
+                    drift_event = self.race_state.update_drift(
+                        heading_deg=player_telem.get('yaw', 0.0),
+                        velocity_x=player_telem.get('velocity_x', 0.0),
+                        velocity_y=player_telem.get('velocity_y', 0.0),
+                        speed_kmh=player_telem['speed_kmh'],
+                        steer=player_telem.get('steer', 0.0),
+                    )
+
+                    # 7. Race commentary: contextual messages
+                    commentary = self.race_state.get_commentary(drift_event=drift_event)
+                    if commentary and self.ws_client:
+                        try:
+                            await self.ws_client.send(json.dumps({
+                                'type': 'commentary',
+                                'text': commentary['text'],
+                                'category': commentary['category'],
+                            }))
+                        except Exception:
+                            pass
+
+                    # 8. Dynamic weather transitions
+                    if self.weather_manager and self.race_director:
+                        progress = self.race_director.get_race_progress(self.race_state)
+                        weather_params = self.weather_manager.update(progress)
+                        if weather_params:
+                            self.carla.set_weather_params(**weather_params)
+
+                    # 9. Send chase camera frame to browser
                     await self._send_frame()
 
                 elif self.race_state.status == "finished":
@@ -503,6 +531,9 @@ class RaceServer:
                             'player_distance': stats['player_distance'],
                             'ai_distance': stats['ai_distance'],
                             'player_collisions': stats['player_collisions'],
+                            'total_drift_score': stats.get('total_drift_score', 0),
+                            'best_single_drift': stats.get('best_single_drift', 0),
+                            'drift_count': stats.get('drift_count', 0),
                         }))
                     self.running = False
                     break

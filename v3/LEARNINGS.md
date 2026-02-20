@@ -310,3 +310,37 @@ Format: `## [timestamp] Category: Short description`
 - **Rule**: Store rapidly-changing values (like speed) in refs, not effect dependencies. Putting `speedKmh` in the useEffect dependency array would tear down and restart the rAF loop on every speed update (60Hz), defeating the purpose of smooth animation.
 
 ---
+
+## [2026-02-19 12:00] Landing page: cinematic dark theme with canvas speed streaks
+
+- **Implemented**: Full-page landing at `/` with animated SpeedCanvas background, scroll-reveal feature cards, "How it works" steps, technical stats, and "Powered by" badges. Zero external assets -- everything is CSS, SVG, and canvas.
+- **SpeedCanvas**: Renders 50 light streaks radiating from a vanishing point at ~42% viewport height, simulating driving toward a horizon. Uses three hue channels (cyan, green, blue) matching the app's accent palette. Each streak has independent speed, length, opacity, and fade-in/fade-out curves. A subtle perspective grid (16 radial lines + 10 horizontal lines) provides depth.
+- **Scroll-reveal with IntersectionObserver**: A reusable `useReveal()` hook returns a ref and a `visible` boolean. On mount, it creates an IntersectionObserver with `threshold: 0.15`. When the element scrolls into view, `visible` flips to `true` and the observer disconnects (fire-once). Each card/section uses CSS `transition` with staggered `delay` values (0s, 0.1s, 0.2s, 0.3s) for a cascade effect.
+- **Performance**: Canvas animation runs a single `requestAnimationFrame` loop with delta-time normalization (`dt / 16.67` for 60fps baseline). No React state updates during animation -- all mutation is on plain arrays and objects.
+- **Typography trick**: Using `Impact` font-family with `-0.05em` letter-spacing and `leading-[0.85]` line-height gives the title a condensed, racing-poster feel without importing a custom web font.
+- **CTA glow**: The "RACE NOW" button uses a CSS `box-shadow` keyframe animation (`cta-pulse`) that breathes between 20px and 35px green glow. On hover, a separate `blur-2xl` span with a gradient from green to cyan creates a bloom effect behind the button.
+- **Rule**: For landing page canvas animations, keep particle/streak counts modest (~50) and avoid per-particle DOM elements. A single canvas with a RAF loop is far more performant than 50 animated `<div>` elements and gives pixel-level control over gradients and fading.
+- **Rule**: `useMemo` pre-computed random values prevent flicker on React re-renders. For streaks defined inline in JSX, use `useMemo([])` with an empty dep array so the random values are stable across renders.
+- **Rule**: `IntersectionObserver` with `disconnect()` on first intersection is the correct pattern for fire-once scroll-reveal. Do not use a continuous observer that re-evaluates on every scroll frame.
+
+---
+
+## [2026-02-19 12:00] Tunnel comparison: ngrok vs Cloudflare quick tunnels
+
+- **Problem**: Cloudflare quick tunnels added 40-80ms overhead to every WebSocket message, making total round-trip latency 120-220ms. This was the single largest source of perceived lag -- bigger than JPEG encoding, physics, and steering ramp combined.
+- **Options evaluated**:
+  1. **ngrok** (chosen): Free tier gives 1 HTTP tunnel with valid TLS certs. WebSocket fully supported. ~10-20ms overhead. Requires auth token (free signup at https://ngrok.com).
+  2. **bore.digital**: TCP-only, no TLS. Would give `ws://` not `wss://`, so mixed content blocking still applies. Ruled out.
+  3. **localtunnel**: Free, gives HTTPS, but extremely unreliable -- frequent disconnections. Not suitable for real-time gaming.
+  4. **serveo.net**: SSH-based, free, gives HTTPS. Has been intermittently down for extended periods. Reliability concern.
+  5. **Tailscale**: Requires client-side install. Not viable for a browser-only game.
+  6. **Cloudflare named tunnels**: Still routes through Cloudflare's edge network, so core latency issue remains.
+- **Implementation**: ngrok is now the primary tunnel in `entrypoint.sh` and `deploy.sh`. Cloudflare is kept as an automatic fallback when `NGROK_AUTHTOKEN` is not set.
+- **ngrok URL extraction**: ngrok exposes a local API at `localhost:4040`. The tunnel URL is extracted via `curl -s http://localhost:4040/api/tunnels | python3 -c "..."`. This is more reliable than parsing log output.
+- **Free tier WebSocket note**: ngrok's free tier shows a "Visit Site" interstitial for HTTP GET requests to the tunnel URL. This does NOT affect WebSocket upgrade requests -- the `wss://` connection goes through cleanly.
+- **Auth token setup**: Set `NGROK_AUTHTOKEN` as an env var. For Vast.ai auto-provisioning, add it to Vercel env vars so `start.ts` passes it through. For manual deploys, pass as 3rd arg to `deploy.sh` or set as env var.
+- **Expected improvement**: Total round-trip latency should drop from ~120-220ms (Cloudflare) to ~80-140ms (ngrok), a ~40-80ms improvement. This is the equivalent of eliminating all JPEG encoding overhead twice over.
+- **Rule**: When choosing a tunnel for real-time applications, latency overhead is the primary criterion, not features. A tunnel with 10ms overhead and fewer features beats a tunnel with 60ms overhead and more features every time. Measure latency, not just "does it work."
+- **Rule**: Always keep the previous tunnel as a fallback. If the new tunnel's auth token isn't configured or the service is down, the system should degrade gracefully to the working (if slower) alternative.
+
+---
