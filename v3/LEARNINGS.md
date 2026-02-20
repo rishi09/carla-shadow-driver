@@ -273,3 +273,28 @@ Format: `## [timestamp] Category: Short description`
 - **Lesson**: For testing canvas-based games in the browser, do not rely on simulated keyboard events via WebDriver. Instead, expose a programmatic input API on the game engine and call it via `execute_script()`. This is both more reliable and allows precise analog control values (fractional throttle/steer) that binary key events cannot express.
 
 ---
+
+## [2026-02-19 01:00] Steering sensitivity: the Goldilocks problem
+- **History**: `dt * 6.5` attack felt sluggish (130ms to full lock). `dt * 18` was too aggressive — reached max steer in 1 frame, causing constant drifting. `dt * 10` is the sweet spot (~80ms).
+- **Root cause of drifting**: The steer LIMITS were too high, not just the ramp rate. With binary keyboard input, you either have 0% or 100% key press — the steer limit IS your actual steering angle. Old limit of 0.7 at low speed was way too much lock.
+- **New limits**: 0.5 (low speed) / 0.3 (medium) / 0.18 (high) / 0.10 (very high). These prevent over-rotation while keeping the car maneuverable.
+- **Rule**: For keyboard-controlled racing, steer limits matter more than ramp rate. Keep limits low enough that holding A/D at max produces stable cornering, not drifting.
+
+## [2026-02-19 01:00] Cloudflare tunnel latency dominates everything else
+- **Measured**: With Cloudflare quick tunnel, total round-trip latency was ~120-200ms. Via SSH tunnel (`ws://localhost:8765`), it dropped to ~50-80ms.
+- **Implication**: The ~40-80ms overhead of Cloudflare proxying was larger than ALL our JPEG encoding + physics optimizations combined. No amount of JPEG quality reduction or steering tuning will make the game feel good through Cloudflare.
+- **Rule**: Measure end-to-end latency FIRST before optimizing sub-components. The transport layer was the bottleneck, not encoding.
+- **Next step**: Need `wss://` (TLS WebSocket) directly to the GPU, bypassing Cloudflare. Options: ngrok, Tailscale, self-signed cert, or Vast.ai Direct mode.
+
+## [2026-02-19 01:00] Mixed content blocking kills direct WebSocket
+- **Bug**: `ws://66.115.179.154:50187` from `https://shadow-driver-v3.vercel.app` is blocked by Chrome's mixed content policy.
+- **Exception**: `ws://localhost:*` is allowed from HTTPS pages (browser treats localhost as secure).
+- **SSH tunnel workaround**: `ssh -L 8765:localhost:8765 -p PORT root@IP` maps the GPU's port 8765 to localhost:8765, which Chrome allows.
+- **Rule**: HTTPS pages can ONLY connect to `wss://` or `ws://localhost`. Direct `ws://` to any non-localhost IP is blocked. Plan for TLS from the start.
+
+## [2026-02-19 01:00] Minimap z-index covering HUD
+- **Bug**: Minimap (z-20, bottom-4 right-4) covered the FPS/latency display (z-10, bottom-4 right-4).
+- **Fix**: Moved minimap to `bottom-24` to sit above the latency panel.
+- **Rule**: When adding overlay components at the same corner, check z-index stacking. Use Tailwind spacing utilities to offset them.
+
+---
