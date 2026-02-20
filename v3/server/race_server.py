@@ -183,6 +183,7 @@ class RaceServer:
     # Vercel API URLs for social presence callbacks
     CALLBACK_URL = os.environ.get('CALLBACK_URL', 'https://shadow-driver-v3.vercel.app/api/gpu/callback')
     RACE_COMPLETE_URL = os.environ.get('RACE_COMPLETE_URL', 'https://shadow-driver-v3.vercel.app/api/gpu/race-complete')
+    ACTIVITY_PING_URL = os.environ.get('ACTIVITY_PING_URL', 'https://shadow-driver-v3.vercel.app/api/activity/ping')
 
     def __init__(self, config_path: str = "configs/race.yaml"):
         with open(config_path, 'r') as f:
@@ -268,6 +269,42 @@ class RaceServer:
         # Player name (set by client on start_race)
         self._player_name: str = "Anonymous"
 
+        # Activity ping task: sends periodic pings while clients are connected
+        self._activity_ping_task: Optional[asyncio.Task] = None
+
+    def _ping_activity(self):
+        """Fire-and-forget HTTP POST to the activity ping endpoint.
+        Records this instance as actively racing so the landing page
+        can show a live spectator count."""
+        def _do_post():
+            try:
+                payload = json.dumps({"instanceId": self._instance_id}).encode()
+                req = urllib.request.Request(
+                    self.ACTIVITY_PING_URL,
+                    method="POST",
+                    data=payload,
+                    headers={"Content-Type": "application/json"},
+                )
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    resp.read()
+            except Exception as e:
+                # Don't crash if the API is unreachable
+                print(f"[activity] Ping error (non-fatal): {e}")
+
+        import threading
+        threading.Thread(target=_do_post, daemon=True).start()
+
+    async def _activity_ping_loop(self):
+        """Send periodic activity pings every 45 seconds while clients are connected.
+        The KV entry has a 60-second TTL, so pinging every 45s keeps it alive."""
+        try:
+            while True:
+                if len(self.shutdown_manager.connected_clients) > 0:
+                    self._ping_activity()
+                await asyncio.sleep(45)
+        except asyncio.CancelledError:
+            pass
+
     def _report_callback(self, payload: dict):
         """Fire-and-forget HTTP POST to the callback URL (runs in background thread)."""
         def _do_post():
@@ -333,6 +370,11 @@ class RaceServer:
             "type": "session_start",
             "connection_id": connection_id,
         })
+
+        # Send immediate activity ping and start periodic ping loop
+        self._ping_activity()
+        if self._activity_ping_task is None or self._activity_ping_task.done():
+            self._activity_ping_task = asyncio.create_task(self._activity_ping_loop())
 
         # If there's an existing race running, stop it gracefully before accepting new client
         if self.running or self._race_task or self._telemetry_task:

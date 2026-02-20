@@ -467,7 +467,7 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
           </p>
         </div>
 
-        {/* Dare Challenge result banner */}
+        {/* Dare / Bet-Your-Laptime Challenge result banner */}
         {dareTime != null && dareTime > 0 && revealStep >= 1 && (
           <div className="mb-4" style={revealStyle(1)}>
             {result.player_time != null && result.player_time <= dareTime ? (
@@ -479,10 +479,12 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
                     animation: 'victory-glow 2s ease-in-out infinite',
                   }}
                 >
-                  CHALLENGE BEATEN!
+                  {challengeData ? `YOU BEAT ${challengeData.playerName.toUpperCase()}!` : 'CHALLENGE BEATEN!'}
                 </div>
                 <div className="text-green-400/70 text-xs font-mono mt-1">
-                  Target: {formatRaceTime(dareTime)}
+                  {challengeData
+                    ? `${challengeData.playerName}'s time: ${formatChallengeTime(dareTime)}`
+                    : `Target: ${formatRaceTime(dareTime)}`}
                   <span className="text-green-300 ml-2">
                     You were {formatGap(dareTime - result.player_time)}s faster!
                   </span>
@@ -496,10 +498,12 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
                     textShadow: '0 0 15px rgba(239, 68, 68, 0.4)',
                   }}
                 >
-                  NOT THIS TIME...
+                  {challengeData ? `${challengeData.playerName.toUpperCase()} WINS...` : 'NOT THIS TIME...'}
                 </div>
                 <div className="text-red-400/60 text-xs font-mono mt-1">
-                  Target: {formatRaceTime(dareTime)}
+                  {challengeData
+                    ? `${challengeData.playerName}'s time: ${formatChallengeTime(dareTime)}`
+                    : `Target: ${formatRaceTime(dareTime)}`}
                   {result.player_time != null && (
                     <span className="text-red-300/70 ml-2">
                       +{formatGap(result.player_time - dareTime)}s behind
@@ -1019,8 +1023,22 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
             )}
             {result.player_time != null && (
               <button
-                onClick={handleDare}
+                onClick={handleBetChallenge}
                 className="text-purple-400/60 hover:text-purple-400 text-xs font-mono transition-colors inline-flex items-center gap-1.5"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6" /><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18" />
+                  <path d="M4 22h16" /><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22" />
+                  <path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22" />
+                  <path d="M18 2H6v7a6 6 0 0 0 12 0V2Z" />
+                </svg>
+                {betChallengeCopied ? 'Challenge link copied!' : 'Bet Your Laptime'}
+              </button>
+            )}
+            {result.player_time != null && (
+              <button
+                onClick={handleDare}
+                className="text-white/30 hover:text-white/50 text-xs font-mono transition-colors inline-flex items-center gap-1.5"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M12 2L2 7l10 5 10-5-10-5z" />

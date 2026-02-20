@@ -181,7 +181,7 @@ The key insight from Trackmania: you don't need real-time multiplayer to create 
 - [x] **Seasonal tournaments**: Monthly themed events (night race series, rain championship, reverse tracks). Aggregate scores across multiple tracks. Prizes: cosmetic badges on leaderboard profile.
 
 ### Social Presence (make it feel alive)
-- [ ] **Live spectator count**: Show "X people racing right now" on the landing page. Even seeing "3 people racing" makes the game feel alive. Implementation: track active WebSocket connections in Vercel KV, poll every 30s.
+- [x] **Live spectator count**: Show "X people racing right now" on the landing page. Even seeing "3 people racing" makes the game feel alive. Implementation: track active WebSocket connections in Vercel KV, poll every 30s.
 
 - [x] **Recent results feed**: Scrolling ticker on landing page showing recent race completions: "Player beat Hard AI by 0.3s on Town05 - 12 min ago". Creates social proof and competitive motivation.
 
@@ -903,7 +903,7 @@ Server-side: convert CARLA frames to colored ASCII art using a GPU shader. Strea
 
 ### SOCIAL / VIRAL MECHANICS
 
-**9. Bet-Your-Laptime Challenges**
+**9. Bet-Your-Laptime Challenges** [DONE]
 Player finishes a race. Gets a challenge URL with their time embedded (cryptographically signed to prevent cheating). Friend clicks it, sees "Can you beat 1:23.456?" before racing. Result is binary: BEAT or FAILED. The simplicity is the viral mechanic. No leaderboards, no accounts -- just a link and a dare.
 - Viral: 9/10 | Feasibility: 9/10 | Wow: 7/10
 

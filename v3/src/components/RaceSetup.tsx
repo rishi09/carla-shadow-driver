@@ -3,6 +3,7 @@ import { LeaderboardPanel } from './LeaderboardPanel.tsx';
 import { usePersonalBests } from '../hooks/usePersonalBests.ts';
 import { useAdaptiveDifficulty } from '../hooks/useAdaptiveDifficulty.ts';
 import { getDailyChallenge, getDailyBest } from '../hooks/useDailyChallenge.ts';
+import type { ChallengeData } from '../utils/challengeUrl.ts';
 import { usePlayerName } from '../hooks/usePlayerName.ts';
 import { useStreak } from '../hooks/useStreak.ts';
 import { useSocialPresence } from '../hooks/useSocialPresence.ts';
@@ -113,13 +114,15 @@ interface RaceSetupProps {
   };
   /** Dare challenge time in seconds (from ?dare=X.XXX query param) */
   dareTime?: number | null;
+  /** Bet-Your-Laptime challenge data (from ?challenge= URL param) */
+  challengeData?: ChallengeData | null;
   /** Whether fragile cargo mode is enabled */
   isCargoMode?: boolean;
   /** Toggle cargo mode on/off */
   onToggleCargoMode?: (on: boolean) => void;
 }
 
-export function RaceSetup({ onStartRace, onBack, onStartDailyChallenge, quickstart, isConnected, urlSettings, dareTime, isCargoMode, onToggleCargoMode }: RaceSetupProps) {
+export function RaceSetup({ onStartRace, onBack, onStartDailyChallenge, quickstart, isConnected, urlSettings, dareTime, challengeData, isCargoMode, onToggleCargoMode }: RaceSetupProps) {
   const [selectedTrack, setSelectedTrack] = useState(urlSettings?.track || DEFAULT_TRACK);
   const [selectedWeather, setSelectedWeather] = useState(urlSettings?.weather || DEFAULT_WEATHER);
   const [selectedLaps, setSelectedLaps] = useState(urlSettings?.laps || DEFAULT_LAPS);
@@ -268,7 +271,7 @@ export function RaceSetup({ onStartRace, onBack, onStartDailyChallenge, quicksta
           }
         `}</style>
 
-        {/* Dare Challenge Banner -- shown when ?dare=X param is present */}
+        {/* Dare Challenge Banner -- shown when ?dare=X or ?challenge= param is present */}
         {dareTime != null && dareTime > 0 && (
           <div className="mb-6 p-4 rounded-xl border border-purple-500/40 bg-gradient-to-r from-purple-600/15 to-cyan-600/15 relative overflow-hidden">
             <style>{`
@@ -287,11 +290,26 @@ export function RaceSetup({ onStartRace, onBack, onStartDailyChallenge, quicksta
             />
             <div className="flex items-center gap-2 mb-2">
               <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-purple-400">
-                <path d="M12 2L2 7l10 5 10-5-10-5z" />
-                <path d="M2 17l10 5 10-5" />
-                <path d="M2 12l10 5 10-5" />
+                {challengeData ? (
+                  // Trophy icon for Bet-Your-Laptime challenge
+                  <>
+                    <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6" /><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18" />
+                    <path d="M4 22h16" /><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22" />
+                    <path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22" />
+                    <path d="M18 2H6v7a6 6 0 0 0 12 0V2Z" />
+                  </>
+                ) : (
+                  // Layers icon for generic dare
+                  <>
+                    <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                    <path d="M2 17l10 5 10-5" />
+                    <path d="M2 12l10 5 10-5" />
+                  </>
+                )}
               </svg>
-              <span className="text-purple-400 font-black text-sm uppercase tracking-wider">Friend's Dare</span>
+              <span className="text-purple-400 font-black text-sm uppercase tracking-wider">
+                {challengeData ? `${challengeData.playerName}'s Challenge` : "Friend's Dare"}
+              </span>
             </div>
             <div
               className="text-white text-xl font-black tracking-wide"
@@ -300,7 +318,9 @@ export function RaceSetup({ onStartRace, onBack, onStartDailyChallenge, quicksta
               Can you beat {formatSetupTime(dareTime)}?
             </div>
             <div className="text-white/40 text-xs mt-1">
-              Track and settings locked to match the dare. Race to prove yourself!
+              {challengeData
+                ? `Track and settings locked to match ${challengeData.playerName}'s race. Prove you're faster!`
+                : 'Track and settings locked to match the dare. Race to prove yourself!'}
             </div>
           </div>
         )}
