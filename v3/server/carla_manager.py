@@ -543,7 +543,9 @@ class RaceManager:
         self._camera_mode = mode
         print(f"Camera mode switched to: {mode}")
 
-    def apply_player_control(self, keys: Dict[str, bool]):
+    def apply_player_control(self, keys: Dict[str, bool],
+                             difficulty: str = 'medium',
+                             next_checkpoint: Optional[Tuple[float, float]] = None):
         """Convert WASD keys to vehicle control with driving assists.
 
         Integrates:
@@ -551,6 +553,13 @@ class RaceManager:
         2. Countersteer assist (auto-corrects when car is sliding)
         3. Traction control (reduces throttle on wheel spin)
         4. Handbrake drift mechanics (reduces rear tire friction)
+        5. Speed-dependent steering ramp time (snappy at low speed, weighty at high speed)
+        6. Auto-brake assist for Easy mode (brakes into sharp turns)
+
+        Args:
+            keys: Dict of WASD + space key states.
+            difficulty: Current difficulty level ('easy', 'medium', 'hard').
+            next_checkpoint: Optional (x, y) of the next checkpoint for auto-brake assist.
         """
         if not self.player_car:
             print("[CTRL] WARNING: player_car is None!")
@@ -591,11 +600,22 @@ class RaceManager:
         # At 200 km/h: 0.08 + 0.42 * 0.057 = 0.10
         steer_limit = 0.08 + 0.42 * math.exp(-speed_kmh / 70.0)
 
-        # Ramp toward target: attack ~100ms, release ~167ms
-        # At 30fps (dt=0.033), attack step = 0.167/frame → 0.5 in 3 frames (100ms)
-        # Release step = 0.1/frame → 0.5 in 5 frames (167ms)
-        steer_attack = dt * 5.0   # reaches 0.5 (low-speed limit) in ~3 frames = 100ms
-        steer_release = dt * 3.0  # returns from 0.5 to 0 in ~5 frames = 167ms
+        # --- Feature 5: Speed-dependent steering ramp time ---
+        # Scale steering ramp duration with speed for GT7 "weight" feel.
+        # ramp_ms = 40 + speed_kmh * 0.3
+        #   At   0 km/h: 40ms  (very snappy for parking/reversing)
+        #   At 100 km/h: 70ms  (moderate, responsive but not twitchy)
+        #   At 200 km/h: 100ms (weighty, deliberate high-speed steering)
+        # Convert ms to per-frame rate: to reach steer_limit in ramp_ms,
+        # rate = steer_limit / (ramp_ms / 1000 * 30)  [at 30fps]
+        ramp_ms = 40.0 + speed_kmh * 0.3
+        ramp_frames = (ramp_ms / 1000.0) * 30.0  # Number of frames for the ramp
+        # Attack rate: how much steer changes per frame toward the target
+        steer_attack = steer_limit / max(ramp_frames, 1.0)
+        # Release is slightly slower than attack (feels more natural)
+        release_ms = ramp_ms * 1.3  # 30% slower release
+        release_frames = (release_ms / 1000.0) * 30.0
+        steer_release = steer_limit / max(release_frames, 1.0)
 
         if keys.get('a', False):
             target_steer = -steer_limit
@@ -662,10 +682,21 @@ class RaceManager:
                       f"thr={reverse_throttle:.2f} steer={control.steer:.2f} brk=0.0")
             return
 
+        # --- Feature 6: Auto-brake assist for Easy mode ---
+        # When approaching a sharp turn at high speed, auto-apply 30% brake.
+        # Only active on Easy difficulty. Checks the bearing angle to the next
+        # checkpoint relative to the car's heading. If the turn is sharp (>60 deg)
+        # and speed is high (>100 km/h), gently brake to help beginners.
+        auto_brake = 0.0
+        if difficulty == 'easy' and next_checkpoint is not None and speed_kmh > 100.0:
+            auto_brake = self._compute_auto_brake(next_checkpoint, speed_kmh)
+
+        effective_brake = max(self._current_brake, auto_brake)
+
         control = carla.VehicleControl(
             throttle=effective_throttle,
             steer=final_steer,
-            brake=self._current_brake,
+            brake=effective_brake,
             hand_brake=hand_brake,
         )
         self.player_car.apply_control(control)
@@ -681,9 +712,11 @@ class RaceManager:
                 assists.append(f"TC={self._tc_throttle_cap:.2f}")
             if self._handbrake_was_active:
                 assists.append("HB_DRIFT")
+            if auto_brake > 0.0:
+                assists.append(f"AUTO_BRK={auto_brake:.2f}")
             assist_str = " | assists: " + ", ".join(assists) if assists else ""
             print(f"[CTRL#{self._ctrl_frame}] keys={active} spd={speed_kmh:.1f} "
-                  f"steerLim={steer_limit:.2f} "
+                  f"steerLim={steer_limit:.2f} rampMs={ramp_ms:.0f} "
                   f"thr={control.throttle:.2f} steer={control.steer:.2f} brk={control.brake:.2f} | "
                   f"readback: thr={rb.throttle:.2f} steer={rb.steer:.2f} brk={rb.brake:.2f}"
                   f"{assist_str}")
@@ -750,6 +783,55 @@ class RaceManager:
             return -correction_magnitude
         else:
             return correction_magnitude
+
+    def _compute_auto_brake(self, next_checkpoint: Tuple[float, float],
+                            speed_kmh: float) -> float:
+        """Compute auto-brake assist for Easy mode.
+
+        When approaching a sharp turn (next checkpoint bearing > 60 degrees from
+        current heading) at speed > 100 km/h, returns a brake value of 0.3.
+        This makes Easy mode genuinely playable for beginners by preventing them
+        from flying off the road at high speed into sharp corners.
+
+        The assist is subtle: it never overrides harder player braking, only
+        supplements it with a gentle 30% brake.
+
+        Args:
+            next_checkpoint: (x, y) position of the next checkpoint.
+            speed_kmh: Current vehicle speed.
+
+        Returns:
+            Brake value: 0.3 if auto-brake conditions are met, 0.0 otherwise.
+        """
+        if not self.player_car:
+            return 0.0
+
+        transform = self.player_car.get_transform()
+        car_x = transform.location.x
+        car_y = transform.location.y
+        heading_yaw = transform.rotation.yaw  # Degrees, CARLA convention
+
+        cp_x, cp_y = next_checkpoint
+
+        # Compute bearing to checkpoint
+        dx = cp_x - car_x
+        dy = cp_y - car_y
+        bearing_to_cp = math.degrees(math.atan2(dy, dx))
+
+        # Compute angle difference between heading and bearing, normalized to [-180, 180]
+        angle_diff = bearing_to_cp - heading_yaw
+        while angle_diff > 180.0:
+            angle_diff -= 360.0
+        while angle_diff < -180.0:
+            angle_diff += 360.0
+
+        abs_angle = abs(angle_diff)
+
+        # Only auto-brake if the turn is sharp (> 60 degrees)
+        if abs_angle > 60.0:
+            return 0.3
+
+        return 0.0
 
     def _apply_traction_control(self, throttle: float, speed_kmh: float, dt: float) -> float:
         """Apply traction control to prevent wheel spin.

@@ -821,9 +821,9 @@ See `LEARNINGS.md` section "What Makes Racing Games Fun" for full rationale behi
 - [x] **Radial motion blur shader**: Replace uniform CSS `filter: blur()` with a WebGL radial blur from screen center. Blur amount per pixel = `distance_from_center * speed_factor`. This single change transforms "looks out of focus" into "looks fast." Implement as a fragment shader in `WebGLCanvas.tsx`.
 
 #### Controls & Physics Feel
-- [ ] **Speed-dependent steering ramp time**: In `carla_manager.py`, scale steering ramp duration with speed: `ramp_ms = 40 + speed * 0.3`. At 0 km/h: 40ms (snappy). At 200 km/h: 100ms (weighty). Makes high-speed steering feel deliberate and solid (GT7 "weight" feel).
+- [x] **Speed-dependent steering ramp time**: In `carla_manager.py`, scale steering ramp duration with speed: `ramp_ms = 40 + speed * 0.3`. At 0 km/h: 40ms (snappy). At 200 km/h: 100ms (weighty). Makes high-speed steering feel deliberate and solid (GT7 "weight" feel).
 - [x] **Two-layer input bars**: In `RaceHUD.tsx` InputBar component, show two overlapping bars: background bar = local input (instant, from keyboard state), foreground bar = server-confirmed input (delayed, from telemetry). Gives visual feedback that "the car is catching up to my input." Helps players understand the latency.
-- [ ] **Auto-brake assist for Easy mode**: On Easy difficulty, when approaching a sharp turn (next checkpoint bearing > 60 degrees from heading) at speed > 100 km/h, auto-apply 30% brake. Server-side in `carla_manager.py`. Makes Easy mode genuinely playable for beginners (Forza Horizon lesson).
+- [x] **Auto-brake assist for Easy mode**: On Easy difficulty, when approaching a sharp turn (next checkpoint bearing > 60 degrees from heading) at speed > 100 km/h, auto-apply 30% brake. Server-side in `carla_manager.py`. Makes Easy mode genuinely playable for beginners (Forza Horizon lesson).
 
 #### Dramatic Moments Detection
 - [x] **"NICE SAVE!" detection and popup**: Track speed history. If speed drops >50% then recovers within 2 seconds, OR car goes >5m off racing line then returns, show "NICE SAVE!" text popup with a brief cyan flash. These moments feel heroic and are clip-worthy.

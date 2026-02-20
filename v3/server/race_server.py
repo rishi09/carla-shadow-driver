@@ -819,8 +819,17 @@ class RaceServer:
                     # a chance to process queued WebSocket messages.
                     await asyncio.sleep(0)
 
-                    # 1. Apply player controls
-                    self.carla.apply_player_control(self.player_keys)
+                    # 1. Apply player controls (with difficulty + checkpoint for assists)
+                    next_cp = None
+                    if self.race_state:
+                        cp_idx = self.race_state.player_checkpoint % len(self.race_state.checkpoints)
+                        cp_x, cp_y, _ = self.race_state.checkpoints[cp_idx]
+                        next_cp = (cp_x, cp_y)
+                    self.carla.apply_player_control(
+                        self.player_keys,
+                        difficulty=self.difficulty,
+                        next_checkpoint=next_cp,
+                    )
 
                     # 2. AI control based on difficulty
                     if self.difficulty == 'medium':
@@ -984,7 +993,16 @@ class RaceServer:
                     # One racer finished - continue simulation for 30s grace period
                     # so the other racer can still finish and get a time
                     await asyncio.sleep(0)
-                    self.carla.apply_player_control(self.player_keys)
+                    next_cp_finish = None
+                    if self.race_state:
+                        cp_idx = self.race_state.player_checkpoint % len(self.race_state.checkpoints)
+                        cp_x, cp_y, _ = self.race_state.checkpoints[cp_idx]
+                        next_cp_finish = (cp_x, cp_y)
+                    self.carla.apply_player_control(
+                        self.player_keys,
+                        difficulty=self.difficulty,
+                        next_checkpoint=next_cp_finish,
+                    )
                     self.carla.tick()
                     await asyncio.sleep(0)
 
