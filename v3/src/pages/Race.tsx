@@ -734,6 +734,19 @@ export function Race() {
         crowd.cheer();
         aiPersonality.triggerTrashTalk('player_overtakes');
         subtitleCommentary.triggerCommentary('overtake_player');
+        // Spike music stems intensity on overtake
+        musicStems.updateRaceState({
+          speed: player.speed_kmh,
+          maxSpeed: 200,
+          gap: gap,
+          lapNumber: player.lap,
+          totalLaps: player.total_laps,
+          isCloseRacing: Math.abs(gap) < 2.0,
+          isFinalLap: player.total_laps > 1 && player.lap === player.total_laps,
+          justOvertook: true,
+          raceFinished: false,
+          won: false,
+        });
       }
       if (prevGapSignRef.current < 0 && currentSign > 0) {
         // AI just overtook the player
@@ -1316,6 +1329,20 @@ export function Race() {
     if (gpu.raceFinished) {
       setView('results');
       crowd.roar();
+
+      // Signal music stems that race is finished (triggers victory/defeat fade)
+      musicStems.updateRaceState({
+        speed: 0,
+        maxSpeed: 200,
+        gap: 0,
+        lapNumber: 0,
+        totalLaps: 0,
+        isCloseRacing: false,
+        isFinalLap: false,
+        justOvertook: false,
+        raceFinished: true,
+        won: gpu.raceFinished.winner === 'player',
+      });
 
       // Stop ghost recording
       ghostRecorder.stop();
