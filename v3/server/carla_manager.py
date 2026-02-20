@@ -758,8 +758,8 @@ class RaceManager:
         - High throttle input but car isn't accelerating as expected
         - Very low speed with high throttle (launch spin)
 
-        Recovery: When stuck at near-zero speed for >1.5s, TC fully disables
-        for 3 seconds to let the player power out of walls/corners.
+        Recovery: When stuck at near-zero speed for >2s with throttle applied,
+        TC fully disables for 3 seconds to let the player power out of walls.
 
         Returns:
             Effective throttle value (may be reduced from input).
@@ -774,30 +774,32 @@ class RaceManager:
                 self._tc_stuck_time = 0.0
             return throttle
 
+        # --- Global stuck detection (independent of TC conditions) ---
+        # If player is pressing throttle but car isn't moving, track it.
+        # This catches cases where TC oscillation prevents the stuck timer
+        # inside condition 1 from ever accumulating.
+        if speed_kmh < 2.0 and throttle > 0.3:
+            self._tc_stuck_time += dt
+        elif speed_kmh >= 5.0:
+            # Only reset when clearly moving (hysteresis prevents flapping)
+            self._tc_stuck_time = 0.0
+
+        # If stuck for >2s, enter recovery: fully disable TC for 3s
+        if self._tc_stuck_time > 2.0:
+            self._tc_recovery_time = 3.0
+            self._tc_throttle_cap = 1.0
+            self._traction_control_active = False
+            print(f"[TC] Stuck {self._tc_stuck_time:.1f}s at {speed_kmh:.1f}km/h, 3s recovery")
+            return throttle
+
         # Calculate expected vs actual acceleration
         acceleration = (speed_kmh - self._prev_speed_kmh) / dt  # km/h per second
 
         # Condition 1: Launch traction control
         # At very low speed with high throttle, cap to prevent standing wheel spin.
-        # Only trigger after sustained non-acceleration (acceleration stays near zero
-        # for multiple frames despite throttle). Use a realistic expected accel for
-        # CARLA's physics with our tuned car (~20 km/h/s at full throttle from stop).
         if speed_kmh < 10.0 and throttle > 0.5:
             expected_accel = throttle * 25.0  # Realistic: full throttle ~25 km/h/s in CARLA
             if acceleration < expected_accel * 0.15 and acceleration >= 0:
-                # Track how long we've been stuck with TC active
-                if speed_kmh < 2.0:
-                    self._tc_stuck_time += dt
-                else:
-                    self._tc_stuck_time = 0.0
-
-                # If stuck for >1s, enter recovery mode: fully disable TC for 3s
-                if self._tc_stuck_time > 1.0:
-                    self._tc_recovery_time = 3.0
-                    self._tc_throttle_cap = 1.0
-                    self._traction_control_active = False
-                    return throttle
-
                 # Wheels spinning: almost no acceleration despite throttle.
                 # Cap at 0.5 minimum so TC slows wheelspin without killing launch.
                 self._tc_throttle_cap = max(0.5, self._tc_throttle_cap - dt * 3.0)
@@ -815,7 +817,6 @@ class RaceManager:
 
         # No traction issue: gradually release the cap back to 1.0
         self._tc_throttle_cap = min(1.0, self._tc_throttle_cap + dt * 2.0)
-        self._tc_stuck_time = 0.0
         if self._tc_throttle_cap >= 0.99:
             self._traction_control_active = False
 

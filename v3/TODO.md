@@ -209,7 +209,7 @@ Features that are only possible (or dramatically better) because this runs in a 
 ### Zero-Friction Access (the browser's killer feature)
 The #1 lesson from every viral browser game (agar.io, slither.io, Wordle, GeoGuessr, Slow Roads): the gap between "seeing a link" and "playing the game" must be as close to zero as possible. No downloads, no accounts, no logins.
 
-- [ ] **:star: Sub-3-second cold start for returning players**: Cache the React bundle aggressively (service worker). Pre-connect to the WebSocket URL. If the user has a recent `?ws=` URL in localStorage, auto-connect on page load. Target: URL click -> gameplay in <3 seconds.
+- [x] **:star: Sub-3-second cold start for returning players**: Cache the React bundle aggressively (service worker). Pre-connect to the WebSocket URL. If the user has a recent `?ws=` URL in localStorage, auto-connect on page load. Target: URL click -> gameplay in <3 seconds.
 
 - [ ] **Progressive loading during GPU wait**: While the GPU instance is provisioning (~60-120s), show: interactive track preview (client-side 3D minimap), controls tutorial, leaderboard for selected track, and a "warm up" mode where the player can practice steering with a local 2D car physics sim. The wait becomes part of the experience, not dead time.
 
@@ -239,7 +239,7 @@ Already have engine sound + background music, but there's more untapped potentia
 
 - [ ] **Doppler effect on AI car**: When the AI car passes the player or vice versa, apply a frequency shift to the AI's engine sound. The Web Audio API's `AudioPannerNode` with `positionX/Y/Z` can do this natively -- just update the AI car's position in 3D audio space each frame.
 
-- [ ] **Crowd/ambiance layer**: Procedural crowd noise that reacts to race events -- cheering on overtake, gasp on crash, roar on finish. Use filtered white noise shaped by gain envelopes triggered by race_state events. No audio files needed.
+- [x] **Crowd/ambiance layer**: Procedural crowd noise that reacts to race events -- cheering on overtake, gasp on crash, roar on finish. Use filtered white noise shaped by gain envelopes triggered by race_state events. No audio files needed.
 
 ### Canvas/WebGL Post-Processing
 Client-side effects that enhance the server-rendered JPEG stream.

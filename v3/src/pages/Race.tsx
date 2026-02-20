@@ -1,5 +1,6 @@
 import { useState, useCallback, useMemo } from 'react';
 import { useGPUConnection } from '../hooks/useGPUConnection.ts';
+import { getLastWsUrl } from '../hooks/useGPUConnection.ts';
 import { useEngineSound } from '../hooks/useEngineSound.ts';
 import { useBackgroundMusic } from '../hooks/useBackgroundMusic.ts';
 import { useSteeringPrediction } from '../hooks/useSteeringPrediction.ts';
@@ -8,6 +9,7 @@ import { useLeaderboard } from '../hooks/useLeaderboard.ts';
 import { usePersonalBests } from '../hooks/usePersonalBests.ts';
 import { useGamepad } from '../hooks/useGamepad.ts';
 import { useStreak } from '../hooks/useStreak.ts';
+import { useCrowdAmbiance } from '../hooks/useCrowdAmbiance.ts';
 import { getDailyChallenge, saveDailyChallengeResult } from '../hooks/useDailyChallenge.ts';
 import type { PersonalBestResult } from '../hooks/usePersonalBests.ts';
 import { VideoCanvas } from '../components/VideoCanvas.tsx';
@@ -43,7 +45,7 @@ const DEMO_WS_URL = 'ws://localhost:8765';
 export function Race() {
   const params = new URLSearchParams(window.location.search);
   const isDemo = params.get('demo') === 'true';
-  const directWsUrl = params.get('ws');
+  const directWsUrl = params.get('ws') || getLastWsUrl();
   const isQuickstart = params.get('quickstart') === 'true';
 
   // Deep linking: parse race settings from URL (e.g. shared challenge links)
@@ -74,6 +76,7 @@ export function Race() {
   const gpu = useGPUConnection();
   const engineSound = useEngineSound();
   const bgMusic = useBackgroundMusic();
+  const crowd = useCrowdAmbiance();
   const leaderboard = useLeaderboard();
   const personalBests = usePersonalBests();
   const gamepad = useGamepad();
@@ -340,6 +343,7 @@ export function Race() {
       if (prevGapSignRef.current > 0 && currentSign < 0) {
         // Player just overtook the AI
         engineSound.triggerEvent('overtake');
+        crowd.cheer();
       }
       prevGapSignRef.current = currentSign;
 
@@ -349,11 +353,14 @@ export function Race() {
           closeGapTriggeredRef.current = true;
           engineSound.triggerEvent('close_gap');
         }
+        // Crowd anticipation scales with proximity (0.5s gap = max tension)
+        crowd.setAnticipation(1 - Math.abs(gap));
       } else {
         if (closeGapTriggeredRef.current) {
           closeGapTriggeredRef.current = false;
           engineSound.stopCloseGapTension();
         }
+        crowd.setAnticipation(0);
       }
     }
 
@@ -362,24 +369,27 @@ export function Race() {
       engineSound.triggerEvent('final_lap');
     }
     prevLapRef.current = player.lap;
-  }, [view, gpu.raceState?.player?.gap_seconds, gpu.raceState?.player?.lap, gpu.raceState?.player?.total_laps, engineSound.triggerEvent, engineSound.stopCloseGapTension]);
+  }, [view, gpu.raceState?.player?.gap_seconds, gpu.raceState?.player?.lap, gpu.raceState?.player?.total_laps, engineSound.triggerEvent, engineSound.stopCloseGapTension, crowd.cheer, crowd.setAnticipation]);
 
   // Collision hit sound (percussive white noise burst, layered on top of existing impact)
   useEffect(() => {
     const collisions = gpu.raceState?.collisions;
     if (!collisions || collisions.length === 0) return;
     engineSound.triggerEvent('collision_hit');
-  }, [gpu.raceState?.collisions, engineSound.triggerEvent]);
+    crowd.gasp();
+  }, [gpu.raceState?.collisions, engineSound.triggerEvent, crowd.gasp]);
 
-  // --- Background music lifecycle ---
+  // --- Background music + crowd ambiance lifecycle ---
   useEffect(() => {
     const status = gpu.raceState?.race_status;
     if (view === 'racing' && (status === 'racing' || status === 'finishing' || status === 'countdown')) {
       bgMusic.start();
+      crowd.start();
     } else {
       bgMusic.stop();
+      crowd.stop();
     }
-  }, [view, gpu.raceState?.race_status, bgMusic.start, bgMusic.stop]);
+  }, [view, gpu.raceState?.race_status, bgMusic.start, bgMusic.stop, crowd.start, crowd.stop]);
 
   // --- Wake Lock: prevent screen from sleeping during race ---
   useEffect(() => {
@@ -629,6 +639,7 @@ export function Race() {
   useEffect(() => {
     if (gpu.raceFinished) {
       setView('results');
+      crowd.roar();
 
       // Record streak (consecutive days played)
       const streakRes = streak.recordRace();
@@ -952,6 +963,7 @@ export function Race() {
               const newMuted = !engineSound.isMuted;
               engineSound.setMuted(newMuted);
               bgMusic.setMuted(newMuted);
+              crowd.setMuted(newMuted);
             }}
             className="absolute top-[88px] left-4 z-10 pointer-events-auto bg-black/60 backdrop-blur-sm rounded-lg px-3 py-2 text-white/60 hover:text-white text-sm border border-white/10 transition-colors"
             title={engineSound.isMuted ? 'Unmute' : 'Mute'}

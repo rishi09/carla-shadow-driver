@@ -18,6 +18,45 @@ const WS_CONNECT_DELAY = 3000;
 const WS_MAX_RETRIES = 3;
 const WS_RETRY_DELAY = 2000;
 
+// localStorage keys for persisting last successful WS URL (sub-3s cold start)
+const LAST_WS_URL_KEY = 'shadow_driver_last_ws_url';
+const LAST_WS_TIME_KEY = 'shadow_driver_last_ws_time';
+const WS_URL_MAX_AGE_MS = 30 * 60 * 1000; // 30 minutes — tunnels expire, instances shut down
+
+/** Read a recent WS URL from localStorage (null if expired or missing) */
+export function getLastWsUrl(): string | null {
+  try {
+    const url = localStorage.getItem(LAST_WS_URL_KEY);
+    const time = localStorage.getItem(LAST_WS_TIME_KEY);
+    if (!url || !time) return null;
+    if (Date.now() - parseInt(time, 10) > WS_URL_MAX_AGE_MS) {
+      // Expired — clean up
+      localStorage.removeItem(LAST_WS_URL_KEY);
+      localStorage.removeItem(LAST_WS_TIME_KEY);
+      return null;
+    }
+    return url;
+  } catch {
+    return null;
+  }
+}
+
+/** Clear the saved WS URL (called on fatal connection errors) */
+function clearLastWsUrl(): void {
+  try {
+    localStorage.removeItem(LAST_WS_URL_KEY);
+    localStorage.removeItem(LAST_WS_TIME_KEY);
+  } catch { /* ignore */ }
+}
+
+/** Save a successful WS URL + timestamp */
+function saveLastWsUrl(url: string): void {
+  try {
+    localStorage.setItem(LAST_WS_URL_KEY, url);
+    localStorage.setItem(LAST_WS_TIME_KEY, String(Date.now()));
+  } catch { /* ignore — private browsing etc. */ }
+}
+
 // API base URL - v3's own API routes for start, shared API for status/callback/stop
 const API_BASE_URL = '';
 
@@ -161,6 +200,8 @@ export function useGPUConnection(): UseGPUConnectionReturn {
         setConnectionState('connected');
         setError(null);
         wsRetryCountRef.current = 0;
+        // Persist successful WS URL for sub-3s cold start on return visits
+        if (tunnelUrlRef.current) saveLastWsUrl(tunnelUrlRef.current);
         ws.send(JSON.stringify({ type: 'handshake', client: 'shadow-driver-v3' }));
         pingIntervalRef.current = setInterval(() => {
           if (ws.readyState === WebSocket.OPEN) {
@@ -296,6 +337,7 @@ export function useGPUConnection(): UseGPUConnectionReturn {
             const msg = data as { message: string };
             console.warn('[v3] Server shutting down:', msg.message);
             setError({ message: msg.message || 'Server shut down due to inactivity', code: 'SERVER_SHUTDOWN' });
+            clearLastWsUrl(); // Server is gone — don't auto-reconnect
             closeWebSocket();
           } else if (data.type === 'respawn_ack') {
             // Server acknowledged respawn request — no UI action needed
@@ -318,6 +360,7 @@ export function useGPUConnection(): UseGPUConnectionReturn {
         }
         if (!event.wasClean) {
           setError({ message: 'Connection lost', code: `WS_CLOSE_${event.code}` });
+          clearLastWsUrl(); // Saved URL is stale — don't auto-reconnect to a dead server
         }
         closeWebSocket();
       };
