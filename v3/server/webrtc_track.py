@@ -25,6 +25,10 @@ class CarlaVideoTrack(MediaStreamTrack):
         self._carla = carla_manager
         self._start = None
         self._timestamp = 0
+        # Timing stats
+        self._frame_count = 0
+        self._total_prep_ms = 0.0
+        self._log_interval = 100  # Log every N frames
 
     async def recv(self):
         """Return the next video frame, paced at 30 fps."""
@@ -33,6 +37,9 @@ class CarlaVideoTrack(MediaStreamTrack):
 
         # Pace at 30 fps
         pts, time_base = await self.next_timestamp()
+
+        # Measure frame preparation time
+        t0 = time.monotonic()
 
         # Read RGB frame from CARLA camera buffer
         frame_rgb = self._carla.get_chase_frame()
@@ -43,6 +50,18 @@ class CarlaVideoTrack(MediaStreamTrack):
         video_frame = av.VideoFrame.from_ndarray(frame_rgb, format="rgb24")
         video_frame.pts = pts
         video_frame.time_base = time_base
+
+        prep_ms = (time.monotonic() - t0) * 1000
+        self._frame_count += 1
+        self._total_prep_ms += prep_ms
+        if self._frame_count % self._log_interval == 0:
+            avg = self._total_prep_ms / self._log_interval
+            elapsed = time.time() - self._start
+            fps = self._frame_count / elapsed if elapsed > 0 else 0
+            print(f"[WebRTC] frame_prep={avg:.1f}ms avg over {self._log_interval} frames, "
+                  f"total_frames={self._frame_count}, effective_fps={fps:.1f}")
+            self._total_prep_ms = 0.0
+
         return video_frame
 
     async def next_timestamp(self):

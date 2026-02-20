@@ -209,6 +209,22 @@ export function useGPUConnection(): UseGPUConnectionReturn {
                   new RTCSessionDescription({ sdp: answer.sdp, type: answer.sdpType })
                 );
                 console.log('[v3] WebRTC answer applied');
+                // Log WebRTC stats every 5s to measure encode/transport latency
+                const statsInterval = setInterval(async () => {
+                  if (!pcRef.current) { clearInterval(statsInterval); return; }
+                  try {
+                    const stats = await pcRef.current.getStats();
+                    stats.forEach((report: any) => {
+                      if (report.type === 'inbound-rtp' && report.kind === 'video') {
+                        console.log(`[WebRTC stats] frames=${report.framesReceived}, ` +
+                          `decoded=${report.framesDecoded}, dropped=${report.framesDropped}, ` +
+                          `jitter=${report.jitter?.toFixed(3)}s, ` +
+                          `bytesRx=${report.bytesReceived}, ` +
+                          `decodeTime=${report.totalDecodeTime?.toFixed(2)}s total`);
+                      }
+                    });
+                  } catch { /* pc closed */ clearInterval(statsInterval); }
+                }, 5000);
               }
             } catch (err) {
               console.warn('[v3] Failed to apply WebRTC answer:', err);
