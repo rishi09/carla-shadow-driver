@@ -19,6 +19,8 @@ interface MinimapProps {
   playerTrail?: Array<{ x: number; y: number }> | null;
   /** Whether the race has finished (show trails in post-race mode) */
   raceFinished?: boolean;
+  /** Per-sector times for color-coding trail in post-race view */
+  sectorTimes?: { player: number[]; ai: number[] } | null;
 }
 
 const MAP_SIZE = 200;
@@ -26,7 +28,7 @@ const PADDING = 16;
 const DRAW_AREA = MAP_SIZE - PADDING * 2;
 
 /** Canvas-based minimap showing car positions on the track. */
-export function Minimap({ raceState, challengeGhost, racingLine, playerTrail, raceFinished }: MinimapProps) {
+export function Minimap({ raceState, challengeGhost, racingLine, playerTrail, raceFinished, sectorTimes }: MinimapProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [pulsePhase, setPulsePhase] = useState(0);
 
@@ -279,18 +281,81 @@ export function Minimap({ raceState, challengeGhost, racingLine, playerTrail, ra
       ctx.setLineDash([]);
     }
 
-    // Draw player trail (thin green breadcrumb line showing recent positions)
+    // Draw player trail (thin breadcrumb line showing recent positions)
+    // In post-race mode with sector times, color-code by performance
     if (playerTrail && playerTrail.length > 1) {
-      ctx.strokeStyle = 'rgba(34, 197, 94, 0.4)'; // green, semi-transparent
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      const [ptx0, pty0] = toCanvas(playerTrail[0].x, playerTrail[0].y);
-      ctx.moveTo(ptx0, pty0);
-      for (let i = 1; i < playerTrail.length; i++) {
-        const [ptx, pty] = toCanvas(playerTrail[i].x, playerTrail[i].y);
-        ctx.lineTo(ptx, pty);
+      const checkpointsForTrail = raceState.checkpoints;
+      const canColorCode = raceFinished &&
+        sectorTimes &&
+        sectorTimes.player.length > 0 &&
+        sectorTimes.ai.length > 0 &&
+        checkpointsForTrail &&
+        checkpointsForTrail.length > 1;
+
+      if (canColorCode && checkpointsForTrail && sectorTimes) {
+        // Map checkpoint positions to nearest trail indices
+        const numSectors = Math.min(sectorTimes.player.length, sectorTimes.ai.length, checkpointsForTrail.length);
+        const trailIndices: number[] = [];
+        let searchFrom = 0;
+        for (let i = 0; i < checkpointsForTrail.length; i++) {
+          const cp = checkpointsForTrail[i];
+          let bestIdx = searchFrom;
+          let bestDist = Infinity;
+          for (let j = searchFrom; j < playerTrail.length; j++) {
+            const dx = playerTrail[j].x - cp.x;
+            const dy = playerTrail[j].y - cp.y;
+            const dist = dx * dx + dy * dy;
+            if (dist < bestDist) {
+              bestDist = dist;
+              bestIdx = j;
+            }
+          }
+          trailIndices.push(bestIdx);
+          searchFrom = Math.max(searchFrom, Math.min(bestIdx, playerTrail.length - 1));
+        }
+
+        // Draw each sector segment with appropriate color
+        for (let s = 0; s < numSectors; s++) {
+          const segStart = trailIndices[s];
+          const segEnd = s + 1 < trailIndices.length ? trailIndices[s + 1] : playerTrail.length - 1;
+          if (segEnd <= segStart) continue;
+
+          const pTime = sectorTimes.player[s] ?? 0;
+          const aTime = sectorTimes.ai[s] ?? 0;
+          let color: string;
+          if (pTime <= 0 || aTime <= 0) {
+            color = 'rgba(234, 179, 8, 0.5)'; // yellow fallback
+          } else {
+            const delta = pTime - aTime;
+            if (delta < -0.2) color = 'rgba(34, 197, 94, 0.6)';       // green - faster
+            else if (delta > 0.2) color = 'rgba(239, 68, 68, 0.5)';   // red - slower
+            else color = 'rgba(234, 179, 8, 0.5)';                    // yellow - even
+          }
+
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          const [sx, sy] = toCanvas(playerTrail[segStart].x, playerTrail[segStart].y);
+          ctx.moveTo(sx, sy);
+          for (let i = segStart + 1; i <= segEnd; i++) {
+            const [ptx, pty] = toCanvas(playerTrail[i].x, playerTrail[i].y);
+            ctx.lineTo(ptx, pty);
+          }
+          ctx.stroke();
+        }
+      } else {
+        // Default: single green trail
+        ctx.strokeStyle = 'rgba(34, 197, 94, 0.4)'; // green, semi-transparent
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        const [ptx0, pty0] = toCanvas(playerTrail[0].x, playerTrail[0].y);
+        ctx.moveTo(ptx0, pty0);
+        for (let i = 1; i < playerTrail.length; i++) {
+          const [ptx, pty] = toCanvas(playerTrail[i].x, playerTrail[i].y);
+          ctx.lineTo(ptx, pty);
+        }
+        ctx.stroke();
       }
-      ctx.stroke();
     }
 
     // Draw AI car (blue, drawn first so player appears on top)
@@ -406,7 +471,7 @@ export function Minimap({ raceState, challengeGhost, racingLine, playerTrail, ra
       ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
       ctx.fillText('FRIEND', challengeLegendX + 6, legendY + 3);
     }
-  }, [raceState, bounds, pulsePhase, challengeGhostPos, racingLine, playerTrail, raceFinished]);
+  }, [raceState, bounds, pulsePhase, challengeGhostPos, racingLine, playerTrail, raceFinished, sectorTimes]);
 
   return (
     <canvas

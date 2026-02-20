@@ -347,7 +347,7 @@ Comprehensive research into AI in games beyond self-driving, with concrete imple
   - [ ] Call Claude Haiku API from race_server.py after race_finished event
   - [x] Return coaching tips (3-5 bullet points) in race_finished WebSocket message
   - [x] Display tips in RaceResults.tsx below the racing line visualization
-  - [ ] Color-code racing line sections: green (faster than AI), red (slower than AI), with time delta labels
+  - [x] Color-code racing line sections: green (faster than AI), red (slower than AI), with time delta labels
 
 #### :star: 3. Ghost Car AI Clone (Imitation Learning) -- The Unique Differentiator
 - **What**: Train a small neural network on YOUR driving data, then race against a ghost car that drives exactly like you. "Can you beat yourself?"

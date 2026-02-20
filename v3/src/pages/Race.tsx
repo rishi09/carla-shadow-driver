@@ -14,6 +14,7 @@ import { useLeaderboard } from '../hooks/useLeaderboard.ts';
 import { usePersonalBests } from '../hooks/usePersonalBests.ts';
 import { useTournaments } from '../hooks/useTournaments.ts';
 import { useGamepad } from '../hooks/useGamepad.ts';
+import { usePhoneSteering } from '../hooks/usePhoneSteering.ts';
 import { useStreak } from '../hooks/useStreak.ts';
 import { useAdaptiveDifficulty } from '../hooks/useAdaptiveDifficulty.ts';
 import { useCrowdAmbiance } from '../hooks/useCrowdAmbiance.ts';
@@ -49,6 +50,7 @@ import { RecordingControls } from '../components/RecordingControls.tsx';
 import { SplitTimeDelta } from '../components/SplitTimeDelta.tsx';
 import { VoiceBoostOverlay } from '../components/VoiceBoostOverlay.tsx';
 import { VoiceCommandHUD } from '../components/VoiceCommandHUD.tsx';
+import { PhoneSteeringOverlay } from '../components/PhoneSteeringOverlay.tsx';
 import { useGhostRecorder } from '../hooks/useGhostRecorder.ts';
 import type { GhostFrame } from '../hooks/useGhostRecorder.ts';
 import { useHighlightDetector } from '../hooks/useHighlightDetector.ts';
@@ -59,7 +61,12 @@ import { useVoiceBoost } from '../hooks/useVoiceBoost.ts';
 import { useVoiceCommands } from '../hooks/useVoiceCommands.ts';
 import { useGifExport } from '../hooks/useGifExport.ts';
 import { useCargoMode } from '../hooks/useCargoMode.ts';
+import { useAmbientLight, zoneToWeatherParams } from '../hooks/useAmbientLight.ts';
+import { useTwitchChat } from '../hooks/useTwitchChat.ts';
+import type { TwitchCommand } from '../hooks/useTwitchChat.ts';
 import { CargoMeter } from '../components/CargoMeter.tsx';
+import { AmbientLightIndicator } from '../components/AmbientLightIndicator.tsx';
+import { TwitchOverlay } from '../components/TwitchOverlay.tsx';
 import { decodeGhostFromUrl } from '../utils/ghostUrl.ts';
 import { decodeChallenge, formatChallengeTime } from '../utils/challengeUrl.ts';
 import type { ChallengeData } from '../utils/challengeUrl.ts';
@@ -75,6 +82,7 @@ export function Race() {
   const isDemo = params.get('demo') === 'true';
   const directWsUrl = params.get('ws') || getLastWsUrl();
   const isQuickstart = params.get('quickstart') === 'true';
+  const twitchChannelParam = params.get('twitch') || null;
 
   // Deep linking: parse race settings from URL (e.g. shared challenge links)
   // Challenge URLs override individual query params
@@ -158,6 +166,7 @@ export function Race() {
   const personalBests = usePersonalBests();
   const tournaments = useTournaments();
   const gamepad = useGamepad();
+  const phoneSteering = usePhoneSteering();
   const streak = useStreak();
   const adaptiveDifficulty = useAdaptiveDifficulty();
   const voiceBoost = useVoiceBoost();
@@ -178,6 +187,10 @@ export function Race() {
     },
   );
   const cargoMode = useCargoMode();
+  const ambientLight = useAmbientLight();
+  const [twitchChannel, setTwitchChannel] = useState<string | null>(twitchChannelParam);
+  const twitchChat = useTwitchChat(twitchChannel);
+  const twitchCommandRef = useRef<TwitchCommand | ''>('');
   const aiPersonality = useAIPersonality();
   const commentary = useRaceCommentary();
   const subtitleCommentary = useCommentary();
@@ -1216,7 +1229,7 @@ export function Race() {
     // Expose keysRef for browser console debugging
     (window as unknown as Record<string, unknown>).__keysRef = keysRef;
 
-    // Send controls at 30Hz, merging keyboard + gamepad + voice commands
+    // Send controls at 30Hz, merging keyboard + gamepad + phone steering + voice commands
     keyIntervalRef.current = setInterval(() => {
       // E2E testing override: if window.__e2eKeys is set, use those keys
       const e2eKeys = (window as unknown as Record<string, unknown>).__e2eKeys as KeyState | undefined;
@@ -1227,7 +1240,30 @@ export function Race() {
       // Voice command effects: overlay onto key state (read from ref for latest values)
       const vc = voiceCommandEffectsRef.current;
 
-      if (gamepad.connected) {
+      if (phoneSteering.isActive) {
+        // Phone steering active: use gyroscope for analog controls
+        const phoneKeys: KeyState = {
+          w: phoneSteering.throttle > 0.05,
+          a: phoneSteering.steer < -0.05,
+          s: phoneSteering.brake > 0.05,
+          d: phoneSteering.steer > 0.05,
+          space: false,
+        };
+        // Merge: phone steering takes priority, also keep keyboard keys active
+        const mergedKeys: KeyState = {
+          w: keysRef.current.w || phoneKeys.w || vc.throttleBoost,
+          a: keysRef.current.a || phoneKeys.a || vc.steerLeft,
+          s: keysRef.current.s || phoneKeys.s || vc.brakeAssist,
+          d: keysRef.current.d || phoneKeys.d || vc.steerRight,
+          space: keysRef.current.space,
+        };
+        gpu.sendControls(mergedKeys, {
+          steer: phoneSteering.steer + (vc.steerLeft ? -0.3 : 0) + (vc.steerRight ? 0.3 : 0),
+          throttle: Math.min(1.0, phoneSteering.throttle + (vc.throttleBoost ? 0.5 : 0)),
+          brake: Math.min(1.0, phoneSteering.brake + (vc.brakeAssist ? 0.7 : 0)),
+          handbrake: false,
+        });
+      } else if (gamepad.connected) {
         // Gamepad connected: send analog controls
         // Also set keyboard keys based on gamepad for server compatibility
         const gpKeys: KeyState = {
@@ -2215,6 +2251,7 @@ export function Race() {
             racingLine={racingLine}
             playerTrail={playerTrail}
             raceFinished={view === 'results'}
+            sectorTimes={view === 'results' && gpu.raceFinished?.sector_times ? gpu.raceFinished.sector_times : null}
           />
 
           {/* Rear-view mirror (toggle with M key) */}

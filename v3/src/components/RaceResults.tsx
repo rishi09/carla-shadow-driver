@@ -939,6 +939,8 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
               playerPath={result.player_path}
               aiPath={result.ai_path}
               racingLine={result.racing_line}
+              checkpoints={result.racing_line}
+              sectorTimes={result.sector_times}
             />
           </div>
         )}
