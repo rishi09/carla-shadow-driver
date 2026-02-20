@@ -48,6 +48,10 @@ interface RaceResultsProps {
   cargoIntegrity?: number;
   /** Cargo mode: combined score (lower is better), undefined if not in cargo mode */
   cargoScore?: number;
+  /** Blindfold mode: total seconds spent blind, undefined if not in blindfold mode */
+  blindfoldTotalTime?: number;
+  /** Tab penalty: number of tab switches and total time away, undefined if no switches */
+  tabPenalty?: { switchCount: number; totalSecondsAway: number };
   /** Detected highlights from the race */
   highlights?: Highlight[];
   /** Whether this is a demo session (skip cloud leaderboard) */
@@ -123,7 +127,7 @@ function formatGap(seconds: number): string {
   return abs.toFixed(1);
 }
 
-export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onInstantReplay, personalBestResult, isDailyChallenge, dailyChallengePosition, streakResult, ghostFrames, dareTime, challengeData, cargoIntegrity, cargoScore, highlights, isDemo, onRaceGhost, tournamentProgress, onNextTournamentTrack }: RaceResultsProps) {
+export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onInstantReplay, personalBestResult, isDailyChallenge, dailyChallengePosition, streakResult, ghostFrames, dareTime, challengeData, cargoIntegrity, cargoScore, blindfoldTotalTime, tabPenalty, highlights, isDemo, onRaceGhost, tournamentProgress, onNextTournamentTrack }: RaceResultsProps) {
   const playerWon = result.winner === 'player';
 
   // Staggered reveal animation state
@@ -824,6 +828,42 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
                   {cargoScore.toLocaleString()}
                 </div>
                 <div className="text-white/30">pts</div>
+              </div>
+            )}
+
+            {/* Blindfold Mode stats */}
+            {blindfoldTotalTime != null && (
+              <div className="contents" style={revealStyle(7)}>
+                <div className="text-white/50 flex items-center gap-1">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-red-400/60">
+                    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+                    <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+                    <line x1="1" y1="1" x2="23" y2="23" />
+                  </svg>
+                  Blind Time
+                </div>
+                <div className="text-red-400 font-bold">
+                  {blindfoldTotalTime.toFixed(1)}s
+                </div>
+                <div className="text-white/30">driving blind</div>
+              </div>
+            )}
+
+            {/* Tab Penalty stats (fourth-wall meta feature) */}
+            {tabPenalty != null && tabPenalty.switchCount > 0 && (
+              <div className="contents" style={revealStyle(7)}>
+                <div className="text-white/50 flex items-center gap-1">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-red-400/60">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                    <circle cx="12" cy="12" r="3" />
+                    <line x1="1" y1="1" x2="23" y2="23" />
+                  </svg>
+                  Tab Away
+                </div>
+                <div className="text-red-400 font-bold">
+                  {tabPenalty.switchCount}x
+                </div>
+                <div className="text-white/30">{tabPenalty.totalSecondsAway.toFixed(1)}s away</div>
               </div>
             )}
           </div>

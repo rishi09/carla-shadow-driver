@@ -1,160 +1,368 @@
-import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
-
 /**
- * Server-driven weather mood data (from RaceState.weather_mood).
- * Used as the primary source for effect intensities.
+ * WeatherEffects.tsx - Client-side weather visual effects rendered over the
+ * video feed. Uses a canvas for particle systems (rain, snow) and CSS overlays
+ * for fog, lightning, and screen tints.
+ *
+ * Effects:
+ *   Rain   - Falling thin white/blue streaks (200-400 particles, 2-4px long),
+ *            wind-affected angle. Splash circles expand at the bottom.
+ *            Longer "windshield wipe" streaks sweep across the screen.
+ *            Subtle blue tint at screen edges (5% opacity gradient).
+ *   Thunder- Random screen-wide white flash (50ms, 10-30% opacity),
+ *            followed by a bass rumble via parent callback to
+ *            useWeatherEffects.playThunder(). Interval: 8-20 seconds.
+ *   Fog    - Radial CSS blur from edges inward (center clear, edges 3-5px blur).
+ *            White/gray overlay at 10-15% opacity.
+ *            Animated wisps: slowly drifting semi-transparent CSS shapes.
+ *   Snow   - Falling white circles (2-6px diameter, 100-200 particles),
+ *            slow fall with sinusoidal horizontal drift. Gradual white
+ *            accumulation at screen bottom. "LOW GRIP" warning text.
+ *
+ * All layers use pointer-events: none to avoid blocking interaction.
+ * Canvas uses requestAnimationFrame with delta-time for consistent speed.
  */
-interface WeatherMood {
-  mood: 'CALM' | 'BUILDING' | 'TENSE' | 'DRAMATIC' | 'EPIC' | 'FINALE' | 'NIGHT_TENSE';
-  intensity: number;
-  precipitation: number;
-  fog_density: number;
-  wind_intensity: number;
-  cloudiness: number;
-  wetness?: number;
-}
 
-/**
- * Derived weather parameters used internally for rendering effects.
- * Values are normalized 0-1 unless noted.
- */
-interface WeatherParams {
-  /** Precipitation intensity 0-1 (0 = none, 1 = torrential) */
-  precipitation: number;
-  /** Fog density 0-1 */
-  fogDensity: number;
-  /** Wind intensity 0-1 */
-  windIntensity: number;
-  /** Whether to render snow instead of rain */
-  isSnow: boolean;
-  /** Whether thunder effects should fire */
-  hasThunder: boolean;
-}
+import { useRef, useEffect, useState, useMemo } from 'react';
+import type { WeatherEffectState } from '../hooks/useWeatherEffects.ts';
+
+// ---------------------------------------------------------------------------
+// Props
+// ---------------------------------------------------------------------------
 
 interface WeatherEffectsProps {
-  /** Server weather mood telemetry (primary data source) */
-  weatherMood?: WeatherMood | null;
-  /** Weather preset selected in RaceSetup (fallback when no server data) */
-  weatherPreset?: string;
-  /** Player speed for wind-angle adjustments */
+  /** Normalized weather effect state from useWeatherEffects hook */
+  effects: WeatherEffectState;
+  /** Called when a lightning flash fires so the parent can trigger audio */
+  onLightningFlash?: () => void;
+  /** Current player speed in km/h (affects rain angle) */
   speedKmh?: number;
 }
 
-/** Map weather preset names to synthetic WeatherParams for fallback rendering */
-function presetToParams(preset: string): WeatherParams {
-  switch (preset) {
-    case 'rain':
-      return { precipitation: 0.5, fogDensity: 0.15, windIntensity: 0.3, isSnow: false, hasThunder: false };
-    case 'storm':
-      return { precipitation: 0.85, fogDensity: 0.25, windIntensity: 0.6, isSnow: false, hasThunder: true };
-    case 'cloudy':
-      return { precipitation: 0.1, fogDensity: 0.2, windIntensity: 0.15, isSnow: false, hasThunder: false };
-    case 'night':
-      return { precipitation: 0, fogDensity: 0.35, windIntensity: 0.05, isSnow: false, hasThunder: false };
-    case 'snow':
-    case 'winter':
-      return { precipitation: 0.5, fogDensity: 0.3, windIntensity: 0.15, isSnow: true, hasThunder: false };
-    default: // 'clear', 'sunset', etc.
-      return { precipitation: 0, fogDensity: 0, windIntensity: 0, isSnow: false, hasThunder: false };
-  }
-}
+// ---------------------------------------------------------------------------
+// Particle interfaces
+// ---------------------------------------------------------------------------
 
-/** Convert server weather_mood to normalized WeatherParams */
-function moodToParams(mood: WeatherMood): WeatherParams {
-  const precip = mood.precipitation / 100; // server sends 0-100
-  const fog = mood.fog_density / 100;
-  const wind = mood.wind_intensity / 100;
-  const isSnow = false; // server doesn't distinguish snow -- would need preset name
-  const hasThunder = precip > 0.7;
-  return { precipitation: precip, fogDensity: fog, windIntensity: wind, isSnow, hasThunder };
-}
-
-// -----------------------------------------------------------------------
-// Rain / Snow Particle types
-// -----------------------------------------------------------------------
 interface RainDrop {
   x: number;
   y: number;
-  speed: number;
-  length: number;
+  speed: number;  // px/s vertical
+  length: number; // streak length multiplier (2-4)
   opacity: number;
-  /** Wind drift in px/frame */
-  drift: number;
+  drift: number;  // px/s horizontal wind drift
+}
+
+interface RainSplash {
+  x: number;
+  y: number;
+  radius: number;
+  maxRadius: number;
+  life: number; // 1 = just born, 0 = dead
+}
+
+interface WindshieldStreak {
+  x: number;     // px
+  y: number;     // px
+  length: number; // px
+  angle: number;  // radians
+  opacity: number;
+  speed: number;  // px/s wipe speed downward
+  life: number;   // 1 -> 0
 }
 
 interface SnowFlake {
   x: number;
   y: number;
-  speed: number;
-  radius: number;
+  speed: number;  // px/s fall speed
+  radius: number; // 1-3 px (renders as 2-6px diameter)
   opacity: number;
-  /** Phase offset for sinusoidal horizontal drift */
-  phase: number;
-  /** Frequency multiplier for drift */
-  freq: number;
+  phase: number;  // sinusoidal drift phase
+  freq: number;   // drift frequency multiplier
 }
 
-// -----------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+const LIGHTNING_MIN_INTERVAL = 8000;
+const LIGHTNING_MAX_INTERVAL = 20000;
+const LIGHTNING_FLASH_DURATION = 50;
+const SPLASH_LIFETIME = 0.3;
+const WISP_COUNT = 5;
+
+// ---------------------------------------------------------------------------
+// Particle factory helpers
+// ---------------------------------------------------------------------------
+
+function createRainDrop(w: number, h: number, wind: number, randomY: boolean): RainDrop {
+  return {
+    x: Math.random() * w * 1.2 - w * 0.1,
+    y: randomY ? Math.random() * h : -(10 + Math.random() * 30),
+    speed: 600 + Math.random() * 400,
+    length: 2 + Math.random() * 2,
+    opacity: 0.3 + Math.random() * 0.4,
+    drift: (wind * 0.5 + Math.random() * 0.3) * 100,
+  };
+}
+
+function createSnowFlake(w: number, h: number, randomY: boolean): SnowFlake {
+  return {
+    x: Math.random() * w,
+    y: randomY ? Math.random() * h : -(5 + Math.random() * 20),
+    speed: 30 + Math.random() * 50,
+    radius: 1 + Math.random() * 2,
+    opacity: 0.4 + Math.random() * 0.4,
+    phase: Math.random() * Math.PI * 2,
+    freq: 0.5 + Math.random() * 1.0,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Canvas drawing functions
+// ---------------------------------------------------------------------------
+
+function drawRainParticles(
+  ctx: CanvasRenderingContext2D,
+  drops: RainDrop[],
+  splashes: RainSplash[],
+  streaks: WindshieldStreak[],
+  w: number,
+  h: number,
+  dt: number,
+  wind: number,
+  rainIntensity: number,
+  speedKmh: number,
+) {
+  // Wind angle: slight angle from vertical, affected by wind + car speed
+  const windAngle = 5 + wind * 15;
+  const speedAngle = Math.min(15, speedKmh / 10);
+  const totalAngleDeg = windAngle + speedAngle;
+  const rad = (totalAngleDeg * Math.PI) / 180;
+  const dx = Math.sin(rad);
+  const dy = Math.cos(rad);
+
+  // --- Raindrops (thin white/blue lines, 2-4px long) ---
+  ctx.lineCap = 'round';
+  for (let i = 0; i < drops.length; i++) {
+    const d = drops[i];
+    d.x += (d.drift + dx * d.speed * 0.3) * dt;
+    d.y += dy * d.speed * dt;
+
+    // Off-screen: spawn a splash at bottom before resetting
+    if (d.y > h + 20 || d.x > w + 50 || d.x < -50) {
+      if (d.y > h - 30 && splashes.length < 60) {
+        splashes.push({
+          x: Math.min(Math.max(d.x, 0), w),
+          y: h - Math.random() * 4,
+          radius: 0,
+          maxRadius: 2 + Math.random() * 3,
+          life: 1,
+        });
+      }
+      drops[i] = createRainDrop(w, h, wind, false);
+      continue;
+    }
+
+    // Draw raindrop as a short line
+    const endX = d.x - dx * d.length * 4;
+    const endY = d.y - dy * d.length * 4;
+    ctx.beginPath();
+    ctx.moveTo(d.x, d.y);
+    ctx.lineTo(endX, endY);
+    ctx.strokeStyle = `rgba(180, 210, 255, ${d.opacity})`;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+
+  // --- Splash circles (small expanding rings at screen bottom) ---
+  for (let i = splashes.length - 1; i >= 0; i--) {
+    const s = splashes[i];
+    s.life -= dt / SPLASH_LIFETIME;
+    s.radius = s.maxRadius * (1 - s.life);
+
+    if (s.life <= 0) {
+      splashes.splice(i, 1);
+      continue;
+    }
+
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, s.radius, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(180, 210, 255, ${(s.life * 0.35 * rainIntensity).toFixed(2)})`;
+    ctx.lineWidth = 0.7;
+    ctx.stroke();
+  }
+
+  // --- Windshield wipe streaks (longer lines that sweep across) ---
+  const maxStreaks = Math.round(6 * rainIntensity);
+  if (streaks.length < maxStreaks && Math.random() < dt * 2 * rainIntensity) {
+    streaks.push({
+      x: Math.random() * w,
+      y: Math.random() * h * 0.4,
+      length: 40 + Math.random() * 80,
+      angle: rad * 0.6 + (Math.random() - 0.5) * 0.2,
+      opacity: 0.04 + Math.random() * 0.08,
+      speed: 200 + Math.random() * 300,
+      life: 1,
+    });
+  }
+
+  for (let i = streaks.length - 1; i >= 0; i--) {
+    const s = streaks[i];
+    s.y += s.speed * dt;
+    s.life -= dt * 0.5;
+
+    if (s.life <= 0 || s.y > h + 20) {
+      streaks.splice(i, 1);
+      continue;
+    }
+
+    const endX = s.x + Math.sin(s.angle) * s.length;
+    const endY = s.y + Math.cos(s.angle) * s.length;
+    ctx.beginPath();
+    ctx.moveTo(s.x, s.y);
+    ctx.lineTo(endX, endY);
+    ctx.strokeStyle = `rgba(200, 220, 255, ${(s.opacity * s.life).toFixed(3)})`;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }
+}
+
+function drawSnowParticles(
+  ctx: CanvasRenderingContext2D,
+  flakes: SnowFlake[],
+  w: number,
+  h: number,
+  dt: number,
+  wind: number,
+  snowAccum: { value: number },
+  snowIntensity: number,
+) {
+  const time = performance.now() / 1000;
+
+  // Update and draw snowflakes (white circles, 2-6px diameter, gentle drift)
+  for (let i = 0; i < flakes.length; i++) {
+    const f = flakes[i];
+    f.y += f.speed * dt;
+    f.x += Math.sin(time * f.freq + f.phase) * 20 * dt; // sinusoidal drift
+    f.x += wind * 30 * dt; // wind effect
+
+    if (f.y > h + 10 || f.x > w + 20 || f.x < -20) {
+      flakes[i] = createSnowFlake(w, h, false);
+      continue;
+    }
+
+    ctx.beginPath();
+    ctx.arc(f.x, f.y, f.radius, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(240, 245, 255, ${f.opacity})`;
+    ctx.fill();
+  }
+
+  // Snow accumulation: bottom of screen gradually gets white
+  snowAccum.value = Math.min(1, snowAccum.value + dt * 0.008 * snowIntensity);
+  const accumHeight = snowAccum.value * 12;
+  if (accumHeight > 0.5) {
+    const gradient = ctx.createLinearGradient(0, h - accumHeight * 3, 0, h);
+    gradient.addColorStop(0, 'rgba(255, 255, 255, 0)');
+    gradient.addColorStop(1, `rgba(255, 255, 255, ${(0.12 * snowIntensity).toFixed(2)})`);
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, h - accumHeight * 3, w, accumHeight * 3);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Component
-// -----------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 
-/**
- * Client-side weather visual effects overlay.
- *
- * Renders on a full-screen canvas + CSS layers with pointer-events: none
- * so it doesn't block controls or HUD interaction.
- *
- * Effects:
- *   Rain  -- falling angled lines (200-400 particles) when precipitation > 0.3
- *   Thunder -- screen flash + sub-bass rumble when precipitation > 0.7
- *   Fog   -- radial CSS blur + white overlay at edges when fog_density > 0.3
- *   Snow  -- gentle falling circles with sinusoidal drift + LOW GRIP warning
- */
-export function WeatherEffects({ weatherMood, weatherPreset = 'clear', speedKmh = 0 }: WeatherEffectsProps) {
+export function WeatherEffects({ effects, onLightningFlash, speedKmh = 0 }: WeatherEffectsProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const animFrameRef = useRef<number>(0);
-  const rainRef = useRef<RainDrop[]>([]);
-  const snowRef = useRef<SnowFlake[]>([]);
-  const paramsRef = useRef<WeatherParams>({ precipitation: 0, fogDensity: 0, windIntensity: 0, isSnow: false, hasThunder: false });
+  const animFrameRef = useRef(0);
+
+  // Particle pools (persisted via refs across frames)
+  const rainDropsRef = useRef<RainDrop[]>([]);
+  const splashesRef = useRef<RainSplash[]>([]);
+  const streaksRef = useRef<WindshieldStreak[]>([]);
+  const snowFlakesRef = useRef<SnowFlake[]>([]);
+  const snowAccumRef = useRef({ value: 0 });
+
+  // Lightning
+  const [lightningFlash, setLightningFlash] = useState(false);
+  const lightningTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lightningOpacityRef = useRef(0);
+
+  // Cache props in refs so the stable animation loop can read them
+  const effectsRef = useRef(effects);
+  effectsRef.current = effects;
   const speedRef = useRef(speedKmh);
-
-  // Thunder state
-  const [thunderFlash, setThunderFlash] = useState(false);
-  const thunderTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const audioCtxRef = useRef<AudioContext | null>(null);
-
-  // Keep speed ref in sync without re-mounting effects
   speedRef.current = speedKmh;
+  const onLightningFlashRef = useRef(onLightningFlash);
+  onLightningFlashRef.current = onLightningFlash;
 
-  // Derive params from server mood or preset fallback
-  const params = useMemo<WeatherParams>(() => {
-    if (weatherMood) return moodToParams(weatherMood);
-    return presetToParams(weatherPreset);
-  }, [weatherMood, weatherPreset]);
+  // Fog wisp data (stable across component lifetime)
+  const fogWisps = useMemo(() => {
+    return Array.from({ length: WISP_COUNT }, (_, i) => ({
+      id: i,
+      x: 10 + Math.random() * 80,
+      y: 20 + Math.random() * 60,
+      width: 150 + Math.random() * 200,
+      height: 40 + Math.random() * 60,
+      duration: 12 + Math.random() * 13,
+      delay: Math.random() * 8,
+      opacity: 0.03 + Math.random() * 0.05,
+    }));
+  }, []);
 
-  paramsRef.current = params;
-
-  // ----- Rain particle pool -----
-  const initRain = useCallback((width: number, height: number) => {
-    const count = Math.floor(200 + params.precipitation * 200); // 200-400
-    const drops: RainDrop[] = [];
-    for (let i = 0; i < count; i++) {
-      drops.push(createRainDrop(width, height, params.windIntensity, true));
+  // ------------------------------------------------------------------
+  // Lightning scheduling: fires on random 8-20 second intervals
+  // ------------------------------------------------------------------
+  useEffect(() => {
+    if (!effects.thunder) {
+      if (lightningTimerRef.current) {
+        clearTimeout(lightningTimerRef.current);
+        lightningTimerRef.current = null;
+      }
+      setLightningFlash(false);
+      return;
     }
-    rainRef.current = drops;
-  }, [params.precipitation, params.windIntensity]);
 
-  // ----- Snow particle pool -----
-  const initSnow = useCallback((width: number, height: number) => {
-    const count = Math.floor(100 + params.precipitation * 100); // 100-200
-    const flakes: SnowFlake[] = [];
-    for (let i = 0; i < count; i++) {
-      flakes.push(createSnowFlake(width, height, true));
-    }
-    snowRef.current = flakes;
-  }, [params.precipitation]);
+    const scheduleFlash = () => {
+      const delay = LIGHTNING_MIN_INTERVAL + Math.random() * (LIGHTNING_MAX_INTERVAL - LIGHTNING_MIN_INTERVAL);
+      lightningTimerRef.current = setTimeout(() => {
+        lightningOpacityRef.current = 0.1 + Math.random() * 0.2;
+        setLightningFlash(true);
+        onLightningFlashRef.current?.();
 
-  // ----- Canvas animation loop -----
+        setTimeout(() => {
+          setLightningFlash(false);
+          lightningOpacityRef.current = 0;
+        }, LIGHTNING_FLASH_DURATION);
+
+        scheduleFlash();
+      }, delay);
+    };
+
+    // First flash after a shorter initial delay
+    const initialDelay = 3000 + Math.random() * 5000;
+    lightningTimerRef.current = setTimeout(() => {
+      lightningOpacityRef.current = 0.1 + Math.random() * 0.2;
+      setLightningFlash(true);
+      onLightningFlashRef.current?.();
+      setTimeout(() => {
+        setLightningFlash(false);
+        lightningOpacityRef.current = 0;
+      }, LIGHTNING_FLASH_DURATION);
+      scheduleFlash();
+    }, initialDelay);
+
+    return () => {
+      if (lightningTimerRef.current) {
+        clearTimeout(lightningTimerRef.current);
+        lightningTimerRef.current = null;
+      }
+    };
+  }, [effects.thunder]);
+
+  // ------------------------------------------------------------------
+  // Canvas animation loop (stable effect, reads from refs)
+  // ------------------------------------------------------------------
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -162,14 +370,13 @@ export function WeatherEffects({ weatherMood, weatherPreset = 'clear', speedKmh 
     if (!ctx) return;
 
     const resize = () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-      // Re-init particles on resize
-      if (paramsRef.current.isSnow) {
-        initSnow(canvas.width, canvas.height);
-      } else {
-        initRain(canvas.width, canvas.height);
-      }
+      const parent = canvas.parentElement;
+      if (!parent) return;
+      const rect = parent.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = rect.width * dpr;
+      canvas.height = rect.height * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     };
     resize();
     window.addEventListener('resize', resize);
@@ -177,19 +384,74 @@ export function WeatherEffects({ weatherMood, weatherPreset = 'clear', speedKmh 
     let lastTime = performance.now();
 
     const loop = (now: number) => {
-      const dt = Math.min((now - lastTime) / 1000, 0.05); // cap dt at 50ms
+      const dt = Math.min((now - lastTime) / 1000, 0.05); // cap at 50ms
       lastTime = now;
 
-      const p = paramsRef.current;
-      const w = canvas.width;
-      const h = canvas.height;
+      const parent = canvas.parentElement;
+      if (!parent) {
+        animFrameRef.current = requestAnimationFrame(loop);
+        return;
+      }
+      const rect = parent.getBoundingClientRect();
+      const w = rect.width;
+      const h = rect.height;
+      const eff = effectsRef.current;
+      const spd = speedRef.current;
 
       ctx.clearRect(0, 0, w, h);
 
-      if (p.isSnow && p.precipitation > 0.3) {
-        drawSnow(ctx, snowRef.current, w, h, dt);
-      } else if (!p.isSnow && p.precipitation > 0.3) {
-        drawRain(ctx, rainRef.current, w, h, dt, p, speedRef.current);
+      // --- Sync rain pool size ---
+      if (eff.rain >= 0.05) {
+        const target = Math.round(200 + eff.rain * 200);
+        const pool = rainDropsRef.current;
+        while (pool.length < target) {
+          pool.push(createRainDrop(w, h, eff.wind, true));
+        }
+        if (pool.length > target) pool.length = target;
+      } else {
+        rainDropsRef.current.length = 0;
+        splashesRef.current.length = 0;
+        streaksRef.current.length = 0;
+      }
+
+      // --- Sync snow pool size ---
+      if (eff.snow >= 0.05) {
+        const target = Math.round(100 + eff.snow * 100);
+        const pool = snowFlakesRef.current;
+        while (pool.length < target) {
+          pool.push(createSnowFlake(w, h, true));
+        }
+        if (pool.length > target) pool.length = target;
+      } else {
+        snowFlakesRef.current.length = 0;
+        // Slowly reduce accumulation when snow stops
+        snowAccumRef.current.value = Math.max(0, snowAccumRef.current.value - dt * 0.02);
+      }
+
+      // --- Draw rain ---
+      if (rainDropsRef.current.length > 0) {
+        drawRainParticles(
+          ctx,
+          rainDropsRef.current,
+          splashesRef.current,
+          streaksRef.current,
+          w, h, dt,
+          eff.wind,
+          eff.rain,
+          spd,
+        );
+      }
+
+      // --- Draw snow ---
+      if (snowFlakesRef.current.length > 0) {
+        drawSnowParticles(
+          ctx,
+          snowFlakesRef.current,
+          w, h, dt,
+          eff.wind,
+          snowAccumRef.current,
+          eff.snow,
+        );
       }
 
       animFrameRef.current = requestAnimationFrame(loop);
@@ -201,161 +463,114 @@ export function WeatherEffects({ weatherMood, weatherPreset = 'clear', speedKmh 
       cancelAnimationFrame(animFrameRef.current);
       window.removeEventListener('resize', resize);
     };
-  }, [initRain, initSnow]);
-
-  // ----- Re-init particles when precipitation changes significantly -----
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    if (params.isSnow) {
-      initSnow(canvas.width, canvas.height);
-    } else {
-      initRain(canvas.width, canvas.height);
-    }
-  }, [params.precipitation > 0.3, params.isSnow, initRain, initSnow]);
-
-  // ----- Thunder scheduling -----
-  useEffect(() => {
-    if (!params.hasThunder) {
-      if (thunderTimerRef.current) {
-        clearTimeout(thunderTimerRef.current);
-        thunderTimerRef.current = null;
-      }
-      return;
-    }
-
-    const scheduleThunder = () => {
-      const delay = 8000 + Math.random() * 12000; // 8-20 seconds
-      thunderTimerRef.current = setTimeout(() => {
-        // Visual flash
-        setThunderFlash(true);
-        setTimeout(() => setThunderFlash(false), 50);
-
-        // Audio rumble
-        playThunderRumble();
-
-        // Schedule next
-        scheduleThunder();
-      }, delay);
-    };
-
-    scheduleThunder();
-
-    return () => {
-      if (thunderTimerRef.current) {
-        clearTimeout(thunderTimerRef.current);
-        thunderTimerRef.current = null;
-      }
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params.hasThunder]);
-
-  /** Play a sub-bass thunder rumble via Web Audio API */
-  const playThunderRumble = useCallback(() => {
-    try {
-      if (!audioCtxRef.current) {
-        audioCtxRef.current = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
-      }
-      const ctx = audioCtxRef.current;
-      if (ctx.state === 'suspended') {
-        ctx.resume();
-      }
-
-      const now = ctx.currentTime;
-
-      // Sub-bass oscillator (40-60Hz)
-      const osc = ctx.createOscillator();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(40 + Math.random() * 20, now);
-
-      // Gain envelope: quick attack, 300ms decay
-      const gain = ctx.createGain();
-      gain.gain.setValueAtTime(0, now);
-      gain.gain.linearRampToValueAtTime(0.15, now + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
-
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start(now);
-      osc.stop(now + 0.4);
-    } catch {
-      // Audio not available -- fail silently
-    }
   }, []);
 
-  // Cleanup audio context on unmount
-  useEffect(() => {
-    return () => {
-      if (audioCtxRef.current) {
-        audioCtxRef.current.close().catch(() => {});
-        audioCtxRef.current = null;
-      }
-    };
-  }, []);
+  // ------------------------------------------------------------------
+  // Early exit: nothing to render
+  // ------------------------------------------------------------------
+  const hasRain = effects.rain >= 0.05;
+  const hasSnow = effects.snow >= 0.05;
+  const hasFog = effects.fog >= 0.05;
+  const hasAnyEffect = hasRain || hasSnow || hasFog || effects.thunder;
 
-  // ----- Fog CSS -----
-  const fogActive = params.fogDensity > 0.3;
-  const fogOpacity = fogActive ? Math.min(0.15, (params.fogDensity - 0.3) * 0.5 + 0.10) : 0;
-  const fogBlur = fogActive ? Math.min(5, 3 + (params.fogDensity - 0.3) * 6) : 0;
+  if (!hasAnyEffect) return null;
 
-  // ----- Rain tint (blue edge gradient) -----
-  const rainTintActive = !params.isSnow && params.precipitation > 0.3;
+  // Fog CSS parameters
+  const fogOverlayOpacity = hasFog ? Math.min(0.15, effects.fog * 0.25 + 0.08) : 0;
+  const fogBlurPx = hasFog ? Math.min(5, 3 + effects.fog * 4) : 0;
 
-  // Nothing to render at all?
-  const hasAnyEffect = params.precipitation > 0.3 || fogActive || params.hasThunder || params.isSnow;
-  if (!hasAnyEffect && !thunderFlash) return null;
+  // Rain blue tint opacity
+  const rainTintOpacity = hasRain ? Math.min(0.05, effects.rain * 0.06) : 0;
 
   return (
     <>
-      {/* Canvas for rain / snow particles */}
+      {/* Canvas for rain/snow particle systems */}
       <canvas
         ref={canvasRef}
-        className="absolute inset-0 pointer-events-none"
-        style={{ zIndex: 11, width: '100%', height: '100%' }}
+        className="absolute inset-0 w-full h-full pointer-events-none"
+        style={{ zIndex: 11 }}
       />
 
       {/* Rain: subtle blue tint at screen edges */}
-      {rainTintActive && (
+      {hasRain && (
         <div
           className="absolute inset-0 pointer-events-none"
           style={{
             zIndex: 10,
-            background: `radial-gradient(ellipse 110% 100% at 50% 50%, transparent 55%, rgba(60,100,180,${(0.05).toFixed(3)}) 100%)`,
-            transition: 'opacity 1s ease-out',
+            background: `radial-gradient(ellipse 110% 100% at 50% 50%, transparent 55%, rgba(60, 100, 180, ${rainTintOpacity.toFixed(3)}) 100%)`,
+            transition: 'background 1.5s ease-out',
           }}
         />
       )}
 
-      {/* Thunder: screen-wide white flash */}
-      {thunderFlash && (
+      {/* Fog: white/gray radial overlay at 10-15% opacity */}
+      {hasFog && (
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            zIndex: 10,
+            background: `radial-gradient(ellipse 100% 100% at 50% 50%, transparent 35%, rgba(220, 225, 230, ${fogOverlayOpacity.toFixed(3)}) 100%)`,
+            transition: 'background 2s ease-out',
+          }}
+        />
+      )}
+
+      {/* Fog: radial blur from edges inward (center clear, edges blurred) */}
+      {hasFog && (
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            zIndex: 10,
+            maskImage: 'radial-gradient(ellipse 70% 60% at 50% 50%, transparent 0%, black 100%)',
+            WebkitMaskImage: 'radial-gradient(ellipse 70% 60% at 50% 50%, transparent 0%, black 100%)',
+          }}
+        >
+          <div
+            className="absolute inset-0"
+            style={{
+              backdropFilter: `blur(${fogBlurPx.toFixed(1)}px)`,
+              WebkitBackdropFilter: `blur(${fogBlurPx.toFixed(1)}px)`,
+            }}
+          />
+        </div>
+      )}
+
+      {/* Fog: animated wisps (slowly drifting semi-transparent shapes) */}
+      {hasFog && (
+        <div className="absolute inset-0 pointer-events-none overflow-hidden" style={{ zIndex: 10 }}>
+          {fogWisps.map((wisp) => (
+            <div
+              key={wisp.id}
+              style={{
+                position: 'absolute',
+                left: `${wisp.x}%`,
+                top: `${wisp.y}%`,
+                width: `${wisp.width}px`,
+                height: `${wisp.height}px`,
+                borderRadius: '50%',
+                background: `radial-gradient(ellipse at center, rgba(255,255,255,${(wisp.opacity * effects.fog * 3).toFixed(3)}) 0%, transparent 70%)`,
+                animation: `weatherFxWispDrift ${wisp.duration}s ease-in-out ${wisp.delay}s infinite alternate`,
+                willChange: 'transform, opacity',
+              }}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Lightning: screen-wide white flash (50ms, 10-30% opacity) */}
+      {lightningFlash && (
         <div
           className="absolute inset-0 pointer-events-none"
           style={{
             zIndex: 25,
-            backgroundColor: 'rgba(255,255,255,0.15)',
-            animation: 'weather-fx-flash 50ms linear forwards',
-          }}
-        />
-      )}
-
-      {/* Fog: radial blur from edges + white overlay */}
-      {fogActive && (
-        <div
-          className="absolute inset-0 pointer-events-none"
-          style={{
-            zIndex: 10,
-            background: `radial-gradient(ellipse 100% 100% at 50% 50%, transparent 35%, rgba(220,225,230,${fogOpacity.toFixed(3)}) 100%)`,
-            WebkitMaskImage: 'radial-gradient(ellipse 100% 100% at 50% 50%, transparent 30%, black 70%)',
-            maskImage: 'radial-gradient(ellipse 100% 100% at 50% 50%, transparent 30%, black 70%)',
-            backdropFilter: `blur(${fogBlur}px)`,
-            WebkitBackdropFilter: `blur(${fogBlur}px)`,
-            transition: 'backdrop-filter 2s ease-out, background 2s ease-out',
+            backgroundColor: `rgba(255, 255, 255, ${lightningOpacityRef.current.toFixed(2)})`,
+            animation: `weatherFxLightningFlash ${LIGHTNING_FLASH_DURATION}ms ease-out forwards`,
           }}
         />
       )}
 
       {/* Snow: LOW GRIP warning */}
-      {params.isSnow && params.precipitation > 0.3 && (
+      {hasSnow && effects.snow > 0.3 && (
         <div
           className="absolute pointer-events-none flex items-center justify-center"
           style={{
@@ -368,10 +583,10 @@ export function WeatherEffects({ weatherMood, weatherPreset = 'clear', speedKmh 
           <div
             className="px-4 py-1.5 rounded-lg border text-xs font-bold uppercase tracking-widest"
             style={{
-              backgroundColor: 'rgba(255, 180, 0, 0.15)',
-              borderColor: 'rgba(255, 180, 0, 0.4)',
-              color: 'rgba(255, 200, 50, 0.9)',
-              animation: 'weather-fx-grip-pulse 2s ease-in-out infinite',
+              backgroundColor: 'rgba(255, 180, 0, 0.12)',
+              borderColor: 'rgba(255, 180, 0, 0.35)',
+              color: 'rgba(255, 200, 50, 0.85)',
+              animation: 'weatherFxGripPulse 2s ease-in-out infinite',
             }}
           >
             LOW GRIP
@@ -379,118 +594,28 @@ export function WeatherEffects({ weatherMood, weatherPreset = 'clear', speedKmh 
         </div>
       )}
 
-      {/* CSS keyframes for flash and grip pulse */}
+      {/* CSS keyframes */}
       <style>{`
-        @keyframes weather-fx-flash {
+        @keyframes weatherFxWispDrift {
+          0% {
+            transform: translateX(-25px) translateY(-8px) scale(1);
+            opacity: 0.5;
+          }
+          50% { opacity: 1; }
+          100% {
+            transform: translateX(25px) translateY(8px) scale(1.12);
+            opacity: 0.5;
+          }
+        }
+        @keyframes weatherFxLightningFlash {
           0% { opacity: 1; }
           100% { opacity: 0; }
         }
-        @keyframes weather-fx-grip-pulse {
+        @keyframes weatherFxGripPulse {
           0%, 100% { opacity: 0.7; }
           50% { opacity: 1; }
         }
       `}</style>
     </>
   );
-}
-
-// -----------------------------------------------------------------------
-// Particle helpers
-// -----------------------------------------------------------------------
-
-function createRainDrop(w: number, h: number, wind: number, randomY: boolean): RainDrop {
-  return {
-    x: Math.random() * w * 1.2 - w * 0.1,
-    y: randomY ? Math.random() * h : -10,
-    speed: 600 + Math.random() * 400, // px/s (fast rain)
-    length: 2 + Math.random() * 2, // 2-4 px
-    opacity: 0.3 + Math.random() * 0.4,
-    drift: (wind * 0.5 + Math.random() * 0.3) * 100, // px/s lateral drift
-  };
-}
-
-function createSnowFlake(w: number, h: number, randomY: boolean): SnowFlake {
-  return {
-    x: Math.random() * w,
-    y: randomY ? Math.random() * h : -10,
-    speed: 30 + Math.random() * 40, // px/s (slow fall)
-    radius: 1 + Math.random() * 2.5, // 2-6px diameter
-    opacity: 0.4 + Math.random() * 0.4,
-    phase: Math.random() * Math.PI * 2,
-    freq: 0.5 + Math.random() * 1.0,
-  };
-}
-
-function drawRain(
-  ctx: CanvasRenderingContext2D,
-  drops: RainDrop[],
-  w: number,
-  h: number,
-  dt: number,
-  params: WeatherParams,
-  speedKmh: number,
-) {
-  const windAngle = 5 + params.windIntensity * 15; // degrees from vertical (5-20)
-  const speedAngle = Math.min(15, speedKmh / 10); // extra angle from car speed
-  const totalAngle = windAngle + speedAngle;
-  const rad = (totalAngle * Math.PI) / 180;
-  const dx = Math.sin(rad);
-  const dy = Math.cos(rad);
-
-  ctx.lineCap = 'round';
-
-  for (let i = 0; i < drops.length; i++) {
-    const d = drops[i];
-
-    // Update position
-    d.x += (d.drift + dx * d.speed) * dt;
-    d.y += dy * d.speed * dt;
-
-    // Reset if off-screen
-    if (d.y > h + 20 || d.x > w + 50 || d.x < -50) {
-      drops[i] = createRainDrop(w, h, params.windIntensity, false);
-      continue;
-    }
-
-    // Draw the rain streak
-    const endX = d.x - dx * d.length;
-    const endY = d.y - dy * d.length;
-
-    ctx.beginPath();
-    ctx.moveTo(d.x, d.y);
-    ctx.lineTo(endX, endY);
-    ctx.strokeStyle = `rgba(180, 210, 255, ${d.opacity})`;
-    ctx.lineWidth = 1;
-    ctx.stroke();
-  }
-}
-
-function drawSnow(
-  ctx: CanvasRenderingContext2D,
-  flakes: SnowFlake[],
-  w: number,
-  h: number,
-  dt: number,
-) {
-  const time = performance.now() / 1000;
-
-  for (let i = 0; i < flakes.length; i++) {
-    const f = flakes[i];
-
-    // Update position: gentle fall + sinusoidal horizontal drift
-    f.y += f.speed * dt;
-    f.x += Math.sin(time * f.freq + f.phase) * 20 * dt;
-
-    // Reset if off-screen
-    if (f.y > h + 10 || f.x > w + 20 || f.x < -20) {
-      flakes[i] = createSnowFlake(w, h, false);
-      continue;
-    }
-
-    // Draw snowflake as a white circle
-    ctx.beginPath();
-    ctx.arc(f.x, f.y, f.radius, 0, Math.PI * 2);
-    ctx.fillStyle = `rgba(240, 245, 255, ${f.opacity})`;
-    ctx.fill();
-  }
 }
