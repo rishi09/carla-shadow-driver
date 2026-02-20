@@ -10,6 +10,7 @@ import { useSteeringPrediction } from '../hooks/useSteeringPrediction.ts';
 import { useFrameExtrapolation } from '../hooks/useFrameExtrapolation.ts';
 import { useLeaderboard } from '../hooks/useLeaderboard.ts';
 import { usePersonalBests } from '../hooks/usePersonalBests.ts';
+import { useTournaments } from '../hooks/useTournaments.ts';
 import { useGamepad } from '../hooks/useGamepad.ts';
 import { useStreak } from '../hooks/useStreak.ts';
 import { useAdaptiveDifficulty } from '../hooks/useAdaptiveDifficulty.ts';
@@ -55,6 +56,8 @@ import { useGifExport } from '../hooks/useGifExport.ts';
 import { useCargoMode } from '../hooks/useCargoMode.ts';
 import { CargoMeter } from '../components/CargoMeter.tsx';
 import { decodeGhostFromUrl } from '../utils/ghostUrl.ts';
+import { decodeChallenge, formatChallengeTime } from '../utils/challengeUrl.ts';
+import type { ChallengeData } from '../utils/challengeUrl.ts';
 import type { KeyState } from '../types/index.ts';
 import { useEffect, useRef } from 'react';
 
@@ -69,14 +72,20 @@ export function Race() {
   const isQuickstart = params.get('quickstart') === 'true';
 
   // Deep linking: parse race settings from URL (e.g. shared challenge links)
-  const urlSettings = useMemo(() => ({
-    track: params.get('track') || undefined,
-    laps: params.get('laps') ? parseInt(params.get('laps')!, 10) : undefined,
-    weather: params.get('weather') || undefined,
-    model: params.get('model') || undefined,
-    playerCar: params.get('playerCar') || undefined,
-    timeOfDay: params.get('timeOfDay') || undefined,
-  }), []); // eslint-disable-line react-hooks/exhaustive-deps
+  // Challenge URLs override individual query params
+  const urlSettings = useMemo(() => {
+    const challengeParam = params.get('challenge');
+    const challenge = challengeParam ? decodeChallenge(challengeParam) : null;
+
+    return {
+      track: challenge?.track || params.get('track') || undefined,
+      laps: challenge?.laps || (params.get('laps') ? parseInt(params.get('laps')!, 10) : undefined),
+      weather: challenge?.weather || params.get('weather') || undefined,
+      model: challenge?.model || params.get('model') || undefined,
+      playerCar: params.get('playerCar') || undefined,
+      timeOfDay: challenge?.timeOfDay || params.get('timeOfDay') || undefined,
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Challenge ghost: decode ghost data from URL parameter
   const ghostParam = useMemo(() => params.get('ghost') || null, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -88,6 +97,16 @@ export function Race() {
     const parsed = parseFloat(dareParam);
     return isNaN(parsed) || parsed <= 0 ? null : parsed;
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Bet-Your-Laptime Challenge: parse ?challenge=<base64url> param
+  const challengeData = useMemo<ChallengeData | null>(() => {
+    const challengeParam = params.get('challenge');
+    if (!challengeParam) return null;
+    return decodeChallenge(challengeParam);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Effective dare time: either from ?dare= or from ?challenge= (challenge takes priority)
+  const effectiveDareTime = challengeData?.time ?? dareTime;
 
   const [challengeGhostFrames, setChallengeGhostFrames] = useState<GhostFrame[] | null>(null);
   const challengeGhostDecodedRef = useRef(false);
@@ -130,6 +149,7 @@ export function Race() {
   const crowd = useCrowdAmbiance();
   const leaderboard = useLeaderboard();
   const personalBests = usePersonalBests();
+  const tournaments = useTournaments();
   const gamepad = useGamepad();
   const streak = useStreak();
   const adaptiveDifficulty = useAdaptiveDifficulty();
@@ -157,6 +177,16 @@ export function Race() {
   // Daily challenge state
   const [isDailyChallenge, setIsDailyChallenge] = useState(false);
   const [dailyChallengePosition, setDailyChallengePosition] = useState<{ position: number; total: number; isNewBest: boolean } | null>(null);
+
+  // Tournament state
+  const [tournamentProgressResult, setTournamentProgressResult] = useState<{
+    tournamentName: string;
+    tournamentIcon: string;
+    tracksCompleted: number;
+    totalTracks: number;
+    badge: import('../hooks/useTournaments.ts').TournamentBadge;
+    nextTrack: string | null;
+  } | null>(null);
 
   // First-time player detection
   const [showFirstTimeOverlay, setShowFirstTimeOverlay] = useState(false);
@@ -1407,6 +1437,32 @@ export function Race() {
           const dcResult = saveDailyChallengeResult(gpu.raceFinished.player_time, daily.daySeed);
           setDailyChallengePosition(dcResult);
         }
+
+        // Record tournament result if applicable
+        const settings = lastRaceSettingsRef.current;
+        if (settings && tournaments.isCurrentTournamentRace(config.track, config.laps, settings.weather ?? 'clear', settings.model)) {
+          tournaments.recordResult(config.track, gpu.raceFinished.player_time);
+          // Compute tournament progress for the results screen
+          // Re-read progress after recording (state update is async, so compute eagerly)
+          const completedTracks = tournaments.current.tracks.filter(t => {
+            if (t === config.track) return true; // This track was just completed
+            return tournaments.getTrackBestTime(t) !== null;
+          });
+          const nextIncomplete = tournaments.current.tracks.find(t => {
+            if (t === config.track) return false; // We just raced this one
+            return tournaments.getTrackBestTime(t) === null;
+          });
+          setTournamentProgressResult({
+            tournamentName: tournaments.current.name,
+            tournamentIcon: tournaments.current.icon,
+            tracksCompleted: completedTracks.length,
+            totalTracks: tournaments.current.tracks.length,
+            badge: tournaments.badge, // Will update on next render
+            nextTrack: nextIncomplete ?? null,
+          });
+        } else {
+          setTournamentProgressResult(null);
+        }
       } else {
         setPbResult(null);
       }
@@ -1518,6 +1574,7 @@ export function Race() {
   const handlePlayAgain = useCallback(() => {
     setIsDailyChallenge(false);
     setDailyChallengePosition(null);
+    setTournamentProgressResult(null);
     setView('pre_race');
   }, []);
 
@@ -1597,7 +1654,8 @@ export function Race() {
           urlSettings={urlSettings}
           isCargoMode={cargoMode.isCargoMode}
           onToggleCargoMode={cargoMode.setCargoMode}
-          dareTime={dareTime}
+          dareTime={effectiveDareTime}
+          challengeData={challengeData}
         />
       )}
 
@@ -1961,6 +2019,23 @@ export function Race() {
                   50% { opacity: 0.4; }
                 }
               `}</style>
+            </div>
+          )}
+
+          {/* Bet-Your-Laptime Challenge banner (from ?challenge= URL param) */}
+          {challengeData && !showChallengeGhostBanner && (
+            <div className="absolute top-16 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
+              <div className="flex items-center gap-2 rounded-full px-5 py-2 border border-purple-500/30 bg-black/70 backdrop-blur-sm">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-purple-400">
+                  <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6" /><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18" />
+                  <path d="M4 22h16" /><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22" />
+                  <path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22" />
+                  <path d="M18 2H6v7a6 6 0 0 0 12 0V2Z" />
+                </svg>
+                <span className="text-purple-400/90 text-xs font-bold uppercase tracking-wider">
+                  Beat {challengeData.playerName}'s {formatChallengeTime(challengeData.time)}
+                </span>
+              </div>
             </div>
           )}
 
@@ -2334,10 +2409,24 @@ export function Race() {
             dailyChallengePosition={dailyChallengePosition}
             streakResult={streakResult}
             ghostFrames={ghostRecorder.getGhostData().frames}
-            dareTime={dareTime}
+            dareTime={effectiveDareTime}
+            challengeData={challengeData}
             cargoIntegrity={cargoMode.isCargoMode ? cargoMode.integrity : undefined}
             cargoScore={cargoMode.isCargoMode && gpu.raceFinished.player_time != null ? cargoMode.computeScore(gpu.raceFinished.player_time) : undefined}
             highlights={raceHighlights}
+            tournamentProgress={tournamentProgressResult}
+            onNextTournamentTrack={tournamentProgressResult?.nextTrack ? () => {
+              // Navigate to the next tournament track with pre-filled settings
+              const next = tournamentProgressResult.nextTrack;
+              if (!next) return;
+              const params = new URLSearchParams(window.location.search);
+              params.set('track', next);
+              params.set('laps', String(tournaments.current.laps));
+              params.set('weather', tournaments.current.weather);
+              params.set('model', tournaments.current.model);
+              params.set('timeOfDay', tournaments.current.timeOfDay);
+              window.location.href = `/race?${params.toString()}`;
+            } : undefined}
           />
           {/* Photo Finish overlay on results screen (golden glow + text, auto-dismisses after 3s) */}
           {photoFinish && (

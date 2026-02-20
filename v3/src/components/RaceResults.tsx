@@ -3,6 +3,8 @@ import type { RaceFinished } from '../types/index.ts';
 import type { PersonalBestResult } from '../hooks/usePersonalBests.ts';
 import type { GhostFrame } from '../hooks/useGhostRecorder.ts';
 import { encodeGhostForUrl } from '../utils/ghostUrl.ts';
+import { createChallengeUrl, formatChallengeTime } from '../utils/challengeUrl.ts';
+import type { ChallengeData } from '../utils/challengeUrl.ts';
 import { RacingLineViz } from './RacingLineViz.tsx';
 import { RaceResultCard } from './RaceResultCard.tsx';
 import { HighlightReel } from './HighlightReel.tsx';
@@ -10,6 +12,7 @@ import type { Highlight } from '../hooks/useHighlightDetector.ts';
 import { useCloudLeaderboard } from '../hooks/useCloudLeaderboard.ts';
 import type { CloudSubmitResult, CloudLeaderboardEntry } from '../hooks/useCloudLeaderboard.ts';
 import { CloudLeaderboard } from './CloudLeaderboard.tsx';
+import type { TournamentBadge } from '../hooks/useTournaments.ts';
 
 interface RaceResultsProps {
   result: RaceFinished;
@@ -38,6 +41,8 @@ interface RaceResultsProps {
   ghostFrames?: GhostFrame[];
   /** Dare challenge: time to beat (from ?dare=X query param), null if not a dare */
   dareTime?: number | null;
+  /** Bet-Your-Laptime challenge data (from ?challenge= URL param) */
+  challengeData?: ChallengeData | null;
   /** Cargo mode: final integrity percentage (0-100), undefined if not in cargo mode */
   cargoIntegrity?: number;
   /** Cargo mode: combined score (lower is better), undefined if not in cargo mode */
@@ -48,6 +53,17 @@ interface RaceResultsProps {
   isDemo?: boolean;
   /** Called when user wants to race against a ghost from the leaderboard */
   onRaceGhost?: (ghostId: string, entry: CloudLeaderboardEntry) => void;
+  /** Tournament progress info (if this race was part of a tournament) */
+  tournamentProgress?: {
+    tournamentName: string;
+    tournamentIcon: string;
+    tracksCompleted: number;
+    totalTracks: number;
+    badge: TournamentBadge;
+    nextTrack: string | null;
+  } | null;
+  /** Navigate to next tournament track */
+  onNextTournamentTrack?: () => void;
 }
 
 const MEDAL_ICONS: Record<string, string> = {
@@ -106,7 +122,7 @@ function formatGap(seconds: number): string {
   return abs.toFixed(1);
 }
 
-export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onInstantReplay, personalBestResult, isDailyChallenge, dailyChallengePosition, streakResult, ghostFrames, dareTime, cargoIntegrity, cargoScore, highlights, isDemo, onRaceGhost }: RaceResultsProps) {
+export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onInstantReplay, personalBestResult, isDailyChallenge, dailyChallengePosition, streakResult, ghostFrames, dareTime, challengeData, cargoIntegrity, cargoScore, highlights, isDemo, onRaceGhost, tournamentProgress, onNextTournamentTrack }: RaceResultsProps) {
   const playerWon = result.winner === 'player';
 
   // Staggered reveal animation state
@@ -139,6 +155,32 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
     navigator.clipboard.writeText(dareUrl).then(() => {
       setDareCopied(true);
       setTimeout(() => setDareCopied(false), 2500);
+    }).catch(() => {});
+  }, [raceSettings, result.player_time]);
+
+  // Bet-Your-Laptime challenge: generate challenge URL with time + name + settings
+  const [betChallengeCopied, setBetChallengeCopied] = useState(false);
+
+  const handleBetChallenge = useCallback(() => {
+    if (!raceSettings || result.player_time == null) return;
+    let playerName = 'Anonymous';
+    try {
+      playerName = localStorage.getItem('shadow_driver_player_name')?.trim() || 'Anonymous';
+    } catch { /* ignore */ }
+
+    const url = createChallengeUrl({
+      track: raceSettings.track,
+      laps: raceSettings.laps,
+      time: result.player_time,
+      playerName,
+      weather: raceSettings.weather,
+      model: raceSettings.model,
+      timeOfDay: raceSettings.timeOfDay,
+    });
+
+    navigator.clipboard.writeText(url).then(() => {
+      setBetChallengeCopied(true);
+      setTimeout(() => setBetChallengeCopied(false), 3000);
     }).catch(() => {});
   }, [raceSettings, result.player_time]);
 
@@ -488,6 +530,62 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
                   )}
                 </span>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* Tournament progress banner */}
+        {tournamentProgress && revealStep >= 1 && (
+          <div className="mb-4" style={revealStyle(1)}>
+            <div className="rounded-lg border border-indigo-500/30 bg-indigo-500/[0.08] px-4 py-3">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-lg">{tournamentProgress.tournamentIcon}</span>
+                <span className="text-indigo-400 text-xs font-bold uppercase tracking-wider">
+                  {tournamentProgress.tournamentName}
+                </span>
+                {tournamentProgress.badge && (
+                  <span className="text-sm">{MEDAL_ICONS[tournamentProgress.badge]}</span>
+                )}
+              </div>
+              <div className="flex items-center gap-3">
+                {/* Progress bar */}
+                <div className="flex-1">
+                  <div className="w-full h-1.5 rounded-full bg-white/[0.08] overflow-hidden">
+                    <div
+                      className="h-full rounded-full transition-all duration-700"
+                      style={{
+                        width: `${(tournamentProgress.tracksCompleted / tournamentProgress.totalTracks) * 100}%`,
+                        background: tournamentProgress.badge === 'gold'
+                          ? 'linear-gradient(90deg, #ffd700, #ffed4a)'
+                          : 'linear-gradient(90deg, #6366f1, #818cf8)',
+                      }}
+                    />
+                  </div>
+                </div>
+                <span className="text-indigo-300/70 text-xs font-mono whitespace-nowrap">
+                  {tournamentProgress.tracksCompleted}/{tournamentProgress.totalTracks} tracks
+                </span>
+              </div>
+              {/* Progress message */}
+              <div className="mt-2 text-indigo-300/60 text-xs">
+                {tournamentProgress.tracksCompleted >= tournamentProgress.totalTracks ? (
+                  tournamentProgress.badge === 'gold'
+                    ? 'All tracks completed under par! Gold badge earned!'
+                    : 'All tracks completed! Retry tracks to beat par times for Gold.'
+                ) : tournamentProgress.nextTrack ? (
+                  <span>
+                    {tournamentProgress.totalTracks - tournamentProgress.tracksCompleted} more to go!{' '}
+                    {onNextTournamentTrack && (
+                      <button
+                        onClick={onNextTournamentTrack}
+                        className="text-indigo-400 hover:text-indigo-300 font-bold transition-colors"
+                      >
+                        Race {tournamentProgress.nextTrack} next
+                      </button>
+                    )}
+                  </span>
+                ) : null}
+              </div>
             </div>
           </div>
         )}

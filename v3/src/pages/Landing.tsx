@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { useSocialPresence } from '../hooks/useSocialPresence.ts';
 import { RecentRaces } from '../components/RecentRaces.tsx';
 import { RecentResultsTicker } from '../components/RecentResultsTicker.tsx';
+import { TournamentBanner } from '../components/TournamentBanner.tsx';
+import { TournamentResults } from '../components/TournamentResults.tsx';
 
 // ============================================================
 // SPEED CANVAS — road-like vanishing point with rushing light streaks
@@ -262,10 +264,48 @@ function TechBadge({ label, delay }: { label: string; delay: number }) {
 }
 
 // ============================================================
+// ANIMATED NUMBER — smooth count transition for live player count
+// ============================================================
+function AnimatedNumber({ value }: { value: number }) {
+  const [display, setDisplay] = useState(value);
+  const [animating, setAnimating] = useState(false);
+  const prevRef = useRef(value);
+
+  useEffect(() => {
+    if (value !== prevRef.current) {
+      setAnimating(true);
+      // Brief delay for the "out" phase, then update the number
+      const t1 = setTimeout(() => {
+        setDisplay(value);
+        prevRef.current = value;
+      }, 150);
+      const t2 = setTimeout(() => {
+        setAnimating(false);
+      }, 400);
+      return () => { clearTimeout(t1); clearTimeout(t2); };
+    }
+  }, [value]);
+
+  return (
+    <span
+      className="inline-block tabular-nums"
+      style={{
+        transition: 'transform 0.3s ease, opacity 0.3s ease',
+        transform: animating ? 'translateY(-2px) scale(1.15)' : 'translateY(0) scale(1)',
+        opacity: animating ? 0.6 : 1,
+      }}
+    >
+      {display}
+    </span>
+  );
+}
+
+// ============================================================
 // MAIN LANDING PAGE
 // ============================================================
 export function Landing() {
   const [mounted, setMounted] = useState(false);
+  const [showTournamentResults, setShowTournamentResults] = useState(false);
   const social = useSocialPresence();
 
   useEffect(() => {
@@ -391,16 +431,10 @@ export function Landing() {
                     style={{ animation: 'live-pulse 2s ease-in-out infinite' }}
                   />
                   <span className="text-green-400/80 text-xs sm:text-sm font-medium">
-                    {social.activePlayers} {social.activePlayers === 1 ? 'person' : 'people'} racing right now
+                    <AnimatedNumber value={social.activePlayers} /> {social.activePlayers === 1 ? 'person' : 'people'} racing right now
                   </span>
                 </div>
-              ) : (
-                <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-white/[0.06] bg-white/[0.02]">
-                  <span className="text-white/30 text-xs sm:text-sm">
-                    Be the first to race today!
-                  </span>
-                </div>
-              )}
+              ) : null}
               {social.totalRaces > 0 && (
                 <span className="text-white/15 text-xs font-mono">
                   {social.totalRaces.toLocaleString()} races completed
@@ -424,6 +458,28 @@ export function Landing() {
           <RecentResultsTicker />
         </div>
       </section>
+
+      {/* ===================== TOURNAMENT BANNER ===================== */}
+      <section className="relative z-10 py-8 sm:py-12 px-4 sm:px-6">
+        <div className="max-w-5xl mx-auto">
+          <div className="mb-3 flex justify-end">
+            <button
+              onClick={() => setShowTournamentResults(true)}
+              className="text-white/25 hover:text-white/50 text-xs font-mono transition-colors inline-flex items-center gap-1"
+            >
+              View full results
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="9 18 15 12 9 6" />
+              </svg>
+            </button>
+          </div>
+          <TournamentBanner />
+        </div>
+      </section>
+
+      {showTournamentResults && (
+        <TournamentResults onClose={() => setShowTournamentResults(false)} />
+      )}
 
       {/* ===================== FEATURES ===================== */}
       <section className="relative z-10 py-24 sm:py-36 px-4 sm:px-6">
