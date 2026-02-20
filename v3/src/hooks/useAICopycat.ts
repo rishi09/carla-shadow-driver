@@ -10,7 +10,6 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 
 // --- Types ---
-
 export type MistakeType = 'crash' | 'spin' | 'wrongWay' | 'offRoad' | 'slowdown' | 'wallRide';
 
 export interface Mistake { type: MistakeType; timestamp: number; description: string }
@@ -85,13 +84,8 @@ const COPY_MESSAGES: Record<MistakeType, string[]> = {
   ],
 };
 
-function randomInRange(min: number, max: number): number {
-  return min + Math.random() * (max - min);
-}
-
-function pickRandom<T>(arr: T[]): T {
-  return arr[Math.floor(Math.random() * arr.length)];
-}
+const randomInRange = (min: number, max: number) => min + Math.random() * (max - min);
+const pickRandom = <T,>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
 
 // --- Hook ---
 
@@ -223,13 +217,11 @@ export function useAICopycat(options: UseAICopycatOptions): UseAICopycatReturn {
   }, [enabled]);
 
   // Cleanup message timer on unmount
-  useEffect(() => {
-    return () => {
-      if (messageClearTimerRef.current) {
-        clearTimeout(messageClearTimerRef.current);
-        messageClearTimerRef.current = null;
-      }
-    };
+  useEffect(() => () => {
+    if (messageClearTimerRef.current) {
+      clearTimeout(messageClearTimerRef.current);
+      messageClearTimerRef.current = null;
+    }
   }, []);
 
   const mistakeCount = recordedMistakes.length;

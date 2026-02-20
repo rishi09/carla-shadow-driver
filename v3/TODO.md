@@ -907,7 +907,7 @@ Server-side: convert CARLA frames to colored ASCII art using a GPU shader. Strea
 Player finishes a race. Gets a challenge URL with their time embedded (cryptographically signed to prevent cheating). Friend clicks it, sees "Can you beat 1:23.456?" before racing. Result is binary: BEAT or FAILED. The simplicity is the viral mechanic. No leaderboards, no accounts -- just a link and a dare.
 - Viral: 9/10 | Feasibility: 9/10 | Wow: 7/10
 
-**10. Split-Screen Couples Mode**
+**10. Split-Screen Couples Mode** [DONE]
 Two players, one keyboard. Player 1: WASD. Player 2: arrow keys. Split the canvas in half, each showing their own CARLA camera. Two vehicles, one race server, one GPU. Date night racing. Server spawns two player cars and sends two JPEG streams (half-resolution each).
 - Viral: 8/10 | Feasibility: 6/10 | Wow: 8/10
 
@@ -915,7 +915,7 @@ Two players, one keyboard. Player 1: WASD. Player 2: arrow keys. Split the canva
 Twitch chat votes on controls every 500ms. "LEFT" "RIGHT" "GAS" -- most popular command wins. The car lurches around the track driven by mob rule. Integration via Twitch IRC WebSocket. The chaos IS the content.
 - Viral: 10/10 | Feasibility: 7/10 | Wow: 9/10
 
-**12. Race Roulette -- Random Stranger Matchmaking**
+**12. Race Roulette -- Random Stranger Matchmaking** [DONE]
 Click "Race a Stranger." Matchmaking service (Vercel KV) pairs you with another player who also clicked. Both get assigned to the same GPU instance. Both race the AI. The person with the better time wins. Post-race: option to rematch. No accounts needed -- just ephemeral racing rivals.
 - Viral: 8/10 | Feasibility: 5/10 | Wow: 7/10
 
@@ -923,11 +923,11 @@ Click "Race a Stranger." Matchmaking service (Vercel KV) pairs you with another 
 Show the WORST times alongside the best. "World's Slowest Lap: 14:32.891 by someone who spent the entire race in reverse." Players actively try to get on the worst leaderboard. Two leaderboards, double the competition.
 - Viral: 8/10 | Feasibility: 9/10 | Wow: 6/10
 
-**14. Commentary Soundboard for Spectators**
+**14. Commentary Soundboard for Spectators** [DONE]
 Spectator mode where you don't drive but get a soundboard of air horns, cheers, boos, and meme sounds. Your sounds play in the racer's browser. WebSocket message from spectator -> audio trigger on racer's client. The racer hears random cheering mid-race.
 - Viral: 7/10 | Feasibility: 7/10 | Wow: 7/10
 
-**15. Daily Timelapse Video**
+**15. Daily Timelapse Video** [DONE]
 Every day, auto-generate a 10-second timelapse video of all races run that day. Stitch together the best moments. Post to Twitter via a bot. "Today's Shadow Driver highlights: 47 races, 3 records broken." The game markets itself.
 - Viral: 7/10 | Feasibility: 4/10 | Wow: 6/10
 
@@ -957,7 +957,7 @@ If you crash into a wall, 30 seconds later the AI crashes into the same wall. It
 Instead of racing against you, the AI rides shotgun and gives commentary on YOUR driving. "You should have braked 20 meters earlier." "That was actually a clean apex, nice." "Oh no. Oh no no no." LLM-generated from your real-time telemetry. It's a driving instructor with opinions.
 - Viral: 9/10 | Feasibility: 7/10 | Wow: 8/10
 
-**22. AI Evolution -- Breed the Fastest Car**
+**22. AI Evolution -- Breed the Fastest Car** [DONE]
 Run a genetic algorithm on AI driving parameters (aggression, braking distance, cornering speed, risk tolerance). Each "generation" is 10 AI variants racing each other. Players can watch the evolution. After 50 generations, the winner races the player. Darwin meets drag racing.
 - Viral: 7/10 | Feasibility: 5/10 | Wow: 8/10
 

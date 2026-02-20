@@ -87,6 +87,12 @@ import { useEarthquakeCamera } from '../hooks/useEarthquakeCamera.ts';
 import { useAIGrudge } from '../hooks/useAIGrudge.ts';
 import { useDrunkAI } from '../hooks/useDrunkAI.ts';
 import { DrunkAIOverlay } from '../components/DrunkAIOverlay.tsx';
+import { useBinauralAudio } from '../hooks/useBinauralAudio.ts';
+import { useAINemesis } from '../hooks/useAINemesis.ts';
+import { CursorTrail } from '../components/CursorTrail.tsx';
+import { useStockMarketWeather } from '../hooks/useStockMarketWeather.ts';
+import { useHeartbeatAudio } from '../hooks/useHeartbeatAudio.ts';
+import { useAICopycat } from '../hooks/useAICopycat.ts';
 import { useEffect, useRef } from 'react';
 
 type RaceView = 'setup' | 'pre_race' | 'racing' | 'results';
@@ -229,6 +235,34 @@ export function Race() {
     currentLap: gpu.raceState?.player?.lap ?? 1,
     totalLaps: gpu.raceState?.player?.total_laps ?? 3,
   });
+
+  // Batch 6: Binaural 3D audio, AI Nemesis, Stock Market Weather, Heartbeat, AI Copycat
+  const playerPos = gpu.raceState?.player ? { x: gpu.raceState.player.x ?? 0, y: gpu.raceState.player.y ?? 0, z: 0 } : null;
+  const aiPos = gpu.raceState?.ai ? { x: gpu.raceState.ai.x ?? 0, y: gpu.raceState.ai.y ?? 0, z: 0 } : null;
+  const [binauralEnabled, setBinauralEnabled] = useState(false);
+  const binauralAudio = useBinauralAudio({
+    enabled: binauralEnabled && isRacing,
+    playerPosition: playerPos,
+    aiPosition: aiPos,
+    playerHeading: gpu.raceState?.player?.yaw ?? null,
+    aiSpeed: gpu.raceState?.ai?.speed_kmh ?? null,
+    playerSpeed: gpu.raceState?.player?.speed_kmh ?? null,
+  });
+  const aiNemesis = useAINemesis();
+  const stockWeather = useStockMarketWeather();
+  const heartbeat = useHeartbeatAudio({
+    enabled: isRacing,
+    speed: gpu.raceState?.player?.speed_kmh ?? 0,
+  });
+  const [copycatEnabled, setCopycatEnabled] = useState(false);
+  const aiCopycat = useAICopycat({
+    enabled: copycatEnabled && isRacing,
+    playerPosition: playerPos,
+    playerSpeed: gpu.raceState?.player?.speed_kmh ?? 0,
+    aiPosition: aiPos,
+    isColliding: (gpu.raceState?.collisions?.length ?? 0) > 0,
+  });
+
   const [twitchChannel, setTwitchChannel] = useState<string | null>(twitchChannelParam);
   const twitchChat = useTwitchChat(twitchChannel);
   const twitchCommandRef = useRef<TwitchCommand | ''>('');
@@ -548,6 +582,18 @@ export function Race() {
     timeZoneSentRef.current = true;
     gpu.sendAmbientWeather(timeZoneRacing.sunAltitude, timeZoneRacing.cloudiness, 0);
   }, [view, timeZoneRacing.enabled, timeZoneRacing.sunAltitude, timeZoneRacing.cloudiness, synthwave.enabled, ambientLight.isActive, gpu.sendAmbientWeather]);
+
+  // --- Stock market weather: market data drives CARLA weather ---
+  const stockSentRef = useRef(false);
+  useEffect(() => {
+    if (view !== 'racing' || !stockWeather.enabled || synthwave.enabled || ambientLight.isActive || timeZoneRacing.enabled) {
+      stockSentRef.current = false;
+      return;
+    }
+    if (stockSentRef.current) return;
+    stockSentRef.current = true;
+    gpu.sendAmbientWeather(stockWeather.weather.sunAltitude, stockWeather.weather.cloudiness, stockWeather.weather.rain);
+  }, [view, stockWeather.enabled, stockWeather.weather, synthwave.enabled, ambientLight.isActive, timeZoneRacing.enabled, gpu.sendAmbientWeather]);
 
   // --- Race commentary updates ---
   useEffect(() => {
@@ -1482,6 +1528,12 @@ export function Race() {
       // Record race outcome in AI grudge system
       aiGrudge.recordRaceEnd(gpu.raceFinished.winner === 'player');
 
+      // Record race outcome in AI Nemesis system
+      if (aiNemesis.currentNemesis && gpu.raceFinished.player_time != null && gpu.raceFinished.ai_time != null) {
+        const margin = Math.abs(gpu.raceFinished.player_time - gpu.raceFinished.ai_time) / 1000;
+        aiNemesis.recordResult(gpu.raceFinished.winner === 'player', margin);
+      }
+
       // Signal music stems that race is finished (triggers victory/defeat fade)
       musicStems.updateRaceState({
         speed: 0,
@@ -1938,6 +1990,15 @@ export function Race() {
           onToggleDrunkAI={setDrunkAIEnabled}
           aiGrudgeMood={aiGrudge.mood}
           aiGrudgeMessage={aiGrudge.moodMessage}
+          binauralEnabled={binauralEnabled}
+          onToggleBinaural={setBinauralEnabled}
+          aiNemesisName={aiNemesis.currentNemesis?.name}
+          aiNemesisTaunt={aiNemesis.currentNemesis ? aiNemesis.getPreRaceTaunt() : undefined}
+          stockWeatherEnabled={stockWeather.enabled}
+          onToggleStockWeather={stockWeather.setEnabled}
+          stockMarketMood={stockWeather.marketMood}
+          copycatEnabled={copycatEnabled}
+          onToggleCopycat={setCopycatEnabled}
         />
       )}
 
@@ -2349,6 +2410,18 @@ export function Race() {
             drunkLabel={drunkAI.drunkLabel}
             enabled={drunkAI.enabled}
           />
+
+          {/* AI Copycat message (when AI copies your crash) */}
+          {aiCopycat.copyMessage && (
+            <div className="absolute bottom-32 left-1/2 -translate-x-1/2 z-40 pointer-events-none">
+              <div className="bg-black/70 backdrop-blur-sm rounded-lg px-4 py-2 border border-yellow-500/30">
+                <p className="text-sm text-yellow-300 italic text-center">{aiCopycat.copyMessage}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Cursor trail (post-race fun) */}
+          <CursorTrail enabled={view === 'results'} />
 
           {/* Ambient Light indicator (room brightness -> weather) */}
           {ambientLight.isActive && (gpu.raceState?.race_status === 'racing' || gpu.raceState?.race_status === 'countdown') && (

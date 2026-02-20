@@ -170,9 +170,27 @@ interface RaceSetupProps {
   aiGrudgeMood?: string;
   /** AI grudge mood message (e.g. "May the best driver win.") */
   aiGrudgeMessage?: string;
+  /** Whether binaural 3D audio is enabled */
+  binauralEnabled?: boolean;
+  /** Toggle binaural 3D audio on/off */
+  onToggleBinaural?: (on: boolean) => void;
+  /** Current AI nemesis name (display only) */
+  aiNemesisName?: string;
+  /** Pre-race taunt from current nemesis */
+  aiNemesisTaunt?: string;
+  /** Whether stock market weather is enabled */
+  stockWeatherEnabled?: boolean;
+  /** Toggle stock market weather on/off */
+  onToggleStockWeather?: (on: boolean) => void;
+  /** Stock market mood label (e.g. "Bull Run", "Bear Territory") */
+  stockMarketMood?: string;
+  /** Whether AI copycat mode is enabled */
+  copycatEnabled?: boolean;
+  /** Toggle AI copycat mode on/off */
+  onToggleCopycat?: (on: boolean) => void;
 }
 
-export function RaceSetup({ onStartRace, onBack, onStartDailyChallenge, quickstart, isConnected, urlSettings, dareTime, challengeData, isCargoMode, onToggleCargoMode, isBlindfoldMode, onToggleBlindfoldMode, voiceCommandsSupported, voiceCommandsEnabled, onToggleVoiceCommands, ambientLightSupported, ambientLightEnabled, onToggleAmbientLight, headTrackingSupported, headTrackingEnabled, onToggleHeadTracking, twitchChannel, onSetTwitchChannel, phoneSteeringSupported, phoneSteeringEnabled, onTogglePhoneSteering, synthwaveEnabled, onToggleSynthwave, timeZoneEnabled, timeZoneLabel, onToggleTimeZone, drunkAIEnabled, onToggleDrunkAI, aiGrudgeMood, aiGrudgeMessage }: RaceSetupProps) {
+export function RaceSetup({ onStartRace, onBack, onStartDailyChallenge, quickstart, isConnected, urlSettings, dareTime, challengeData, isCargoMode, onToggleCargoMode, isBlindfoldMode, onToggleBlindfoldMode, voiceCommandsSupported, voiceCommandsEnabled, onToggleVoiceCommands, ambientLightSupported, ambientLightEnabled, onToggleAmbientLight, headTrackingSupported, headTrackingEnabled, onToggleHeadTracking, twitchChannel, onSetTwitchChannel, phoneSteeringSupported, phoneSteeringEnabled, onTogglePhoneSteering, synthwaveEnabled, onToggleSynthwave, timeZoneEnabled, timeZoneLabel, onToggleTimeZone, drunkAIEnabled, onToggleDrunkAI, aiGrudgeMood, aiGrudgeMessage, binauralEnabled, onToggleBinaural, aiNemesisName, aiNemesisTaunt, stockWeatherEnabled, onToggleStockWeather, stockMarketMood, copycatEnabled, onToggleCopycat }: RaceSetupProps) {
   const [selectedTrack, setSelectedTrack] = useState(urlSettings?.track || DEFAULT_TRACK);
   const [selectedWeather, setSelectedWeather] = useState(urlSettings?.weather || DEFAULT_WEATHER);
   const [selectedLaps, setSelectedLaps] = useState(urlSettings?.laps || DEFAULT_LAPS);
@@ -1032,6 +1050,131 @@ export function RaceSetup({ onStartRace, onBack, onStartDailyChallenge, quicksta
                 />
               </div>
             </button>
+          </div>
+        )}
+
+        {/* Binaural 3D Audio */}
+        {onToggleBinaural && (
+          <div className="mb-6">
+            <button
+              onClick={() => onToggleBinaural(!binauralEnabled)}
+              className={`w-full flex items-center gap-3 py-3 px-4 rounded-lg border text-left transition-all ${
+                binauralEnabled
+                  ? 'bg-violet-500/10 border-violet-500/40'
+                  : 'bg-black/60 border-white/10 hover:border-white/20'
+              }`}
+            >
+              <div className="shrink-0">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={binauralEnabled ? '#a78bfa' : 'rgba(255,255,255,0.4)'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M9 18V5l12-2v13" />
+                  <circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <span className={`text-sm font-medium ${binauralEnabled ? 'text-violet-400' : 'text-white'}`}>
+                    {'\uD83C\uDFA7'} 3D Spatial Audio
+                  </span>
+                  {binauralEnabled && (
+                    <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded border border-violet-500/40 bg-violet-500/20 text-violet-400">ON</span>
+                  )}
+                </div>
+                <p className="text-white/40 text-xs mt-0.5">
+                  Hear AI car position in 3D with headphones
+                </p>
+              </div>
+              <div className={`w-10 h-5 rounded-full relative transition-colors ${binauralEnabled ? 'bg-violet-500/40' : 'bg-white/10'}`}>
+                <div className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${binauralEnabled ? 'left-[22px] bg-violet-400' : 'left-0.5 bg-white/40'}`} />
+              </div>
+            </button>
+          </div>
+        )}
+
+        {/* Stock Market Weather */}
+        {onToggleStockWeather && (
+          <div className="mb-6">
+            <button
+              onClick={() => onToggleStockWeather(!stockWeatherEnabled)}
+              className={`w-full flex items-center gap-3 py-3 px-4 rounded-lg border text-left transition-all ${
+                stockWeatherEnabled
+                  ? 'bg-emerald-500/10 border-emerald-500/40'
+                  : 'bg-black/60 border-white/10 hover:border-white/20'
+              }`}
+            >
+              <div className="shrink-0">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={stockWeatherEnabled ? '#34d399' : 'rgba(255,255,255,0.4)'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="22 7 13.5 15.5 8.5 10.5 2 17" />
+                  <polyline points="16 7 22 7 22 13" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <span className={`text-sm font-medium ${stockWeatherEnabled ? 'text-emerald-400' : 'text-white'}`}>
+                    {'\uD83D\uDCC8'} Stock Market Weather
+                  </span>
+                  {stockWeatherEnabled && stockMarketMood && (
+                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded border border-emerald-500/30 bg-emerald-500/10 text-emerald-400/70">
+                      {stockMarketMood}
+                    </span>
+                  )}
+                </div>
+                <p className="text-white/40 text-xs mt-0.5">
+                  S&P 500 drives the weather: up = sunny, down = storm
+                </p>
+              </div>
+              <div className={`w-10 h-5 rounded-full relative transition-colors ${stockWeatherEnabled ? 'bg-emerald-500/40' : 'bg-white/10'}`}>
+                <div className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${stockWeatherEnabled ? 'left-[22px] bg-emerald-400' : 'left-0.5 bg-white/40'}`} />
+              </div>
+            </button>
+          </div>
+        )}
+
+        {/* AI Copycat Mode */}
+        {onToggleCopycat && (
+          <div className="mb-6">
+            <button
+              onClick={() => onToggleCopycat(!copycatEnabled)}
+              className={`w-full flex items-center gap-3 py-3 px-4 rounded-lg border text-left transition-all ${
+                copycatEnabled
+                  ? 'bg-pink-500/10 border-pink-500/40'
+                  : 'bg-black/60 border-white/10 hover:border-white/20'
+              }`}
+            >
+              <div className="shrink-0">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={copycatEnabled ? '#f472b6' : 'rgba(255,255,255,0.4)'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <span className={`text-sm font-medium ${copycatEnabled ? 'text-pink-400' : 'text-white'}`}>
+                    {'\uD83D\uDE48'} AI Copycat
+                  </span>
+                  {copycatEnabled && (
+                    <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded border border-pink-500/40 bg-pink-500/20 text-pink-400">ON</span>
+                  )}
+                </div>
+                <p className="text-white/40 text-xs mt-0.5">
+                  AI copies your crashes 30 seconds later
+                </p>
+              </div>
+              <div className={`w-10 h-5 rounded-full relative transition-colors ${copycatEnabled ? 'bg-pink-500/40' : 'bg-white/10'}`}>
+                <div className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${copycatEnabled ? 'left-[22px] bg-pink-400' : 'left-0.5 bg-white/40'}`} />
+              </div>
+            </button>
+          </div>
+        )}
+
+        {/* AI Nemesis display */}
+        {aiNemesisName && (
+          <div className="mb-6 bg-black/60 border border-red-500/30 rounded-lg px-4 py-3">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-red-400 text-sm font-bold">{'\u2694\uFE0F'} Nemesis: {aiNemesisName}</span>
+            </div>
+            {aiNemesisTaunt && (
+              <p className="text-white/50 text-xs italic">&ldquo;{aiNemesisTaunt}&rdquo;</p>
+            )}
           </div>
         )}
 
