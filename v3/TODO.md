@@ -961,7 +961,7 @@ Instead of racing against you, the AI rides shotgun and gives commentary on YOUR
 Run a genetic algorithm on AI driving parameters (aggression, braking distance, cornering speed, risk tolerance). Each "generation" is 10 AI variants racing each other. Players can watch the evolution. After 50 generations, the winner races the player. Darwin meets drag racing.
 - Viral: 7/10 | Feasibility: 5/10 | Wow: 8/10
 
-**23. AI That Reads Your Webcam and Comments**
+**23. AI That Reads Your Webcam and Comments** [DONE]
 With webcam permission, run a facial expression classifier (TensorFlow.js) on the player's face. AI taunts based on detected emotion: "You look stressed!" (when frowning), "Ha, you smiled! Was that MY drifting?" (when smiling), "Are you even paying attention?" (when looking away).
 - Viral: 10/10 | Feasibility: 5/10 | Wow: 9/10
 
@@ -971,19 +971,19 @@ With webcam permission, run a facial expression classifier (TensorFlow.js) on th
 Both cars start at the finish line and race BACKWARD around the track. The course runs in reverse. All the turns you learned are now mirrored. Your muscle memory betrays you. Simple server-side change: reverse the checkpoint order and spawn point.
 - Viral: 5/10 | Feasibility: 9/10 | Wow: 5/10
 
-**25. Tag Mode**
+**25. Tag Mode** [DONE]
 One car is "It." If you're It, you're on fire (literally -- CARLA particle effects). You lose health over time. Tag the other car by ramming into it to transfer the "It" status. Last car NOT on fire when the timer expires wins. Racing meets playground tag.
 - Viral: 8/10 | Feasibility: 6/10 | Wow: 8/10
 
-**26. Cops and Robbers**
+**26. Cops and Robbers** [DONE]
 Player is the robber, AI is the cop (or vice versa). Robber must reach checkpoints while evading the cop. Cop has a speed boost but must get within 5m of the robber to "arrest" them. Robber can use handbrake turns to escape. Completely different vibe from regular racing.
 - Viral: 8/10 | Feasibility: 7/10 | Wow: 8/10
 
-**27. The Floor is Lava**
+**27. The Floor is Lava** [DONE]
 Random sections of the road turn red (lava zones) and deal damage if you drive over them. Lava zones shift every 15 seconds. You must plan your racing line around the danger zones. Overlay rendered client-side using checkpoint/position data from server.
 - Viral: 7/10 | Feasibility: 6/10 | Wow: 7/10
 
-**28. Shrinking Track**
+**28. Shrinking Track** [DONE]
 Like a battle royale ring, the driveable road width shrinks over time. Drive outside the shrinking boundary and you take damage. By the final lap, you're threading a needle. Client-side overlay shows the boundary; server enforces collision damage.
 - Viral: 7/10 | Feasibility: 5/10 | Wow: 7/10
 
@@ -991,15 +991,15 @@ Like a battle royale ring, the driveable road width shrinks over time. Drive out
 You're carrying fragile cargo. A "cargo integrity" meter starts at 100%. Every collision, hard brake, and sharp turn depletes it. Reach the destination before it hits 0%. Compete on a combined score: speed vs cargo integrity. The tension between "go fast" and "don't break the eggs" is sublime.
 - Viral: 6/10 | Feasibility: 8/10 | Wow: 7/10
 
-**30. Musical Chairs Racing**
+**30. Musical Chairs Racing** [DONE]
 Multiple checkpoint zones on the map. Music plays. When the music stops, you must be inside a checkpoint zone within 5 seconds or you lose a life. Between stops, you race freely. Combines spatial awareness with speed.
 - Viral: 7/10 | Feasibility: 6/10 | Wow: 7/10
 
-**31. Wrong-Way Chicken**
+**31. Wrong-Way Chicken** [DONE]
 Both cars drive the track in OPPOSITE directions. You're on a collision course. First to swerve loses points. Play chicken with an AI at 200 km/h. The AI has adjustable "bravery" stats. Absolutely terrifying game of nerve.
 - Viral: 9/10 | Feasibility: 7/10 | Wow: 9/10
 
-**32. Photography Rally**
+**32. Photography Rally** [DONE]
 Drive to scenic locations on the CARLA map and "photograph" them (trigger a high-res capture from a specific angle). Scored on composition (how close you are to the target framing) and time. Racing meets photography meets scavenger hunt.
 - Viral: 6/10 | Feasibility: 6/10 | Wow: 7/10
 
@@ -1069,11 +1069,11 @@ Read the Battery Status API (`navigator.getBattery()`). Low battery = Easy mode 
 CARLA has pedestrians. Make them stop and stare when you drive past. Pedestrian heads track your car using CARLA's walker AI. At high speed, they jump out of the way. After a crash, they crowd around to look. The world reacts to you being there. Creepy and immersive.
 - Viral: 7/10 | Feasibility: 5/10 | Wow: 8/10
 
-**48. Speedrun the Internet**
+**48. Speedrun the Internet** [DONE]
 Race to load a real website faster than the AI loads its own website. Player car drives toward "google.com" checkpoint. When the car arrives, a real `fetch('https://google.com')` fires. The webpage loads in an iframe overlay. The AI does the same for a different site. First to "load" wins. Racing meets internet speed test. Utterly pointless. Absolutely hilarious.
 - Viral: 8/10 | Feasibility: 6/10 | Wow: 7/10
 
-**49. Infinite Procedural Highway**
+**49. Infinite Procedural Highway** [DONE]
 No laps. No finish line. An endless straight highway generated in CARLA. How far can you drive without crashing? Obstacles get denser, weather gets worse, the road gets narrower. Endless runner meets racing sim. Global leaderboard for distance. One mode. One metric. Addictive.
 - Viral: 8/10 | Feasibility: 4/10 | Wow: 8/10
 
