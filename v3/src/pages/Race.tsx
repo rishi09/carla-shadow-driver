@@ -101,6 +101,20 @@ import { useRaceMemory } from '../hooks/useRaceMemory.ts';
 import { useAIDiary } from '../hooks/useAIDiary.ts';
 import { useReverseRace } from '../hooks/useReverseRace.ts';
 import { useAIEvolution } from '../hooks/useAIEvolution.ts';
+import { useFloorIsLava } from '../hooks/useFloorIsLava.ts';
+import { useWrongWayChicken } from '../hooks/useWrongWayChicken.ts';
+import { useShrinkingTrack } from '../hooks/useShrinkingTrack.ts';
+import { useTagMode } from '../hooks/useTagMode.ts';
+import { useCopsAndRobbers } from '../hooks/useCopsAndRobbers.ts';
+import { useMusicalChairs } from '../hooks/useMusicalChairs.ts';
+import { usePhotographyRally } from '../hooks/usePhotographyRally.ts';
+import { useWebcamReactions } from '../hooks/useWebcamReactions.ts';
+import { useSpeedrunInternet } from '../hooks/useSpeedrunInternet.ts';
+import { useInfiniteHighway } from '../hooks/useInfiniteHighway.ts';
+import { useEyeTracking } from '../hooks/useEyeTracking.ts';
+import { useTabRearview } from '../hooks/useTabRearview.ts';
+import { useCommentarySoundboard } from '../hooks/useCommentarySoundboard.ts';
+import { useDailyTimelapse } from '../hooks/useDailyTimelapse.ts';
 import { useEffect, useRef } from 'react';
 
 type RaceView = 'setup' | 'pre_race' | 'racing' | 'results';
@@ -314,6 +328,79 @@ export function Race() {
   const reverseRace = useReverseRace();
   const [evolutionEnabled, setEvolutionEnabled] = useState(false);
   const aiEvolution = useAIEvolution(evolutionEnabled);
+
+  // Batch 8: Game mode hooks + eye tracking + tab rearview + soundboard + timelapse
+  const [floorIsLavaEnabled, setFloorIsLavaEnabled] = useState(false);
+  const floorIsLava = useFloorIsLava({
+    enabled: floorIsLavaEnabled && isRacing,
+    playerPosition: playerPos ? { x: playerPos.x, y: playerPos.y } : null,
+    isRacing,
+  });
+  const [wrongWayChickenEnabled, setWrongWayChickenEnabled] = useState(false);
+  const wrongWayChicken = useWrongWayChicken({
+    enabled: wrongWayChickenEnabled && isRacing,
+    playerPosition: playerPos ? { x: playerPos.x, y: playerPos.y } : null,
+    aiPosition: aiPos ? { x: aiPos.x, y: aiPos.y } : null,
+    playerHeading: gpu.raceState?.player?.yaw ?? 0,
+    aiHeading: gpu.raceState?.ai?.yaw ?? 0,
+    playerSpeed: gpu.raceState?.player?.speed_kmh ?? 0,
+    aiSpeed: gpu.raceState?.ai?.speed_kmh ?? 0,
+    playerSteering: gpu.raceState?.player?.steer ?? 0,
+  });
+  const [shrinkingTrackEnabled, setShrinkingTrackEnabled] = useState(false);
+  const shrinkingTrack = useShrinkingTrack({
+    enabled: shrinkingTrackEnabled && isRacing,
+    playerPosition: playerPos ? { x: playerPos.x, y: playerPos.y } : null,
+    raceTimeMs: (gpu.raceState?.player?.race_time ?? 0) * 1000,
+    isRacing,
+    totalLaps: gpu.raceState?.player?.total_laps ?? 3,
+  });
+  const [tagModeEnabled, setTagModeEnabled] = useState(false);
+  const tagMode = useTagMode({
+    enabled: tagModeEnabled && isRacing,
+    playerPosition: playerPos ? { x: playerPos.x, y: playerPos.y } : null,
+    aiPosition: aiPos ? { x: aiPos.x, y: aiPos.y } : null,
+    isRacing,
+  });
+  const [copsEnabled, setCopsEnabled] = useState(false);
+  const copsAndRobbers = useCopsAndRobbers({
+    enabled: copsEnabled && isRacing,
+    playerPosition: playerPos,
+    aiPosition: aiPos,
+    isRacing,
+  });
+  const [musicalChairsEnabled, setMusicalChairsEnabled] = useState(false);
+  const musicalChairs = useMusicalChairs({
+    enabled: musicalChairsEnabled && isRacing,
+    playerPosition: playerPos ? { x: playerPos.x, y: playerPos.y } : null,
+    isRacing,
+  });
+  const [photoRallyEnabled, setPhotoRallyEnabled] = useState(false);
+  const photographyRally = usePhotographyRally({
+    enabled: photoRallyEnabled && isRacing,
+    playerPosition: playerPos ? { x: playerPos.x, y: playerPos.y } : null,
+    isRacing,
+  });
+  const [webcamReactionsEnabled, setWebcamReactionsEnabled] = useState(false);
+  const webcamReactions = useWebcamReactions({ enabled: webcamReactionsEnabled && isRacing });
+  const [speedrunEnabled, setSpeedrunEnabled] = useState(false);
+  const speedrunInternet = useSpeedrunInternet({
+    enabled: speedrunEnabled && isRacing,
+    playerPosition: playerPos ? { x: playerPos.x, y: playerPos.y } : null,
+    isRacing,
+  });
+  const [infiniteEnabled, setInfiniteEnabled] = useState(false);
+  const infiniteHighway = useInfiniteHighway({
+    enabled: infiniteEnabled && isRacing,
+    speed: gpu.raceState?.player?.speed_kmh ?? 0,
+    collisionCount: gpu.raceState?.collisions?.length ?? 0,
+    isRacing,
+  });
+  const [eyeTrackingEnabled, setEyeTrackingEnabled] = useState(false);
+  const eyeTracking = useEyeTracking({ enabled: eyeTrackingEnabled && isRacing });
+  const tabRearview = useTabRearview({ enabled: false, role: 'sender' as const });
+  const commentarySoundboard = useCommentarySoundboard();
+  const dailyTimelapse = useDailyTimelapse();
 
   const [twitchChannel, setTwitchChannel] = useState<string | null>(twitchChannelParam);
   const twitchChat = useTwitchChat(twitchChannel);
@@ -1769,6 +1856,17 @@ export function Race() {
         aiEvolution.evolve();
       }
 
+      // Record daily timelapse frame
+      if (raceConfigRef.current) {
+        dailyTimelapse.addFrame({
+          type: 'finish',
+          description: `${playerWon ? 'Won' : 'Lost'} on ${raceConfigRef.current.track}`,
+          speed: gpu.raceFinished.player_max_speed ?? 0,
+          track: raceConfigRef.current.track,
+          raceId: `race-${Date.now()}`,
+        });
+      }
+
       // Win/loss commentary subtitle
       subtitleCommentary.triggerCommentary(playerWon ? 'win' : 'loss');
 
@@ -2564,6 +2662,78 @@ export function Race() {
             <div className="absolute bottom-48 left-1/2 -translate-x-1/2 z-35 pointer-events-none">
               <div className="bg-black/50 backdrop-blur-sm rounded-full px-4 py-1.5 border border-white/20">
                 <p className="text-xs text-white/70 font-bold uppercase tracking-widest text-center">{npcSpectators.chantText}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Game mode overlays */}
+          {floorIsLava.isInDangerZone && (
+            <div className="absolute top-20 left-1/2 -translate-x-1/2 z-40 pointer-events-none">
+              <div className="bg-red-900/80 backdrop-blur-sm rounded-lg px-4 py-2 border border-red-500/50" style={{ animation: 'pulse 0.5s ease-in-out infinite' }}>
+                <p className="text-sm text-red-300 font-bold uppercase tracking-wider">THE FLOOR IS LAVA!</p>
+              </div>
+            </div>
+          )}
+          {shrinkingTrack.warningText && (
+            <div className="absolute top-20 left-1/2 -translate-x-1/2 z-40 pointer-events-none">
+              <div className="bg-amber-900/70 backdrop-blur-sm rounded-lg px-4 py-2 border border-amber-500/40">
+                <p className="text-xs text-amber-300 font-bold uppercase tracking-wider">{shrinkingTrack.warningText}</p>
+              </div>
+            </div>
+          )}
+          {tagModeEnabled && tagMode.statusText && (
+            <div className="absolute top-20 right-4 z-40 pointer-events-none">
+              <div className="bg-black/70 backdrop-blur-sm rounded-lg px-3 py-2 border border-cyan-500/30">
+                <p className="text-xs text-cyan-300 font-mono">{tagMode.statusText}</p>
+              </div>
+            </div>
+          )}
+          {copsEnabled && copsAndRobbers.statusText && (
+            <div className="absolute top-20 right-4 z-40 pointer-events-none">
+              <div className={`bg-black/70 backdrop-blur-sm rounded-lg px-3 py-2 border ${copsAndRobbers.role === 'robber' ? 'border-red-500/30' : 'border-blue-500/30'}`}>
+                <p className={`text-xs font-mono ${copsAndRobbers.role === 'robber' ? 'text-red-300' : 'text-blue-300'}`}>{copsAndRobbers.statusText}</p>
+              </div>
+            </div>
+          )}
+          {musicalChairsEnabled && musicalChairs.statusText && (
+            <div className="absolute top-28 left-1/2 -translate-x-1/2 z-40 pointer-events-none">
+              <div className="bg-black/70 backdrop-blur-sm rounded-lg px-3 py-2 border border-pink-500/30">
+                <p className="text-xs text-pink-300 font-mono">{musicalChairs.statusText}</p>
+                {musicalChairs.timeUntilStop != null && (
+                  <div className="mt-1 h-1 bg-pink-900 rounded-full overflow-hidden">
+                    <div className="h-full bg-pink-400 transition-all" style={{ width: `${musicalChairs.urgency * 100}%` }} />
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          {wrongWayChicken.lastResult && (
+            <div className="absolute top-20 left-1/2 -translate-x-1/2 z-40 pointer-events-none">
+              <div className="bg-black/70 backdrop-blur-sm rounded-lg px-4 py-2 border border-yellow-500/40">
+                <p className="text-sm text-yellow-300 font-bold">{wrongWayChicken.lastResult}</p>
+              </div>
+            </div>
+          )}
+          {photoRallyEnabled && photographyRally.isNearSpot && (
+            <div className="absolute bottom-56 left-1/2 -translate-x-1/2 z-40 pointer-events-none">
+              <div className="bg-black/70 backdrop-blur-sm rounded-lg px-4 py-2 border border-green-500/30">
+                <p className="text-xs text-green-300 font-mono">PHOTO SPOT! Press P to capture ({photographyRally.capturedCount}/{photographyRally.totalSpots})</p>
+              </div>
+            </div>
+          )}
+          {webcamReactions.aiComment && (
+            <div className="absolute bottom-56 right-4 z-40 pointer-events-none max-w-xs">
+              <div className="bg-black/70 backdrop-blur-sm rounded-lg px-3 py-2 border border-indigo-500/30">
+                <p className="text-xs text-indigo-300 italic">{webcamReactions.aiComment}</p>
+              </div>
+            </div>
+          )}
+          {infiniteEnabled && infiniteHighway.phaseMessage && (
+            <div className="absolute top-28 right-4 z-40 pointer-events-none">
+              <div className="bg-black/70 backdrop-blur-sm rounded-lg px-3 py-2 border border-emerald-500/30">
+                <p className="text-[10px] text-emerald-400/70 font-mono uppercase">Endless Mode</p>
+                <p className="text-xs text-emerald-300 font-mono">{infiniteHighway.phaseMessage}</p>
+                <p className="text-[10px] text-white/40 font-mono mt-0.5">{Math.round(infiniteHighway.distance)}m | x{infiniteHighway.multiplier.toFixed(1)}</p>
               </div>
             </div>
           )}
