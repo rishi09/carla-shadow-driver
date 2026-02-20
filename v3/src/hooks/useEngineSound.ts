@@ -57,6 +57,10 @@ interface AudioNodes {
   screechSource: AudioBufferSourceNode | null;
   screechGain: GainNode;
   screechFilter: BiquadFilterNode;
+  // Wind/air rush noise (always present, volume from speed)
+  windSource: AudioBufferSourceNode;
+  windGain: GainNode;
+  windFilter: BiquadFilterNode;
 }
 
 function rpmToFrequency(rpm: number): number {
@@ -194,6 +198,24 @@ export function useEngineSound(): UseEngineSoundReturn {
     // Create white noise buffer
     noiseBufferRef.current = createWhiteNoiseBuffer(ctx);
 
+    // Wind/air rush noise: looping highpass-filtered white noise, volume from speed
+    const windSource = ctx.createBufferSource();
+    windSource.buffer = noiseBufferRef.current;
+    windSource.loop = true;
+
+    const windFilter = ctx.createBiquadFilter();
+    windFilter.type = 'highpass';
+    windFilter.frequency.value = 1000; // Updated dynamically based on speed
+    windFilter.Q.value = 0.7;
+
+    const windGain = ctx.createGain();
+    windGain.gain.value = 0; // Silent until speed > 80 km/h
+
+    windSource.connect(windFilter);
+    windFilter.connect(windGain);
+    windGain.connect(masterGain);
+    windSource.start();
+
     nodesRef.current = {
       ctx,
       masterGain,
@@ -204,6 +226,9 @@ export function useEngineSound(): UseEngineSoundReturn {
       screechSource: null,
       screechGain,
       screechFilter,
+      windSource,
+      windGain,
+      windFilter,
     };
 
     // Respect muted state
@@ -308,12 +333,14 @@ export function useEngineSound(): UseEngineSoundReturn {
     const subVol = SUB_BASS_GAIN * (0.3 + throttle * 0.7) * (0.5 + rpmFactor * 0.5);
     nodes.gainSub.gain.setTargetAtTime(subVol, now, 0.06);
 
-    // 2nd harmonic gain: gets louder at higher RPM for more aggressive sound
-    const h2Vol = HARMONIC_2_GAIN * (0.6 + rpmFactor * 0.4);
+    // 2nd harmonic gain: gets louder at higher RPM, boosted under throttle load
+    const throttleBoost = throttle > 0.5 ? 1.3 : 1.0; // Engine load differentiation
+    const h2Vol = HARMONIC_2_GAIN * (0.6 + rpmFactor * 0.4) * throttleBoost;
     nodes.gain2.gain.setTargetAtTime(h2Vol, now, 0.05);
 
     // Update low-pass filter based on RPM (opens up at high RPM)
-    const filterFreq = rpmToFilterFreq(rpm);
+    // Under throttle load, open filter an extra 20% for more aggressive tone
+    const filterFreq = rpmToFilterFreq(rpm) * (throttle > 0.5 ? 1.2 : 1.0);
     nodes.lowPass.frequency.setTargetAtTime(filterFreq, now, 0.05);
 
     // Exhaust crackle on throttle lift-off at decent RPM
@@ -341,11 +368,21 @@ export function useEngineSound(): UseEngineSoundReturn {
       // Volume proportional to how hard the turn is
       const screechVol = Math.min(1, (Math.abs(steer) - SCREECH_STEER_THRESHOLD) * 2) * 0.5;
       nodes.screechGain.gain.setTargetAtTime(screechVol, now, 0.02);
+      // Frequency modulation: mild turns = clean high squeal, aggressive = rough low scrub
+      const screechFreq = 3500 - Math.abs(steer) * 1500;
+      nodes.screechFilter.frequency.setTargetAtTime(screechFreq, now, 0.05);
     } else {
       if (screechActiveRef.current) {
         stopScreech();
       }
     }
+
+    // Wind/air rush noise: starts at 80 km/h, increases with speed
+    const windVol = speed > 80 ? Math.min(0.15, (speed - 80) / 800) : 0;
+    nodes.windGain.gain.setTargetAtTime(windVol, now, 0.1);
+    // Shift highpass upward with speed for more "hiss" character
+    const windFreq = 1000 + speed * 5;
+    nodes.windFilter.frequency.setTargetAtTime(windFreq, now, 0.1);
   }, [startScreech, stopScreech, playCrackle]);
 
   // Play countdown beeps: 3 short beeps (ascending) + exciting GO chord
@@ -639,6 +676,9 @@ export function useEngineSound(): UseEngineSoundReturn {
         nodes.osc2.stop();
         nodes.osc3.stop();
         nodes.oscSub.stop();
+        if (nodes.windSource) {
+          try { nodes.windSource.stop(); } catch { /* ok */ }
+        }
         if (nodes.screechSource) {
           try { nodes.screechSource.stop(); } catch { /* ok */ }
         }
