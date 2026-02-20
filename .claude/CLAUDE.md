@@ -19,6 +19,7 @@ Shadow Driver is a browser-based racing game where you race against an AI car in
 - CARLA 0.9.15 running on Vast.ai GPU (RTX 3090, root privilege fix applied)
 - Direct WebSocket connection via `?ws=<tunnel_url>` query parameter
 - H.264 video via NVENC hardware encoding + WebCodecs decode (~30 FPS, ~80-120ms latency target). Falls back to JPEG when unavailable.
+- NVENC encoder now matched to camera resolution (1920x1080) — fixes frame size mismatch that caused 548 encode errors and black screen
 - NVENC spatial-AQ for 10-15% better perceived quality at zero latency cost
 - NVENC H.264 encoding pipeline (server) + WebCodecs VideoDecoder (client) — auto-fallback to JPEG if unavailable
 - Player car controls: WASD + Space (handbrake), R (respawn), C (camera toggle)
@@ -31,16 +32,17 @@ Shadow Driver is a browser-based racing game where you race against an AI car in
 - Hard mode: 55% over speed limit, aggressive lane changes
 - Steering: progressive ramping (~100-130ms attack, ~130-200ms release), speed-limited (0.7 low, 0.15 high)
 - Faster throttle (~150ms) and brake (~60ms) response; reverse threshold 15 km/h
-- Traction control + countersteer assist
+- Traction control + countersteer assist (10° threshold, 0.35 max correction — tuned for high latency)
+- Tire grip tuned for high-latency stability: front friction 4.0, rear 3.8, matched lateral stiffness, CoM -0.4
 - Drift detection and scoring system
 - Compass navigation arrow pointing to next checkpoint
 - Race HUD: speedometer, lap timer, gap timer, throttle/brake/steer bars, connection quality, drift score
 - Minimap with player/AI positions + race progress tracker
 - Countdown overlay (3-2-1-GO with traffic light colors)
-- Screen shake + impact sound on collisions
 - Engine sound + background music with speed-based intensity
 - Camera FOV scaling at speed (1.0→1.05x at 150+ km/h)
 - Speed vignette (GPU-accelerated CSS gradient) + speed lines above 80 km/h
+- Screen shake, motion blur, steering prediction transforms, G-force tilt all **disabled** for high-latency playability
 - Rear-view mirror camera (disabled — can be re-enabled)
 - Daily Challenge system (unique track/weather/difficulty per day)
 - Photo mode (F key)
@@ -58,8 +60,10 @@ Shadow Driver is a browser-based racing game where you race against an AI car in
 - Xvfb virtual display (:99) for NvFBC capture compatibility
 - Visual Style selector in Race Setup advanced settings
 - Adaptive quality tiers relaxed for SSH tunnels: >500ms->q25/540p, 300-500ms->q50/720p, 150-300ms->q60, 80-150ms->q70, <80ms->q75
+- `v3/play.sh` — one-command local play setup: auto-detects Vast.ai instance, loads SSH key, starts tunnel + Vite
 
 ### Not Working / TODO
+- **Latency-adaptive steering**: Server should reduce steering limits when RTT is high (280ms+) to prevent overcorrection fishtailing. Partially addressed by grip tuning, but a dynamic latency→steer_limit multiplier is the right fix.
 - **Tunneling**: ngrok blocked by IT restrictions. bore.pub unreachable from some Vast.ai datacenters. Cloudflare QUIC timeouts on Russian datacenters. **SSH port forwarding is the most reliable option**: `ssh -N -L 8765:localhost:8765 -p PORT root@IP`. Localtunnel.me may work as alternative.
 - **Vercel deploy**: Project is `shadow-driver-v3` under team `rishi09-3609s-projects`. Root directory is `v3/`.
   - **CLI deploy** (from repo root, NOT from v3/): `npx vercel deploy --prod --yes --scope rishi09-3609s-projects --token <VERCEL_TOKEN>`
@@ -139,6 +143,34 @@ Vast.ai GPU Instance (Docker: rkshah09/shadow-driver-v3:latest)
 - `v3/docker/entrypoint.sh` - Starts CARLA (as carla user) + race server + cloudflare tunnel
 - `v3/api/gpu/start.ts` - Vast.ai provisioning with onstart script
 - `.github/workflows/docker-build.yml` - Auto Docker build on push
+
+---
+
+## "Let's Play" Workflow
+
+When the user says "let's play", "let's test", or similar, follow these steps **in order**:
+
+### Prerequisites (user must do once per login session)
+The sandbox cannot access `~/.ssh/id_ed25519` directly (macOS restriction), but it **can** use the shared SSH agent socket. The user must run `ssh-add ~/.ssh/id_ed25519` once in any terminal. After that, Claude can SSH freely for the rest of the session.
+
+If `ssh-add -l` shows "no identities", tell the user: `ssh-add ~/.ssh/id_ed25519` — nothing else.
+
+### Steps Claude performs
+1. **Check SSH key**: Run `ssh-add -l` — if no identities, ask user to run `ssh-add ~/.ssh/id_ed25519` and wait.
+2. **Find GPU instance**: Query Vast.ai API for running instances. If none, tell user to rent one.
+3. **Check race server**: `ssh -p <PORT> root@<HOST> 'pgrep -af race_server'` — if not running, start it.
+4. **Set idle timeout**: `ssh -p <PORT> root@<HOST> "sed -i 's/IDLE_TIMEOUT_SECONDS = 10 \* 60/IDLE_TIMEOUT_SECONDS = 60 * 60/' /opt/shadow-driver/server/race_server.py"` (only if server was restarted).
+5. **Start SSH tunnel**: `ssh -o StrictHostKeyChecking=no -N -L 8765:localhost:8765 -p <PORT> root@<HOST> &` (background).
+6. **Start Vite**: `cd v3 && npx vite --host &` if not already on :5173.
+7. **Verify**: Check `lsof -i :8765` and `lsof -i :5173` both show LISTEN.
+8. **Tell user**: "Open http://localhost:5173/race?ws=ws://localhost:8765"
+
+### Alternative: User runs play.sh
+The script `v3/play.sh` does all of the above in one command:
+```bash
+cd v3 && ./play.sh
+```
+It auto-detects the Vast.ai instance (no args needed), loads SSH key, starts tunnel + Vite.
 
 ---
 
@@ -239,6 +271,18 @@ cd v3 && npm run dev
 ### Issue: Mock WebSocket server blocking SSH tunnel
 **Cause:** A test mock server (`node test/mock_ws_server.mjs`) running on port 8765 intercepts connections meant for the SSH tunnel
 **Fix:** Kill the mock server (`kill <pid>`) and verify only the SSH process is on port 8765 (`lsof -i :8765`)
+
+### Issue: NVENC black screen — frame size mismatch (FIXED)
+**Cause:** NVENC encoder was initialized at streaming resolution (1280x720 from `config.streaming`) but CARLA camera produces frames at camera resolution (1920x1080 from `config.camera.chase`). Every frame failed with `Frame size mismatch: got 8294400, expected 3686400`, resulting in 548 errors, 0 actual frames, and a black screen.
+**Fix (applied):** Changed `_start_nvenc_encoder()` to use `config.camera.chase.width/height` instead of `config.streaming.width/height`. Now NVENC encodes at 1920x1080 matching the actual frame data. Result: 1180 frames encoded, 0 errors, 30 FPS.
+
+### Issue: Car feels drifty / fishtails with high latency
+**Cause:** At 280ms SSH tunnel latency, input delay causes overcorrection. The rear tires had lower friction (3.2 vs 3.8 front) creating intentional oversteer that becomes uncontrollable at high latency. Countersteer assist threshold (15°) and strength (0.25) were too low to compensate.
+**Fix (applied):** Increased rear tire friction to 3.8 (matching front), raised lateral stiffness (rear 17→20, front 20→22), lowered center of mass (-0.3→-0.4), strengthened countersteer assist (10° threshold, 0.35 max correction). **Still TODO:** latency-adaptive steering limits (reduce steer_limit based on measured RTT).
+
+### Issue: Screen tilt/shake/blur makes high-latency play nauseating
+**Cause:** CSS transforms (steering prediction rotation, G-force tilt, frame extrapolation, motion blur, screen shake) fight with 280ms-delayed server frames, making the visual feed disorienting.
+**Fix (applied):** Disabled all CSS transforms on the video feed except basic FOV scale. Disabled screen shake on collisions. These can be re-enabled when latency drops below ~100ms.
 
 ---
 

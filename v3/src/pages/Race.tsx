@@ -1237,7 +1237,7 @@ export function Race() {
       {view === 'racing' && (
         <div
           className="relative w-full h-screen overflow-hidden"
-          style={{ transform: `translate(${shakeX}px, ${shakeY}px)` }}
+          style={{}} /* screen shake disabled for high-latency SSH — re-enable when latency <100ms */
         >
           {/* Video feed: prefer WebRTC, fall back to JPEG canvas */}
           <div
@@ -1246,16 +1246,8 @@ export function Race() {
               ...countdownZoomStyle,
               transform: isCountdown
                 ? countdownZoomStyle.transform
-                : [
-                    `scale(${speedFovScale})`,
-                    steeringPrediction.transform !== 'none' ? steeringPrediction.transform : '',
-                    frameExtrapolation.transform !== 'none' ? frameExtrapolation.transform : '',
-                    gForceTransform,
-                  ].filter(Boolean).join(' '),
-              filter: [
-                !useWebGL2 && motionBlurPx > 0.05 ? `blur(${motionBlurPx.toFixed(2)}px)` : '',
-                crashDesaturate ? 'grayscale(50%)' : '',
-              ].filter(Boolean).join(' ') || 'none',
+                : `scale(${speedFovScale})`,
+              filter: crashDesaturate ? 'grayscale(50%)' : 'none',
               transition: 'filter 100ms ease-out',
             }}
           >

@@ -820,23 +820,28 @@ class RaceServer:
         if self._nvenc_encoder and self._nvenc_encoder.is_running:
             return
 
-        width = self.config.get('streaming', {}).get('width', 1280)
-        height = self.config.get('streaming', {}).get('height', 720)
+        # Use camera resolution for NVENC (must match actual frame size from CARLA)
+        cam_cfg = self.config.get('camera', {}).get('chase', {})
+        width = cam_cfg.get('width', 1920)
+        height = cam_cfg.get('height', 1080)
         encoder = NVENCEncoder(width=width, height=height, fps=30, bitrate='8M')
 
         if encoder.start():
             self._nvenc_encoder = encoder
             print("[NVENC] NVENC encoder started (H.264 hardware encoding active)")
 
-            # Feed a blank frame to prime the encoder and extract codec config
+            # Feed multiple blank frames to prime the encoder and extract codec config
+            # A single frame may not trigger SPS/PPS output from NVENC
             blank = b'\x00' * (width * height * 4)
-            encoder.encode_frame(blank)
+            for i in range(5):
+                encoder.encode_frame(blank)
+                time.sleep(0.05)
             # Wait briefly for codec config
-            config = encoder.wait_for_codec_config(timeout=2.0)
+            config = encoder.wait_for_codec_config(timeout=3.0)
             if config:
                 print(f"[NVENC] Codec config ready: {config['codec']}")
             else:
-                print("[NVENC] Warning: codec config not extracted from first frame")
+                print("[NVENC] Warning: codec config not extracted from primer frames")
         else:
             self._nvenc_encoder = None
             print("[NVENC] NVENC unavailable, using JPEG encoding")

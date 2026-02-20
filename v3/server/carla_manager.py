@@ -236,27 +236,27 @@ class RaceManager:
 
                 # --- Improved tire friction model ---
                 # Front tires: higher friction for responsive steering grip
-                # Rear tires: slightly lower friction for mild oversteer (more fun)
+                # Rear tires: matched friction for stability at high latency
                 # Lateral stiffness tuned for keyboard input stability
                 wheels = physics.wheels
                 for i, wheel in enumerate(wheels):
                     is_front = (i < 2)  # wheels[0,1] = front, wheels[2,3] = rear
                     if is_front:
-                        wheel.tire_friction = max(wheel.tire_friction, 3.8)
+                        wheel.tire_friction = max(wheel.tire_friction, 4.0)
                         # Higher lateral stiffness on front = more grip in turns
+                        wheel.lat_stiff_max_load = 3.5
+                        wheel.lat_stiff_value = 22.0
+                    else:
+                        # Rear friction close to front = stable, less drift-prone
+                        wheel.tire_friction = max(wheel.tire_friction, 3.8)
+                        # Higher lateral stiffness on rear = less slide
                         wheel.lat_stiff_max_load = 3.0
                         wheel.lat_stiff_value = 20.0
-                    else:
-                        # Rear slightly lower friction = mild oversteer tendency
-                        wheel.tire_friction = max(wheel.tire_friction, 3.2)
-                        # Lower lateral stiffness on rear = slides a bit more
-                        wheel.lat_stiff_max_load = 2.5
-                        wheel.lat_stiff_value = 17.0
                     # Stiffer damping for less bouncy feel over bumps
                     wheel.damping_rate = wheel.damping_rate * 1.3
 
                 # Lower center of mass for stability (reduces roll in corners)
-                physics.center_of_mass = carla.Vector3D(0.0, 0.0, -0.3)
+                physics.center_of_mass = carla.Vector3D(0.0, 0.0, -0.4)
 
                 self.player_car.apply_physics_control(physics)
 
@@ -902,21 +902,21 @@ class RaceManager:
         self._drift_angle = drift_angle
         abs_drift = abs(drift_angle)
 
-        # Only activate above threshold (15 degrees)
-        if abs_drift < 15.0:
+        # Only activate above threshold (10 degrees — lower for high-latency stability)
+        if abs_drift < 10.0:
             self._countersteer_active = False
             return 0.0
 
         self._countersteer_active = True
 
         # Scale correction strength with drift angle:
-        # 15° -> 0.0 (just activated), 45°+ -> max correction (0.25)
-        # Using smoothstep-like ramp between 15° and 45°
-        t = min(1.0, (abs_drift - 15.0) / 30.0)  # 0 at 15°, 1 at 45°
+        # 10° -> 0.0 (just activated), 35°+ -> max correction (0.35)
+        # Lower threshold + stronger correction for high-latency stability
+        t = min(1.0, (abs_drift - 10.0) / 25.0)  # 0 at 10°, 1 at 35°
         # Smoothstep: 3t^2 - 2t^3 for natural feel
         t = t * t * (3.0 - 2.0 * t)
 
-        max_correction = 0.25
+        max_correction = 0.35
         correction_magnitude = max_correction * t
 
         # Also scale down at very high speed so the assist doesn't overcorrect

@@ -80,14 +80,17 @@ The perceived lag stack when turning:
 - [x] Add countersteer assist (auto-correct when sliding) -- smoothstep-scaled correction based on heading vs velocity divergence, 15-45deg range, disabled during handbrake
 - [x] Add traction control (reduce throttle on wheel spin) -- detects launch spin and mid-speed traction loss, gradually caps throttle at 0.3-0.4
 - [x] Drift mode: handbrake reduces rear tire friction for controlled slides -- 30% friction on press, restore on release, state-transition only (no per-frame physics apply)
-- [x] Better tire friction model: front/rear split (3.8/3.2), lateral stiffness tuned (front 20, rear 17), stiffer damping
+- [x] Better tire friction model: front 4.0, rear 3.8 (matched for stability), lateral stiffness front 22/rear 20, CoM -0.4. Previously: front 3.8, rear 3.2 which caused excessive oversteer at high latency.
+- [x] Countersteer assist tuned for high latency: 10° threshold (was 15°), 0.35 max correction (was 0.25)
 - [x] Smooth speed-dependent steering: exponential curve replaces step-function thresholds (0.08 + 0.42 * exp(-speed/70))
+- [ ] **Latency-adaptive steering limits**: Multiply steer_limit by a latency factor (e.g. at 280ms RTT, reduce by 30-40%) to prevent overcorrection fishtailing. Server already tracks RTT via `_stats_latencies`.
 
 ## Game Feel / Juice
 - [x] Camera FOV scaling at speed (subtle 1.0→1.05x zoom at 150+ km/h)
 - [x] Let player pick their car from 6 vehicles (Tesla, Mustang, Charger, Audi TT, Mini Cooper, Impala)
 - [x] Speed vignette: GPU-accelerated CSS radial gradient, scales with speed
-- [x] Camera shake on acceleration/hard braking -- throttle/brake onset shake + sudden deceleration jolt (collision shake already exists)
+- [x] ~~Camera shake on acceleration/hard braking~~ -- **disabled** for high-latency playability (re-enable when <100ms)
+- [x] ~~Steering prediction + G-force tilt + motion blur~~ -- **disabled** for high-latency playability (fights with delayed frames)
 - [x] Impact sparks and tire smoke (CSS/canvas overlay particles) -- ParticleOverlay.tsx
 - [x] Gear shift animation/sound -- visual flash in SpeedEffects.tsx
 - [x] Drift scoring (angle * speed * duration = points) -- DriftDetector in race_logic.py, DriftScore.tsx overlay
