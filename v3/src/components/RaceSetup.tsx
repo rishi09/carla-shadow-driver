@@ -156,9 +156,23 @@ interface RaceSetupProps {
   synthwaveEnabled?: boolean;
   /** Toggle synthwave mode on/off */
   onToggleSynthwave?: () => void;
+  /** Whether time-zone racing (match local time) is enabled */
+  timeZoneEnabled?: boolean;
+  /** Current time-of-day label from useTimeZoneRacing (e.g. "Golden Hour", "Deep Night") */
+  timeZoneLabel?: string;
+  /** Toggle time-zone racing on/off */
+  onToggleTimeZone?: (on: boolean) => void;
+  /** Whether drunk AI mode is enabled */
+  drunkAIEnabled?: boolean;
+  /** Toggle drunk AI mode on/off */
+  onToggleDrunkAI?: (on: boolean) => void;
+  /** AI grudge mood label (e.g. "NEUTRAL", "HOSTILE", "ADMIRING") -- always on, display only */
+  aiGrudgeMood?: string;
+  /** AI grudge mood message (e.g. "May the best driver win.") */
+  aiGrudgeMessage?: string;
 }
 
-export function RaceSetup({ onStartRace, onBack, onStartDailyChallenge, quickstart, isConnected, urlSettings, dareTime, challengeData, isCargoMode, onToggleCargoMode, isBlindfoldMode, onToggleBlindfoldMode, voiceCommandsSupported, voiceCommandsEnabled, onToggleVoiceCommands, ambientLightSupported, ambientLightEnabled, onToggleAmbientLight, headTrackingSupported, headTrackingEnabled, onToggleHeadTracking, twitchChannel, onSetTwitchChannel, phoneSteeringSupported, phoneSteeringEnabled, onTogglePhoneSteering, synthwaveEnabled, onToggleSynthwave }: RaceSetupProps) {
+export function RaceSetup({ onStartRace, onBack, onStartDailyChallenge, quickstart, isConnected, urlSettings, dareTime, challengeData, isCargoMode, onToggleCargoMode, isBlindfoldMode, onToggleBlindfoldMode, voiceCommandsSupported, voiceCommandsEnabled, onToggleVoiceCommands, ambientLightSupported, ambientLightEnabled, onToggleAmbientLight, headTrackingSupported, headTrackingEnabled, onToggleHeadTracking, twitchChannel, onSetTwitchChannel, phoneSteeringSupported, phoneSteeringEnabled, onTogglePhoneSteering, synthwaveEnabled, onToggleSynthwave, timeZoneEnabled, timeZoneLabel, onToggleTimeZone, drunkAIEnabled, onToggleDrunkAI, aiGrudgeMood, aiGrudgeMessage }: RaceSetupProps) {
   const [selectedTrack, setSelectedTrack] = useState(urlSettings?.track || DEFAULT_TRACK);
   const [selectedWeather, setSelectedWeather] = useState(urlSettings?.weather || DEFAULT_WEATHER);
   const [selectedLaps, setSelectedLaps] = useState(urlSettings?.laps || DEFAULT_LAPS);
@@ -454,6 +468,22 @@ export function RaceSetup({ onStartRace, onBack, onStartDailyChallenge, quicksta
               <span className="text-white/25 text-[10px] font-mono">
                 AI Adjusted {adaptiveDifficulty.speedFactor > 1.0 ? '+' : ''}{Math.round((adaptiveDifficulty.speedFactor - 1.0) * 100)}%
               </span>
+            </div>
+          )}
+          {/* AI Grudge Indicator (always on, display only) */}
+          {aiGrudgeMood && aiGrudgeMessage && (
+            <div className="mt-2 pl-1 flex items-center gap-2">
+              <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded border border-white/10 bg-white/[0.04] text-white/40">
+                {aiGrudgeMood === 'FURIOUS' ? '\uD83D\uDE21' :
+                 aiGrudgeMood === 'HOSTILE' ? '\uD83D\uDE20' :
+                 aiGrudgeMood === 'ANNOYED' ? '\uD83D\uDE12' :
+                 aiGrudgeMood === 'NEUTRAL' ? '\uD83D\uDE10' :
+                 aiGrudgeMood === 'RESPECTFUL' ? '\uD83E\uDD1D' :
+                 aiGrudgeMood === 'FRIENDLY' ? '\uD83D\uDE04' :
+                 aiGrudgeMood === 'ADMIRING' ? '\uD83E\uDD29' :
+                 '\uD83D\uDE10'} {aiGrudgeMood}
+              </span>
+              <span className="text-white/30 text-[10px] italic">{aiGrudgeMessage}</span>
             </div>
           )}
         </div>
@@ -898,6 +928,107 @@ export function RaceSetup({ onStartRace, onBack, onStartDailyChallenge, quicksta
                     backgroundColor: synthwaveEnabled ? '#ff00ff' : 'rgba(255,255,255,0.4)',
                     boxShadow: synthwaveEnabled ? '0 0 6px rgba(255,0,255,0.6)' : 'none',
                   }}
+                />
+              </div>
+            </button>
+          </div>
+        )}
+
+        {/* Drunk AI Mode */}
+        {onToggleDrunkAI && (
+          <div className="mb-6">
+            <button
+              onClick={() => onToggleDrunkAI(!drunkAIEnabled)}
+              className={`w-full flex items-center gap-3 py-3 px-4 rounded-lg border text-left transition-all ${
+                drunkAIEnabled
+                  ? 'bg-amber-500/10 border-amber-500/40'
+                  : 'bg-black/60 border-white/10 hover:border-white/20'
+              }`}
+            >
+              {/* Beer mug icon */}
+              <div className="shrink-0">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={drunkAIEnabled ? '#f59e0b' : 'rgba(255,255,255,0.4)'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M17 11h1a3 3 0 0 1 0 6h-1" />
+                  <path d="M5 8v10a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V8" />
+                  <path d="M5 8h12" />
+                  <path d="M7 4c0 0 0.5-1 2.5-1s2.5 1 2.5 1" />
+                  <path d="M10 4c0 0 0.5-1 2.5-1s2.5 1 2.5 1" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <span className={`text-sm font-medium ${drunkAIEnabled ? 'text-amber-400' : 'text-white'}`}>
+                    {'\uD83C\uDF7A'} Drunk AI
+                  </span>
+                  {drunkAIEnabled && (
+                    <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded border border-amber-500/40 bg-amber-500/20 text-amber-400">
+                      ON
+                    </span>
+                  )}
+                </div>
+                <p className="text-white/40 text-xs mt-0.5">
+                  AI gets progressively drunker each lap
+                </p>
+              </div>
+              {/* Toggle indicator */}
+              <div className={`w-10 h-5 rounded-full relative transition-colors ${drunkAIEnabled ? 'bg-amber-500/40' : 'bg-white/10'}`}>
+                <div
+                  className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${
+                    drunkAIEnabled ? 'left-[22px] bg-amber-400' : 'left-0.5 bg-white/40'
+                  }`}
+                />
+              </div>
+            </button>
+          </div>
+        )}
+
+        {/* Time-Zone Racing */}
+        {onToggleTimeZone && (
+          <div className="mb-6">
+            <button
+              onClick={() => onToggleTimeZone(!timeZoneEnabled)}
+              className={`w-full flex items-center gap-3 py-3 px-4 rounded-lg border text-left transition-all ${
+                timeZoneEnabled
+                  ? 'bg-sky-500/10 border-sky-500/40'
+                  : 'bg-black/60 border-white/10 hover:border-white/20'
+              }`}
+            >
+              {/* Globe/clock icon */}
+              <div className="shrink-0">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={timeZoneEnabled ? '#38bdf8' : 'rgba(255,255,255,0.4)'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10" />
+                  <path d="M2 12h20" />
+                  <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <span className={`text-sm font-medium ${timeZoneEnabled ? 'text-sky-400' : 'text-white'}`}>
+                    {'\uD83C\uDF0D'} Time-Zone Racing
+                  </span>
+                  {timeZoneEnabled && (
+                    <>
+                      <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded border border-sky-500/40 bg-sky-500/20 text-sky-400">
+                        ON
+                      </span>
+                      {timeZoneLabel && (
+                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded border border-sky-500/30 bg-sky-500/10 text-sky-400/70">
+                          {timeZoneLabel}
+                        </span>
+                      )}
+                    </>
+                  )}
+                </div>
+                <p className="text-white/40 text-xs mt-0.5">
+                  Weather matches your local time
+                </p>
+              </div>
+              {/* Toggle indicator */}
+              <div className={`w-10 h-5 rounded-full relative transition-colors ${timeZoneEnabled ? 'bg-sky-500/40' : 'bg-white/10'}`}>
+                <div
+                  className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${
+                    timeZoneEnabled ? 'left-[22px] bg-sky-400' : 'left-0.5 bg-white/40'
+                  }`}
                 />
               </div>
             </button>

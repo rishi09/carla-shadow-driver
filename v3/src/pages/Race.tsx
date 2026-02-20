@@ -82,6 +82,11 @@ import type { KeyState } from '../types/index.ts';
 import { getBrowserQuip, getBatteryQuip } from '../utils/browserQuips.ts';
 import { useTabPenalty } from '../hooks/useTabPenalty.ts';
 import { useBatteryDifficulty } from '../hooks/useBatteryDifficulty.ts';
+import { useTimeZoneRacing } from '../hooks/useTimeZoneRacing.ts';
+import { useEarthquakeCamera } from '../hooks/useEarthquakeCamera.ts';
+import { useAIGrudge } from '../hooks/useAIGrudge.ts';
+import { useDrunkAI } from '../hooks/useDrunkAI.ts';
+import { DrunkAIOverlay } from '../components/DrunkAIOverlay.tsx';
 import { useEffect, useRef } from 'react';
 
 type RaceView = 'setup' | 'pre_race' | 'racing' | 'results';
@@ -212,6 +217,18 @@ export function Race() {
   }, [batteryDifficulty.battery.level, batteryDifficulty.battery.charging, batteryDifficulty.battery.isAvailable]);
   const isRacing = view === 'racing' && (gpu.raceState?.race_status === 'racing' || gpu.raceState?.race_status === 'finishing');
   const tabPenalty = useTabPenalty(isRacing);
+  const timeZoneRacing = useTimeZoneRacing();
+  const earthquakeCamera = useEarthquakeCamera(
+    gpu.raceState?.player?.gap_seconds ?? null,
+    isRacing,
+  );
+  const aiGrudge = useAIGrudge();
+  const [drunkAIEnabled, setDrunkAIEnabled] = useState(false);
+  const drunkAI = useDrunkAI({
+    enabled: drunkAIEnabled,
+    currentLap: gpu.raceState?.player?.lap ?? 1,
+    totalLaps: gpu.raceState?.player?.total_laps ?? 3,
+  });
   const [twitchChannel, setTwitchChannel] = useState<string | null>(twitchChannelParam);
   const twitchChat = useTwitchChat(twitchChannel);
   const twitchCommandRef = useRef<TwitchCommand | ''>('');
@@ -519,6 +536,18 @@ export function Race() {
     // sun_altitude -30 = deep night, minimal cloudiness, no precipitation
     gpu.sendAmbientWeather(-30, 0, 0);
   }, [view, synthwave.enabled, gpu.sendAmbientWeather]);
+
+  // --- Time-zone racing: match CARLA time of day to player's local time ---
+  const timeZoneSentRef = useRef(false);
+  useEffect(() => {
+    if (view !== 'racing' || !timeZoneRacing.enabled || synthwave.enabled || ambientLight.isActive) {
+      timeZoneSentRef.current = false;
+      return;
+    }
+    if (timeZoneSentRef.current) return;
+    timeZoneSentRef.current = true;
+    gpu.sendAmbientWeather(timeZoneRacing.sunAltitude, timeZoneRacing.cloudiness, 0);
+  }, [view, timeZoneRacing.enabled, timeZoneRacing.sunAltitude, timeZoneRacing.cloudiness, synthwave.enabled, ambientLight.isActive, gpu.sendAmbientWeather]);
 
   // --- Race commentary updates ---
   useEffect(() => {
@@ -1450,6 +1479,9 @@ export function Race() {
       setView('results');
       crowd.roar();
 
+      // Record race outcome in AI grudge system
+      aiGrudge.recordRaceEnd(gpu.raceFinished.winner === 'player');
+
       // Signal music stems that race is finished (triggers victory/defeat fade)
       musicStems.updateRaceState({
         speed: 0,
@@ -1584,6 +1616,9 @@ export function Race() {
       // Record adaptive difficulty (hidden win/loss tracking)
       const playerWon = gpu.raceFinished.winner === 'player';
       adaptiveDifficulty.recordResult(playerWon);
+
+      // Record AI grudge (persistent cross-session grudge tracking)
+      aiGrudge.recordRaceEnd(playerWon);
 
       // AI personality: win/loss trash talk + grudge recording
       aiPersonality.triggerTrashTalk(playerWon ? 'lose' : 'win');
@@ -1896,6 +1931,13 @@ export function Race() {
           onSetTwitchChannel={setTwitchChannel}
           synthwaveEnabled={synthwave.enabled}
           onToggleSynthwave={synthwave.toggle}
+          timeZoneEnabled={timeZoneRacing.enabled}
+          timeZoneLabel={timeZoneRacing.timeOfDay}
+          onToggleTimeZone={timeZoneRacing.setEnabled}
+          drunkAIEnabled={drunkAIEnabled}
+          onToggleDrunkAI={setDrunkAIEnabled}
+          aiGrudgeMood={aiGrudge.mood}
+          aiGrudgeMessage={aiGrudge.moodMessage}
         />
       )}
 
@@ -1903,7 +1945,7 @@ export function Race() {
       {view === 'racing' && (
         <div
           className={`relative w-full h-screen overflow-hidden${synthwave.containerClass ? ` ${synthwave.containerClass}` : ''}`}
-          style={{ transform: `translate(${shakeX}px, ${shakeY}px)` }}
+          style={{ transform: `translate(${shakeX + earthquakeCamera.shakeX}px, ${shakeY + earthquakeCamera.shakeY}px) rotate(${earthquakeCamera.shakeRotation}deg)` }}
         >
           {/* Video feed: prefer WebRTC, fall back to JPEG canvas */}
           {/* Speed-based FOV scale + client-side steering prediction + frame extrapolation + motion blur + countdown zoom + head tracking */}
@@ -2301,6 +2343,13 @@ export function Race() {
             />
           )}
 
+          {/* Drunk AI overlay (shows AI drunkenness level as it increases per lap) */}
+          <DrunkAIOverlay
+            drunkLevel={drunkAI.drunkLevel}
+            drunkLabel={drunkAI.drunkLabel}
+            enabled={drunkAI.enabled}
+          />
+
           {/* Ambient Light indicator (room brightness -> weather) */}
           {ambientLight.isActive && (gpu.raceState?.race_status === 'racing' || gpu.raceState?.race_status === 'countdown') && (
             <div className="absolute top-4 left-4 z-30 pointer-events-none">
@@ -2333,6 +2382,13 @@ export function Race() {
               brake={phoneSteering.brake}
             />
           )}
+
+          {/* Drunk AI overlay (shows AI drunkenness level) */}
+          <DrunkAIOverlay
+            drunkLevel={drunkAI.drunkLevel}
+            drunkLabel={drunkAI.drunkLabel}
+            enabled={drunkAI.enabled}
+          />
 
           {/* Challenge ghost indicator banner */}
           {showChallengeGhostBanner && challengeGhostFrames && (

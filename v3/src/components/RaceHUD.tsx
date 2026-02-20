@@ -24,9 +24,11 @@ interface RaceHUDProps {
   batteryState?: BatteryDisplayState;
   /** Tab penalty message to display as a toast */
   tabPenaltyMessage?: { text: string; id: number } | null;
+  /** Whether time-zone-aware racing is active (shows local time indicator) */
+  timeSyncActive?: boolean;
 }
 
-export function RaceHUD({ raceState, latencyMs, gamepadConnected = false, className = '', localKeys, browserQuip, batteryQuip, batteryState, tabPenaltyMessage }: RaceHUDProps) {
+export function RaceHUD({ raceState, latencyMs, gamepadConnected = false, className = '', localKeys, browserQuip, batteryQuip, batteryState, tabPenaltyMessage, timeSyncActive }: RaceHUDProps) {
   // Track HUD visibility for fade-in on GO
   const [hudVisible, setHudVisible] = useState(false);
   const prevStatusRef = useRef<string | null>(null);
@@ -216,6 +218,9 @@ export function RaceHUD({ raceState, latencyMs, gamepadConnected = false, classN
           )}
           {raceState.weather_mood && raceState.weather_mood.mood !== 'CALM' && (
             <WeatherIndicator mood={raceState.weather_mood.mood} intensity={raceState.weather_mood.intensity} />
+          )}
+          {timeSyncActive && (
+            <TimeSyncIndicator />
           )}
           <div className="text-white/20 text-xs font-mono mt-1">WASD + Space | R=Respawn | C=Camera | G=GIF | B=AI Brain</div>
           {gamepadConnected && (
@@ -850,4 +855,56 @@ function AIEmotionBadge({ emotion }: { emotion: AIEmotion }) {
       </div>
     </div>
   );
+}
+
+/** Time sync indicator: shows local time and sun/moon icon when time-zone racing is active */
+function TimeSyncIndicator() {
+  const [timeStr, setTimeStr] = useState(() => formatLocalTime());
+
+  useEffect(() => {
+    // Update the displayed time every 30 seconds
+    const interval = setInterval(() => setTimeStr(formatLocalTime()), 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const hour = new Date().getHours();
+  const isDaytime = hour >= 6 && hour < 18;
+
+  return (
+    <div className="flex items-center gap-1.5 mt-1">
+      {isDaytime ? (
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FFC107" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.6 }}>
+          <circle cx="12" cy="12" r="5" />
+          <line x1="12" y1="1" x2="12" y2="3" />
+          <line x1="12" y1="21" x2="12" y2="23" />
+          <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
+          <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+          <line x1="1" y1="12" x2="3" y2="12" />
+          <line x1="21" y1="12" x2="23" y2="12" />
+          <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
+          <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
+        </svg>
+      ) : (
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#7986cb" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.6 }}>
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+        </svg>
+      )}
+      <span
+        className="text-[10px] font-mono leading-none"
+        style={{ color: isDaytime ? '#FFC107' : '#7986cb', opacity: 0.5 }}
+      >
+        {timeStr}
+      </span>
+    </div>
+  );
+}
+
+function formatLocalTime(): string {
+  const now = new Date();
+  let hours = now.getHours();
+  const minutes = now.getMinutes();
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  hours = hours % 12;
+  if (hours === 0) hours = 12;
+  return `${hours}:${minutes.toString().padStart(2, '0')} ${ampm}`;
 }
