@@ -1216,6 +1216,10 @@ class RaceServer:
             progress = self.race_director.get_race_progress(self.race_state)
             state['race_progress'] = round(progress, 2)
 
+        # AI Personality emotion for HUD display
+        if self.ai_personality:
+            state['ai_emotion'] = self.ai_personality.to_dict()
+
         # Weather mood info for frontend overlay effects
         if self.weather_mood:
             state['weather_mood'] = self.weather_mood.get_mood()

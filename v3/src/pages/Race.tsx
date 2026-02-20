@@ -29,7 +29,9 @@ import { WeatherOverlay } from '../components/WeatherOverlay.tsx';
 import { FirstTimeOverlay } from '../components/FirstTimeOverlay.tsx';
 import { PhotoMode } from '../components/PhotoMode.tsx';
 import { ClipPreview } from '../components/ClipPreview.tsx';
+import { RecordingControls } from '../components/RecordingControls.tsx';
 import { useReplayRecorder } from '../hooks/useReplayRecorder.ts';
+import { useScreenRecorder } from '../hooks/useScreenRecorder.ts';
 import type { KeyState } from '../types/index.ts';
 import { useEffect, useRef } from 'react';
 
@@ -804,6 +806,12 @@ export function Race() {
             weather={raceWeather}
           />
 
+          {/* Dynamic weather overlay (rain streaks, fog, lightning, wind) */}
+          <WeatherOverlay
+            weatherMood={gpu.raceState?.weather_mood}
+            speedKmh={gpu.raceState?.player.speed_kmh ?? 0}
+          />
+
           {/* HUD overlay */}
           <RaceHUD raceState={gpu.raceState} latencyMs={gpu.latencyMs} gamepadConnected={gamepad.connected} />
 
@@ -963,6 +971,14 @@ export function Race() {
               }
             }}
           />
+
+          {/* Photo Mode overlay */}
+          {photoModeActive && (
+            <PhotoMode
+              canvasRef={replayCanvasRef}
+              onExit={handleExitPhotoMode}
+            />
+          )}
 
           {/* First-time player overlay: full controls guide, dismiss with any key */}
           <FirstTimeOverlay

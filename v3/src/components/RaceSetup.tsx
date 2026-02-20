@@ -4,6 +4,7 @@ import { usePersonalBests } from '../hooks/usePersonalBests.ts';
 import { getDailyChallenge, getDailyBest } from '../hooks/useDailyChallenge.ts';
 import { usePlayerName } from '../hooks/usePlayerName.ts';
 import { useStreak } from '../hooks/useStreak.ts';
+import { useSocialPresence } from '../hooks/useSocialPresence.ts';
 
 const MEDAL_ICONS: Record<string, string> = {
   gold: '\uD83E\uDD47',
@@ -126,6 +127,7 @@ export function RaceSetup({ onStartRace, onBack, onStartDailyChallenge, quicksta
 
   const playerName = usePlayerName();
   const streak = useStreak();
+  const social = useSocialPresence();
 
   const personalBests = usePersonalBests();
   const currentTrack = TRACKS.find(t => t.id === selectedTrack);
