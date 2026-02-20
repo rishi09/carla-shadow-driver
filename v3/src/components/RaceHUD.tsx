@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import type { RaceState, AIEmotion } from '../types/index.ts';
+import type { RaceState, AIEmotion, KeyState } from '../types/index.ts';
 import { RaceProgressBar } from './RaceProgressBar.tsx';
 import { ArcSpeedometer } from './ArcSpeedometer.tsx';
 
@@ -8,9 +8,10 @@ interface RaceHUDProps {
   latencyMs?: number | null;
   gamepadConnected?: boolean;
   className?: string;
+  localKeys?: React.RefObject<KeyState>;
 }
 
-export function RaceHUD({ raceState, latencyMs, gamepadConnected = false, className = '' }: RaceHUDProps) {
+export function RaceHUD({ raceState, latencyMs, gamepadConnected = false, className = '', localKeys }: RaceHUDProps) {
   // Track HUD visibility for fade-in on GO
   const [hudVisible, setHudVisible] = useState(false);
   const prevStatusRef = useRef<string | null>(null);
@@ -150,9 +151,9 @@ export function RaceHUD({ raceState, latencyMs, gamepadConnected = false, classN
               {/* Mini steering wheel that rotates with input */}
               <SteeringWheelIcon steer={player.steer ?? 0} />
               <div className="space-y-1">
-                <InputBar label="THR" value={player.throttle} color="#4CAF50" />
-                <InputBar label="BRK" value={player.brake ?? 0} color="#f44336" />
-                <InputBar label="STR" value={(player.steer ?? 0) * 0.5 + 0.5} color="#2196F3" centered />
+                <InputBar label="THR" value={player.throttle} color="#4CAF50" localValue={localKeys?.current?.w ? 1 : undefined} />
+                <InputBar label="BRK" value={player.brake ?? 0} color="#f44336" localValue={localKeys?.current?.s || localKeys?.current?.space ? 1 : undefined} />
+                <InputBar label="STR" value={(player.steer ?? 0) * 0.5 + 0.5} color="#2196F3" centered localValue={localKeys ? (localKeys.current.a ? 0 : localKeys.current.d ? 1 : 0.5) : undefined} />
               </div>
             </div>
           )}
@@ -482,28 +483,54 @@ function SteeringWheelIcon({ steer }: { steer: number }) {
   );
 }
 
-/** Thin horizontal bar for throttle/brake/steer visualization */
-function InputBar({ label, value, color, centered }: { label: string; value: number; color: string; centered?: boolean }) {
+/** Thin horizontal bar for throttle/brake/steer visualization with optional local input layer */
+function InputBar({ label, value, color, centered, localValue }: { label: string; value: number; color: string; centered?: boolean; localValue?: number }) {
   const pct = Math.max(0, Math.min(1, value)) * 100;
+  const localPct = localValue != null ? Math.max(0, Math.min(1, localValue)) * 100 : undefined;
   return (
     <div className="flex items-center gap-1.5">
       <span className="text-white/30 text-[10px] font-mono w-6">{label}</span>
       <div className="w-16 h-1.5 bg-white/10 rounded-full overflow-hidden relative">
         {centered ? (
-          <div
-            className="absolute top-0 h-full rounded-full"
-            style={{
-              backgroundColor: color,
-              left: pct < 50 ? `${pct}%` : '50%',
-              width: `${Math.abs(pct - 50)}%`,
-              opacity: 0.7,
-            }}
-          />
+          <>
+            {/* Background bar: local input (instant) */}
+            {localPct != null && (
+              <div
+                className="absolute top-0 h-full rounded-full"
+                style={{
+                  backgroundColor: color,
+                  left: localPct < 50 ? `${localPct}%` : '50%',
+                  width: `${Math.abs(localPct - 50)}%`,
+                  opacity: 0.2,
+                }}
+              />
+            )}
+            {/* Foreground bar: server-confirmed input */}
+            <div
+              className="absolute top-0 h-full rounded-full"
+              style={{
+                backgroundColor: color,
+                left: pct < 50 ? `${pct}%` : '50%',
+                width: `${Math.abs(pct - 50)}%`,
+                opacity: 0.7,
+              }}
+            />
+          </>
         ) : (
-          <div
-            className="h-full rounded-full"
-            style={{ backgroundColor: color, width: `${pct}%`, opacity: 0.7 }}
-          />
+          <>
+            {/* Background bar: local input (instant) */}
+            {localPct != null && (
+              <div
+                className="absolute top-0 h-full rounded-full"
+                style={{ backgroundColor: color, width: `${localPct}%`, opacity: 0.2 }}
+              />
+            )}
+            {/* Foreground bar: server-confirmed input */}
+            <div
+              className="absolute top-0 h-full rounded-full"
+              style={{ backgroundColor: color, width: `${pct}%`, opacity: 0.7 }}
+            />
+          </>
         )}
       </div>
     </div>

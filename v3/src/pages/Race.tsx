@@ -2,6 +2,7 @@ import { useState, useCallback, useMemo } from 'react';
 import { useGPUConnection } from '../hooks/useGPUConnection.ts';
 import { getLastWsUrl } from '../hooks/useGPUConnection.ts';
 import { useEngineSound } from '../hooks/useEngineSound.ts';
+import { useAIEngineSound } from '../hooks/useAIEngineSound.ts';
 import { useBackgroundMusic } from '../hooks/useBackgroundMusic.ts';
 import { useSteeringPrediction } from '../hooks/useSteeringPrediction.ts';
 import { useFrameExtrapolation } from '../hooks/useFrameExtrapolation.ts';
@@ -68,6 +69,7 @@ export function Race() {
   const respawnTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cameraIndexRef = useRef(0);
   const CAMERA_MODES = ['chase', 'hood', 'bumper'] as const;
+  const [cameraMode, setCameraMode] = useState<typeof CAMERA_MODES[number]>('chase');
 
   // Feature-detect WebGL2 once (stable across renders)
   const [useWebGL2] = useState(() => supportsWebGL2());
@@ -77,6 +79,7 @@ export function Race() {
 
   const gpu = useGPUConnection();
   const engineSound = useEngineSound();
+  const aiEngineSound = useAIEngineSound();
   const bgMusic = useBackgroundMusic();
   const crowd = useCrowdAmbiance();
   const leaderboard = useLeaderboard();
@@ -182,6 +185,7 @@ export function Race() {
     let rafId: number;
     const tick = () => {
       const player = gpu.raceState?.player;
+      const ai = gpu.raceState?.ai;
       const raceStatus = gpu.raceState?.race_status;
 
       if (raceStatus === 'countdown') {
@@ -203,12 +207,25 @@ export function Race() {
         const intensity = Math.min(1.0, speedFactor + gapCloseFactor);
         bgMusic.updateIntensity(intensity);
       }
+
+      // Update AI engine sound (spatial Doppler) when positions are available
+      if (ai && player && ai.x != null && ai.y != null && player.x != null && player.y != null) {
+        aiEngineSound.update(
+          ai.x,
+          ai.y,
+          ai.speed_kmh,
+          player.x,
+          player.y,
+          player.yaw ?? 0,
+        );
+      }
+
       rafId = requestAnimationFrame(tick);
     };
     rafId = requestAnimationFrame(tick);
 
     return () => { cancelAnimationFrame(rafId); };
-  }, [view, gpu.raceState, engineSound.update, bgMusic.updateIntensity]);
+  }, [view, gpu.raceState, engineSound.update, bgMusic.updateIntensity, aiEngineSound.update]);
 
   // --- Countdown beeps + GO screen shake ---
   useEffect(() => {
@@ -529,17 +546,19 @@ export function Race() {
     }
   }, [view, gpu.raceState?.player?.speed_kmh]);
 
-  // --- Background music + crowd ambiance lifecycle ---
+  // --- Background music + crowd ambiance + AI engine sound lifecycle ---
   useEffect(() => {
     const status = gpu.raceState?.race_status;
     if (view === 'racing' && (status === 'racing' || status === 'finishing' || status === 'countdown')) {
       bgMusic.start();
       crowd.start();
+      aiEngineSound.start();
     } else {
       bgMusic.stop();
       crowd.stop();
+      aiEngineSound.stop();
     }
-  }, [view, gpu.raceState?.race_status, bgMusic.start, bgMusic.stop, crowd.start, crowd.stop]);
+  }, [view, gpu.raceState?.race_status, bgMusic.start, bgMusic.stop, crowd.start, crowd.stop, aiEngineSound.start, aiEngineSound.stop]);
 
   // --- Wake Lock: prevent screen from sleeping during race ---
   useEffect(() => {
@@ -625,7 +644,9 @@ export function Race() {
       }
       if (key === 'c') {
         cameraIndexRef.current = (cameraIndexRef.current + 1) % CAMERA_MODES.length;
-        gpu.sendCameraMode(CAMERA_MODES[cameraIndexRef.current]);
+        const newMode = CAMERA_MODES[cameraIndexRef.current];
+        setCameraMode(newMode);
+        gpu.sendCameraMode(newMode);
         return;
       }
       if (key === 'm') {
@@ -781,7 +802,9 @@ export function Race() {
     }
     if (gamepad.cameraToggle) {
       cameraIndexRef.current = (cameraIndexRef.current + 1) % CAMERA_MODES.length;
-      gpu.sendCameraMode(CAMERA_MODES[cameraIndexRef.current]);
+      const newMode = CAMERA_MODES[cameraIndexRef.current];
+      setCameraMode(newMode);
+      gpu.sendCameraMode(newMode);
     }
   }, [view, gamepad.connected, gamepad.respawn, gamepad.cameraToggle, gamepad.throttle, gpu.raceState?.race_status, gpu.sendRespawn, gpu.sendCameraMode]);
 
@@ -868,11 +891,16 @@ export function Race() {
 
   // --- Speed-based FOV zoom ---
   // Exponential scale: subtle at low speed, ramps aggressively above 150 km/h
+  // Hood/bumper cam: more aggressive curve for immersive first-person feel
+  const isFirstPersonCam = cameraMode === 'hood' || cameraMode === 'bumper';
   const speedFovScale = useMemo(() => {
     const speed = gpu.raceState?.player?.speed_kmh ?? 0;
     const t = Math.min(1, speed / 200);
+    if (isFirstPersonCam) {
+      return 1.0 + 0.12 * Math.pow(t, 1.3);
+    }
     return 1.0 + 0.08 * Math.pow(t, 1.5);
-  }, [gpu.raceState?.player?.speed_kmh]);
+  }, [gpu.raceState?.player?.speed_kmh, isFirstPersonCam]);
 
   // --- Camera G-force shift + brake/accel tilt ---
   // Hard throttle: pushed back (translateY +2px, slight lean back)
@@ -1071,7 +1099,7 @@ export function Race() {
           </div>
 
           {/* Speed lines overlay (anime-style radial lines at high speed) */}
-          <SpeedLines speedKmh={gpu.raceState?.player.speed_kmh ?? 0} />
+          <SpeedLines speedKmh={gpu.raceState?.player.speed_kmh ?? 0} intensityMultiplier={isFirstPersonCam ? 1.5 : 1.0} />
 
           {/* Slipstream / drafting visual: converging blue-white streaks when behind AI */}
           <SlipstreamEffect
@@ -1182,7 +1210,7 @@ export function Race() {
           `}</style>
 
           {/* HUD overlay */}
-          <RaceHUD raceState={gpu.raceState} latencyMs={gpu.latencyMs} gamepadConnected={gamepad.connected} />
+          <RaceHUD raceState={gpu.raceState} latencyMs={gpu.latencyMs} gamepadConnected={gamepad.connected} localKeys={keysRef} />
 
           {/* Drift score overlay (active drift display + score popups + total score) */}
           <DriftScore
@@ -1232,6 +1260,7 @@ export function Race() {
             onClick={() => {
               const newMuted = !engineSound.isMuted;
               engineSound.setMuted(newMuted);
+              aiEngineSound.setMuted(newMuted);
               bgMusic.setMuted(newMuted);
               crowd.setMuted(newMuted);
             }}

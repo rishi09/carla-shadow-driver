@@ -237,7 +237,7 @@ Already have engine sound + background music, but there's more untapped potentia
 
 - [x] **Adaptive music intensity from race events**: Current background music scales with speed. Add event-triggered intensification: bring in drums on overtake, add distortion layer when gap < 1s, drop all music to just bass drone on final lap last checkpoint (the "clutch moment" audio design from Mario Kart). Implementation: set gain nodes per-layer based on race events, not just speed.
 
-- [ ] **Doppler effect on AI car**: When the AI car passes the player or vice versa, apply a frequency shift to the AI's engine sound. The Web Audio API's `AudioPannerNode` with `positionX/Y/Z` can do this natively -- just update the AI car's position in 3D audio space each frame.
+- [x] **Doppler effect on AI car**: When the AI car passes the player or vice versa, apply a frequency shift to the AI's engine sound. The Web Audio API's `AudioPannerNode` with `positionX/Y/Z` can do this natively -- just update the AI car's position in 3D audio space each frame.
 
 - [x] **Crowd/ambiance layer**: Procedural crowd noise that reacts to race events -- cheering on overtake, gasp on crash, roar on finish. Use filtered white noise shaped by gain envelopes triggered by race_state events. No audio files needed.
 
@@ -822,7 +822,7 @@ See `LEARNINGS.md` section "What Makes Racing Games Fun" for full rationale behi
 
 #### Controls & Physics Feel
 - [ ] **Speed-dependent steering ramp time**: In `carla_manager.py`, scale steering ramp duration with speed: `ramp_ms = 40 + speed * 0.3`. At 0 km/h: 40ms (snappy). At 200 km/h: 100ms (weighty). Makes high-speed steering feel deliberate and solid (GT7 "weight" feel).
-- [ ] **Two-layer input bars**: In `RaceHUD.tsx` InputBar component, show two overlapping bars: background bar = local input (instant, from keyboard state), foreground bar = server-confirmed input (delayed, from telemetry). Gives visual feedback that "the car is catching up to my input." Helps players understand the latency.
+- [x] **Two-layer input bars**: In `RaceHUD.tsx` InputBar component, show two overlapping bars: background bar = local input (instant, from keyboard state), foreground bar = server-confirmed input (delayed, from telemetry). Gives visual feedback that "the car is catching up to my input." Helps players understand the latency.
 - [ ] **Auto-brake assist for Easy mode**: On Easy difficulty, when approaching a sharp turn (next checkpoint bearing > 60 degrees from heading) at speed > 100 km/h, auto-apply 30% brake. Server-side in `carla_manager.py`. Makes Easy mode genuinely playable for beginners (Forza Horizon lesson).
 
 #### Dramatic Moments Detection
@@ -839,8 +839,8 @@ See `LEARNINGS.md` section "What Makes Racing Games Fun" for full rationale behi
 
 - [x] **Speed-dependent vignette shape**: Modify SpeedEffects.tsx vignette to darken top and sides more than bottom. Change ellipse from `70% 60%` to `70% 50%` (taller, keeping bottom lighter). Maintains road readability while enhancing tunnel vision.
 - [x] **Speed line vanishing point offset**: In SpeedLines.tsx, move the radial center from dead center to 40% from top (slightly above center). Matches visual perspective of looking down a road. Change `centerY = h / 2` to `centerY = h * 0.4`.
-- [ ] **Emphasize hood cam for speed**: When player switches to first-person/hood cam (C key), increase speed line intensity by 50% and lower the FOV curve threshold. Hood cam should feel MUCH faster than chase cam because road is closer (Wipeout lesson).
-- [ ] **Victory/defeat results enhancements**: Show gap to 3 decimal places when < 1.0s. Show improvement vs previous attempt. Add "Best Improvement" stat (e.g., "1.3s faster than your first race on this track!"). Show time progression chart of last 5 attempts.
+- [x] **Emphasize hood cam for speed**: When player switches to first-person/hood cam (C key), increase speed line intensity by 50% and lower the FOV curve threshold. Hood cam should feel MUCH faster than chase cam because road is closer (Wipeout lesson).
+- [x] **Victory/defeat results enhancements**: Show gap to 3 decimal places when < 1.0s. Show improvement vs previous attempt. Add "Best Improvement" stat (e.g., "1.3s faster than your first race on this track!"). Show time progression chart of last 5 attempts.
 - [x] **Slipstream/drafting visual**: When player is within 10m behind AI car, show faint blue-white speed streaks converging toward center (drafting visual). Even if no actual speed boost, the visual cue makes close following feel intentional and skill-based. If combining with actual draft speed boost, becomes a visible mechanic.
 - [ ] **AI blocking behavior on Hard**: On Hard difficulty, when player is within 5m behind AI, have AI take a defensive line (move toward the inside of the next turn). Creates "I need to outbrake them!" moments. Server-side in AI autopilot parameters.
 - [ ] **Comeback mechanic ("drafting boost")**: When player is >3 seconds behind, grant a subtle 3% speed boost with a faint blue-white screen-edge glow labeled "SLIPSTREAM". Frame rubber-banding as a physics mechanic (drafting) so it feels earned, not gifted. Mario Kart lesson: invisible help feels patronizing; visible help feels like a feature.

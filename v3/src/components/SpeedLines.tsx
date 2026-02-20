@@ -3,6 +3,8 @@ import { useRef, useEffect } from 'react';
 interface SpeedLinesProps {
   speedKmh: number;
   className?: string;
+  /** Multiplier for speed line intensity (default 1.0). Use >1 for first-person cams. */
+  intensityMultiplier?: number;
 }
 
 /** A single speed line with its animation state */
@@ -26,15 +28,17 @@ const LINE_COLOR_B = 255;
  * Uses a canvas overlay with requestAnimationFrame.
  * Lines are recycled from a fixed-size pool for consistent 60fps.
  */
-export function SpeedLines({ speedKmh, className = '' }: SpeedLinesProps) {
+export function SpeedLines({ speedKmh, className = '', intensityMultiplier = 1.0 }: SpeedLinesProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animRef = useRef<number>(0);
   const speedRef = useRef(speedKmh);
   const linesRef = useRef<SpeedLine[]>([]);
   const lastTimeRef = useRef(0);
+  const intensityMultiplierRef = useRef(intensityMultiplier);
 
-  // Update speed ref every render (avoids effect teardown)
+  // Update refs every render (avoids effect teardown)
   speedRef.current = speedKmh;
+  intensityMultiplierRef.current = intensityMultiplier;
 
   useEffect(() => {
     const cvs = canvasRef.current;
@@ -78,8 +82,8 @@ export function SpeedLines({ speedKmh, className = '' }: SpeedLinesProps) {
         return;
       }
 
-      // Intensity: 0 at MIN_SPEED, 1 at MAX_SPEED+
-      const intensity = Math.min(1.0, (speed - MIN_SPEED) / (MAX_SPEED - MIN_SPEED));
+      // Intensity: 0 at MIN_SPEED, 1 at MAX_SPEED+, scaled by intensityMultiplier
+      const intensity = Math.min(1.0, (speed - MIN_SPEED) / (MAX_SPEED - MIN_SPEED)) * intensityMultiplierRef.current;
       const targetLineCount = Math.floor(8 + intensity * (MAX_LINES - 8));
       const lines = linesRef.current;
 

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import type { RaceFinished } from '../types/index.ts';
 import type { PersonalBestResult } from '../hooks/usePersonalBests.ts';
 import { RacingLineViz } from './RacingLineViz.tsx';
@@ -35,6 +35,56 @@ const MEDAL_ICONS: Record<string, string> = {
   bronze: '\uD83E\uDD49',
 };
 
+/** Max number of historical times to keep per track/lap combo */
+const MAX_HISTORY = 5;
+
+/** localStorage key for race history */
+function historyKey(track: string, laps: number): string {
+  return `shadow_driver_race_history_${track}_${laps}`;
+}
+
+interface RaceHistoryEntry {
+  time: number;
+  date: string;
+  won: boolean;
+}
+
+/** Load race history from localStorage */
+function loadHistory(track: string, laps: number): RaceHistoryEntry[] {
+  try {
+    const raw = localStorage.getItem(historyKey(track, laps));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed as RaceHistoryEntry[];
+  } catch {
+    return [];
+  }
+}
+
+/** Save a new race time to history, keeping only the last MAX_HISTORY entries */
+function saveToHistory(track: string, laps: number, entry: RaceHistoryEntry): RaceHistoryEntry[] {
+  const history = loadHistory(track, laps);
+  history.push(entry);
+  // Keep only the last MAX_HISTORY entries
+  const trimmed = history.slice(-MAX_HISTORY);
+  try {
+    localStorage.setItem(historyKey(track, laps), JSON.stringify(trimmed));
+  } catch {
+    // localStorage might be full or disabled
+  }
+  return trimmed;
+}
+
+/** Format gap with 3 decimal places when < 1s, 1 decimal otherwise */
+function formatGap(seconds: number): string {
+  const abs = Math.abs(seconds);
+  if (abs < 1.0) {
+    return abs.toFixed(3);
+  }
+  return abs.toFixed(1);
+}
+
 export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onInstantReplay, personalBestResult, isDailyChallenge, dailyChallengePosition, streakResult }: RaceResultsProps) {
   const playerWon = result.winner === 'player';
 
@@ -48,13 +98,51 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
   // Copy results text state
   const [resultsCopied, setResultsCopied] = useState(false);
 
+  // Race history: load previous attempts and save current one on mount
+  const [raceHistory, setRaceHistory] = useState<RaceHistoryEntry[]>([]);
+  const historySavedRef = useRef(false);
+
+  useEffect(() => {
+    if (!raceSettings || result.player_time == null || historySavedRef.current) return;
+    historySavedRef.current = true;
+
+    // Load existing history BEFORE saving current (so we can show previous attempts)
+    const previousHistory = loadHistory(raceSettings.track, raceSettings.laps);
+
+    // Save this race to history
+    const entry: RaceHistoryEntry = {
+      time: result.player_time,
+      date: new Date().toISOString(),
+      won: playerWon,
+    };
+    const updated = saveToHistory(raceSettings.track, raceSettings.laps, entry);
+    setRaceHistory(updated);
+
+    // Store previous history for "first race" comparison
+    if (previousHistory.length > 0) {
+      setFirstRaceTime(previousHistory[0].time);
+    }
+  }, [raceSettings, result.player_time, playerWon]);
+
+  // First race time on this track/lap combo (from history, before this race was added)
+  const [firstRaceTime, setFirstRaceTime] = useState<number | null>(null);
+
+  // Compute improvement from first race
+  const firstRaceImprovement = useMemo(() => {
+    if (firstRaceTime == null || result.player_time == null) return null;
+    const diff = firstRaceTime - result.player_time;
+    // Only show if meaningful improvement (> 0.1s) and at least 2 races exist
+    if (diff <= 0.1) return null;
+    return diff;
+  }, [firstRaceTime, result.player_time]);
+
   useEffect(() => {
     // Stagger reveal: increment step every 150ms up to 10 steps
     let step = 0;
     const advance = () => {
       step++;
       setRevealStep(step);
-      if (step < 12) {
+      if (step < 13) {
         revealTimerRef.current = setTimeout(advance, 150);
       }
     };
@@ -116,7 +204,7 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
     // Gap description
     let gapStr = '';
     if (result.player_time != null && result.ai_time != null) {
-      const gap = Math.abs(result.player_time - result.ai_time).toFixed(1);
+      const gap = formatGap(result.player_time - result.ai_time);
       gapStr = playerWon ? `Beat AI by ${gap}s` : `Lost to AI by ${gap}s`;
     }
 
@@ -270,8 +358,13 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
                   <div className="text-yellow-400/70 text-xs font-mono mt-1">
                     Previous best: {formatRaceTime(personalBestResult.previousBest.time)}
                     <span className="text-green-400 ml-2">
-                      Improved by {personalBestResult.improvement.toFixed(2)}s
+                      {formatGap(personalBestResult.improvement)}s faster
                     </span>
+                  </div>
+                )}
+                {firstRaceImprovement != null && raceHistory.length >= 3 && (
+                  <div className="text-yellow-400/50 text-[10px] font-mono mt-1">
+                    {firstRaceImprovement.toFixed(1)}s faster than your first race on this track
                   </div>
                 )}
               </div>
@@ -320,7 +413,7 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
                 ? 'bg-player/10 border-player/30 text-player'
                 : 'bg-warning/10 border-warning/30 text-warning'
             }`}>
-              {playerWon ? '-' : '+'}{Math.abs(result.player_time - result.ai_time).toFixed(1)}s
+              {playerWon ? '-' : '+'}{formatGap(result.player_time - result.ai_time)}s
               {playerWon ? ' ahead' : ' behind'}
             </div>
           </div>
@@ -456,9 +549,24 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
           </div>
         )}
 
+        {/* Time Progression -- last 5 attempts on this track */}
+        {raceHistory.length >= 2 && (
+          <div className="bg-dark-400/50 rounded-lg p-4 mb-6 text-left" style={revealStyle(9)}>
+            <div className="text-white/40 text-xs font-mono uppercase mb-3 flex items-center justify-between">
+              <span>Recent Attempts</span>
+              {firstRaceImprovement != null && (
+                <span className="text-cyan-400/80 font-bold normal-case">
+                  {firstRaceImprovement.toFixed(1)}s faster since first race
+                </span>
+              )}
+            </div>
+            <TimeProgressionChart history={raceHistory} />
+          </div>
+        )}
+
         {/* Racing line visualization */}
         {(result.player_path || result.ai_path) && (
-          <div className="mb-6" style={revealStyle(9)}>
+          <div className="mb-6" style={revealStyle(10)}>
             <RacingLineViz
               playerPath={result.player_path}
               aiPath={result.ai_path}
@@ -467,7 +575,7 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
         )}
 
         {/* Shareable race result card */}
-        <div className="mb-6" style={revealStyle(10)}>
+        <div className="mb-6" style={revealStyle(11)}>
           <RaceResultCard
             result={result}
             raceSettings={raceSettings}
@@ -475,7 +583,7 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
         </div>
 
         {/* Action buttons */}
-        <div className="flex gap-3" style={revealStyle(11)}>
+        <div className="flex gap-3" style={revealStyle(12)}>
           {/* Instant Race Again (same settings) -- primary action */}
           <button
             onClick={onInstantReplay ?? onPlayAgain}
@@ -501,7 +609,7 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
 
         {/* Share buttons */}
         {raceSettings && (
-          <div className="mt-4 flex items-center justify-center gap-4" style={revealStyle(12)}>
+          <div className="mt-4 flex items-center justify-center gap-4" style={revealStyle(13)}>
             <button
               onClick={handleCopyResults}
               className="text-white/40 hover:text-white/70 text-xs font-mono transition-colors inline-flex items-center gap-1.5"
@@ -527,7 +635,7 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
         )}
 
         {/* Keyboard shortcut hint */}
-        <div className="mt-3 text-white/20 text-xs font-mono" style={revealStyle(12)}>
+        <div className="mt-3 text-white/20 text-xs font-mono" style={revealStyle(13)}>
           Press Enter to race again
         </div>
       </div>
@@ -568,6 +676,120 @@ function ParticleBurst() {
           } as React.CSSProperties}
         />
       ))}
+    </div>
+  );
+}
+
+/** Mini sparkline chart showing time progression over recent attempts */
+function TimeProgressionChart({ history }: { history: RaceHistoryEntry[] }) {
+  const times = history.map(h => h.time);
+  const minTime = Math.min(...times);
+  const maxTime = Math.max(...times);
+  const range = maxTime - minTime;
+
+  // Chart dimensions
+  const chartWidth = 100; // percentage-based
+  const chartHeight = 40; // px
+  const padding = 4;
+
+  // Normalize time to y position (lower time = higher on chart = better)
+  const normalize = (t: number): number => {
+    if (range === 0) return chartHeight / 2;
+    return padding + ((t - minTime) / range) * (chartHeight - padding * 2);
+  };
+
+  // Show delta from previous for each attempt
+  const deltas: (number | null)[] = times.map((t, i) => {
+    if (i === 0) return null;
+    return times[i - 1] - t; // positive = improvement
+  });
+
+  return (
+    <div>
+      {/* Mini sparkline */}
+      <div
+        className="relative w-full rounded bg-dark-500/50 border border-white/5 mb-2"
+        style={{ height: chartHeight + 8 }}
+      >
+        {/* Best time line */}
+        <div
+          className="absolute left-0 right-0 border-t border-dashed border-green-500/20"
+          style={{ top: normalize(minTime) + 4 }}
+        />
+        {/* SVG sparkline */}
+        <svg
+          className="absolute inset-0 w-full h-full"
+          viewBox={`0 0 ${(times.length - 1) * 100} ${chartHeight + 8}`}
+          preserveAspectRatio="none"
+        >
+          {/* Line path */}
+          <polyline
+            fill="none"
+            stroke="url(#sparkline-gradient)"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            points={times.map((t, i) => {
+              const x = times.length === 1 ? 50 : (i / (times.length - 1)) * ((times.length - 1) * 100);
+              const y = normalize(t) + 4;
+              return `${x},${y}`;
+            }).join(' ')}
+          />
+          {/* Gradient */}
+          <defs>
+            <linearGradient id="sparkline-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stopColor="rgba(255,255,255,0.3)" />
+              <stop offset="100%" stopColor="rgba(74,222,128,0.8)" />
+            </linearGradient>
+          </defs>
+          {/* Data points */}
+          {times.map((t, i) => {
+            const x = times.length === 1 ? 50 : (i / (times.length - 1)) * ((times.length - 1) * 100);
+            const y = normalize(t) + 4;
+            const isBest = t === minTime;
+            const isLatest = i === times.length - 1;
+            return (
+              <circle
+                key={i}
+                cx={x}
+                cy={y}
+                r={isLatest ? 4 : 3}
+                fill={isBest ? '#4ade80' : isLatest ? '#60a5fa' : 'rgba(255,255,255,0.4)'}
+                stroke={isLatest ? '#60a5fa' : 'none'}
+                strokeWidth={isLatest ? 2 : 0}
+              />
+            );
+          })}
+        </svg>
+      </div>
+
+      {/* Time labels row */}
+      <div className="flex justify-between items-end gap-1">
+        {history.map((entry, i) => {
+          const isBest = entry.time === minTime;
+          const isLatest = i === history.length - 1;
+          const delta = deltas[i];
+          return (
+            <div key={i} className="flex-1 text-center">
+              <div className={`text-[10px] font-mono ${
+                isLatest ? 'text-blue-400 font-bold' : isBest ? 'text-green-400 font-bold' : 'text-white/40'
+              }`}>
+                {formatRaceTime(entry.time)}
+              </div>
+              {delta != null && (
+                <div className={`text-[9px] font-mono ${
+                  delta > 0 ? 'text-green-500/70' : delta < 0 ? 'text-red-400/70' : 'text-white/20'
+                }`}>
+                  {delta > 0 ? '-' : '+'}{formatGap(delta)}s
+                </div>
+              )}
+              {delta == null && (
+                <div className="text-[9px] font-mono text-white/15">1st</div>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
