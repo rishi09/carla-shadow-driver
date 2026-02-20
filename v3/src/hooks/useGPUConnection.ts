@@ -174,10 +174,11 @@ export function useGPUConnection(): UseGPUConnectionReturn {
         // 0x00 = main camera, 0x01 = rear-view mirror
         if (event.data instanceof Blob) {
           const blob = event.data as Blob;
-          // Read the first byte to determine frame type
-          const typeByte = await blob.slice(0, 1).arrayBuffer();
-          const frameType = new Uint8Array(typeByte)[0];
-          const jpegBlob = blob.slice(1, blob.size, 'image/jpeg');
+          // Convert entire blob to ArrayBuffer to reliably extract type byte
+          // and slice JPEG data (Safari's Blob.slice can be unreliable)
+          const buffer = await blob.arrayBuffer();
+          const frameType = new Uint8Array(buffer)[0];
+          const jpegBlob = new Blob([buffer.slice(1)], { type: 'image/jpeg' });
 
           if (frameType === 0x01) {
             // Rear-view mirror frame

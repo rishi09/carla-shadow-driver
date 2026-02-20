@@ -11,7 +11,9 @@ SSH="ssh -o StrictHostKeyChecking=no -p $PORT root@$IP"
 SCP="scp -o StrictHostKeyChecking=no -P $PORT"
 
 echo "=== Copying server files to GPU ==="
-$SCP server/carla_manager.py server/race_server.py server/race_logic.py root@$IP:/opt/shadow-driver/server/
+$SCP server/*.py root@$IP:/opt/shadow-driver/server/
+$SSH 'mkdir -p /opt/shadow-driver/server/data'
+$SCP server/data/*.json root@$IP:/opt/shadow-driver/server/data/ 2>/dev/null || true
 
 echo "=== Restarting server + tunnel ==="
 $SSH bash -s -- "$NGROK_TOKEN" <<'REMOTE'
