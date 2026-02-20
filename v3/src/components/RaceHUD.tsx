@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { RaceState } from '../types/index.ts';
 import { RaceProgressBar } from './RaceProgressBar.tsx';
 import { ArcSpeedometer } from './ArcSpeedometer.tsx';
@@ -10,9 +10,41 @@ interface RaceHUDProps {
 }
 
 export function RaceHUD({ raceState, latencyMs, className = '' }: RaceHUDProps) {
+  // Track HUD visibility for fade-in on GO
+  const [hudVisible, setHudVisible] = useState(false);
+  const prevStatusRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const status = raceState?.race_status ?? null;
+    // When transitioning from countdown to racing, fade in HUD
+    if (status === 'racing' && prevStatusRef.current === 'countdown') {
+      // Stagger the fade-in slightly
+      const timer = setTimeout(() => setHudVisible(true), 100);
+      return () => clearTimeout(timer);
+    }
+    // If already racing (e.g., reconnect), show immediately
+    if (status === 'racing' && prevStatusRef.current !== 'countdown') {
+      setHudVisible(true);
+    }
+    // Hide during countdown
+    if (status === 'countdown') {
+      setHudVisible(false);
+    }
+    prevStatusRef.current = status;
+  }, [raceState?.race_status]);
+
   if (!raceState) return null;
 
   const { player, ai, model, race_status, fps, countdown } = raceState;
+
+  // During countdown, hide most HUD elements for a cinematic look
+  const isCountdown = race_status === 'countdown';
+  // HUD elements transition class: hidden during countdown, staggered fade-in on GO
+  const hudOpacityClass = isCountdown
+    ? 'opacity-0'
+    : hudVisible
+      ? 'opacity-100'
+      : 'opacity-0';
 
   return (
     <div className={`absolute inset-0 pointer-events-none ${className}`}>
@@ -21,8 +53,11 @@ export function RaceHUD({ raceState, latencyMs, className = '' }: RaceHUDProps) 
         <CountdownOverlay countdown={countdown} />
       )}
 
-      {/* Top bar: position + lap */}
-      <div className="absolute top-4 left-0 right-0 flex justify-center gap-8 z-10">
+      {/* Top bar: position + lap -- hidden during countdown, fades in on GO */}
+      <div
+        className={`absolute top-4 left-0 right-0 flex justify-center gap-8 z-10 transition-opacity duration-500 ease-out ${hudOpacityClass}`}
+        style={{ transitionDelay: hudVisible ? '0ms' : '0ms' }}
+      >
         {/* Player info */}
         <div className="bg-black/60 backdrop-blur-sm rounded-lg px-4 py-2 border border-player/40">
           <div className="text-player text-xs font-mono uppercase tracking-wider">You</div>
@@ -57,9 +92,12 @@ export function RaceHUD({ raceState, latencyMs, className = '' }: RaceHUDProps) 
         </div>
       </div>
 
-      {/* Race progress bar - shown during racing only */}
+      {/* Race progress bar - shown during racing only, with fade-in */}
       {race_status === 'racing' && (
-        <div className="absolute top-[72px] left-1/2 -translate-x-1/2 z-10 w-[480px] max-w-[90vw]">
+        <div
+          className={`absolute top-[72px] left-1/2 -translate-x-1/2 z-10 w-[480px] max-w-[90vw] transition-opacity duration-500 ease-out ${hudOpacityClass}`}
+          style={{ transitionDelay: hudVisible ? '100ms' : '0ms' }}
+        >
           <RaceProgressBar
             playerLap={player.lap}
             playerCheckpoint={player.checkpoint}
@@ -71,21 +109,29 @@ export function RaceHUD({ raceState, latencyMs, className = '' }: RaceHUDProps) 
         </div>
       )}
 
-      {/* Next checkpoint indicator */}
+      {/* Next checkpoint indicator -- hidden during countdown */}
       {race_status === 'racing' && player.next_checkpoint_x != null && player.x != null && (
-        <CheckpointArrow
-          playerX={player.x}
-          playerY={player.y ?? 0}
-          playerYaw={player.yaw}
-          targetX={player.next_checkpoint_x}
-          targetY={player.next_checkpoint_y ?? 0}
-          checkpoint={player.checkpoint}
-          totalCheckpoints={player.total_checkpoints ?? raceState.checkpoints?.length ?? 10}
-        />
+        <div
+          className={`transition-opacity duration-500 ease-out ${hudOpacityClass}`}
+          style={{ transitionDelay: hudVisible ? '150ms' : '0ms' }}
+        >
+          <CheckpointArrow
+            playerX={player.x}
+            playerY={player.y ?? 0}
+            playerYaw={player.yaw}
+            targetX={player.next_checkpoint_x}
+            targetY={player.next_checkpoint_y ?? 0}
+            checkpoint={player.checkpoint}
+            totalCheckpoints={player.total_checkpoints ?? raceState.checkpoints?.length ?? 10}
+          />
+        </div>
       )}
 
-      {/* Bottom left: arc speedometer + gear + inputs */}
-      <div className="absolute bottom-4 left-4 z-10">
+      {/* Bottom left: arc speedometer + gear + inputs -- hidden during countdown */}
+      <div
+        className={`absolute bottom-4 left-4 z-10 transition-opacity duration-500 ease-out ${hudOpacityClass}`}
+        style={{ transitionDelay: hudVisible ? '200ms' : '0ms' }}
+      >
         <div className="bg-black/60 backdrop-blur-sm rounded-lg px-3 py-3 border border-white/10 flex flex-col items-center">
           <ArcSpeedometer speedKmh={player.speed_kmh} />
           {player.gear !== undefined && (
@@ -104,8 +150,11 @@ export function RaceHUD({ raceState, latencyMs, className = '' }: RaceHUDProps) 
         </div>
       </div>
 
-      {/* Bottom center: lap timer */}
-      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10">
+      {/* Bottom center: lap timer -- hidden during countdown */}
+      <div
+        className={`absolute bottom-4 left-1/2 -translate-x-1/2 z-10 transition-opacity duration-500 ease-out ${hudOpacityClass}`}
+        style={{ transitionDelay: hudVisible ? '300ms' : '0ms' }}
+      >
         <div className="bg-black/60 backdrop-blur-sm rounded-lg px-6 py-3 border border-white/10">
           <div className="flex gap-6">
             <div>
@@ -125,8 +174,11 @@ export function RaceHUD({ raceState, latencyMs, className = '' }: RaceHUDProps) 
         </div>
       </div>
 
-      {/* Bottom right: FPS + latency + connection quality + controls hint */}
-      <div className="absolute bottom-4 right-4 z-10">
+      {/* Bottom right: FPS + latency + connection quality + controls hint -- hidden during countdown */}
+      <div
+        className={`absolute bottom-4 right-4 z-10 transition-opacity duration-500 ease-out ${hudOpacityClass}`}
+        style={{ transitionDelay: hudVisible ? '350ms' : '0ms' }}
+      >
         <div className="bg-black/60 backdrop-blur-sm rounded-lg px-3 py-2 border border-white/10">
           <div className="text-white/30 text-xs font-mono">{fps} FPS</div>
           {latencyMs != null && (
@@ -144,44 +196,209 @@ export function RaceHUD({ raceState, latencyMs, className = '' }: RaceHUDProps) 
   );
 }
 
-/** Cinematic 3-2-1-GO countdown with traffic light colors */
+/** Enhanced cinematic 3-2-1-GO countdown with slam animations and screen effects */
 function CountdownOverlay({ countdown }: { countdown: number }) {
   const [animPhase, setAnimPhase] = useState(0);
+  const prevCountdownRef = useRef(countdown);
 
   useEffect(() => {
+    // Reset animation on each new countdown value
     setAnimPhase(0);
-    const timer = setTimeout(() => setAnimPhase(1), 50);
+    const timer = setTimeout(() => setAnimPhase(1), 30);
+    prevCountdownRef.current = countdown;
     return () => clearTimeout(timer);
   }, [countdown]);
 
   const isGo = countdown === 0;
   const color = isGo ? '#4CAF50' : countdown === 1 ? '#FF9800' : '#f44336';
   const text = isGo ? 'GO!' : String(countdown);
-  const scale = animPhase === 0 ? 'scale-150 opacity-0' : 'scale-100 opacity-100';
 
   return (
     <div className="absolute inset-0 flex items-center justify-center z-30">
-      {/* Dim background during countdown */}
-      <div className="absolute inset-0 bg-black/30" />
+      {/* Keyframe animations */}
+      <style>{`
+        @keyframes countdown-slam {
+          0% {
+            transform: scale(2.5);
+            opacity: 0;
+          }
+          30% {
+            transform: scale(0.9);
+            opacity: 1;
+          }
+          50% {
+            transform: scale(1.05);
+          }
+          100% {
+            transform: scale(1.0);
+            opacity: 1;
+          }
+        }
+        @keyframes go-explode {
+          0% {
+            transform: scale(0.8);
+            opacity: 0;
+          }
+          20% {
+            transform: scale(1.0);
+            opacity: 1;
+          }
+          60% {
+            transform: scale(1.3);
+            opacity: 1;
+          }
+          100% {
+            transform: scale(2.0);
+            opacity: 0;
+          }
+        }
+        @keyframes go-text {
+          0% {
+            transform: scale(0.5);
+            opacity: 0;
+          }
+          30% {
+            transform: scale(1.1);
+            opacity: 1;
+          }
+          50% {
+            transform: scale(1.0);
+          }
+          100% {
+            transform: scale(1.0);
+            opacity: 1;
+          }
+        }
+        @keyframes flash-burst {
+          0% {
+            opacity: 0;
+            transform: scale(0.5);
+          }
+          20% {
+            opacity: 0.6;
+            transform: scale(1.0);
+          }
+          100% {
+            opacity: 0;
+            transform: scale(1.5);
+          }
+        }
+        @keyframes go-flash {
+          0% {
+            opacity: 0;
+            transform: scale(0.3);
+          }
+          15% {
+            opacity: 0.8;
+            transform: scale(1.2);
+          }
+          100% {
+            opacity: 0;
+            transform: scale(2.5);
+          }
+        }
+        @keyframes go-shake {
+          0% { transform: translate(0, 0); }
+          10% { transform: translate(-3px, 2px); }
+          20% { transform: translate(3px, -2px); }
+          30% { transform: translate(-2px, -1px); }
+          40% { transform: translate(2px, 1px); }
+          50% { transform: translate(-1px, 2px); }
+          60% { transform: translate(1px, -1px); }
+          70% { transform: translate(-2px, 0px); }
+          80% { transform: translate(1px, 1px); }
+          90% { transform: translate(-1px, -1px); }
+          100% { transform: translate(0, 0); }
+        }
+        @keyframes traffic-light-pulse {
+          0% { transform: scale(1); }
+          50% { transform: scale(1.3); }
+          100% { transform: scale(1); }
+        }
+      `}</style>
 
-      {/* Traffic light dots */}
-      <div className="relative flex flex-col items-center gap-4">
-        <div className="flex gap-3 mb-4">
-          <div className={`w-5 h-5 rounded-full transition-all duration-300 ${countdown <= 3 ? 'bg-red-500 shadow-[0_0_15px_rgba(244,67,54,0.8)]' : 'bg-white/10'}`} />
-          <div className={`w-5 h-5 rounded-full transition-all duration-300 ${countdown <= 2 && countdown > 0 ? 'bg-amber-500 shadow-[0_0_15px_rgba(255,152,0,0.8)]' : 'bg-white/10'}`} />
-          <div className={`w-5 h-5 rounded-full transition-all duration-300 ${isGo ? 'bg-green-500 shadow-[0_0_15px_rgba(76,175,80,0.8)]' : 'bg-white/10'}`} />
+      {/* Dim background during countdown -- slightly darker */}
+      <div className="absolute inset-0 bg-black/40" />
+
+      {/* GO shake wrapper */}
+      <div
+        className="relative flex flex-col items-center gap-4"
+        style={isGo && animPhase === 1 ? { animation: 'go-shake 0.4s ease-out' } : undefined}
+      >
+        {/* Traffic light dots - larger and more prominent */}
+        <div className="flex gap-4 mb-6">
+          <div
+            className={`w-7 h-7 rounded-full transition-all duration-300 ${countdown <= 3 ? 'bg-red-500 shadow-[0_0_20px_rgba(244,67,54,0.9)]' : 'bg-white/10'}`}
+            style={countdown === 3 && animPhase === 1 ? { animation: 'traffic-light-pulse 0.4s ease-out' } : undefined}
+          />
+          <div
+            className={`w-7 h-7 rounded-full transition-all duration-300 ${countdown <= 2 && countdown > 0 ? 'bg-amber-500 shadow-[0_0_20px_rgba(255,152,0,0.9)]' : 'bg-white/10'}`}
+            style={countdown === 2 && animPhase === 1 ? { animation: 'traffic-light-pulse 0.4s ease-out' } : undefined}
+          />
+          <div
+            className={`w-7 h-7 rounded-full transition-all duration-300 ${countdown <= 1 && countdown > 0 ? 'bg-amber-500 shadow-[0_0_20px_rgba(255,152,0,0.9)]' : isGo ? 'bg-green-500 shadow-[0_0_25px_rgba(76,175,80,0.9)]' : 'bg-white/10'}`}
+            style={isGo && animPhase === 1 ? { animation: 'traffic-light-pulse 0.4s ease-out' } : undefined}
+          />
         </div>
 
-        {/* Number / GO */}
-        <div
-          className={`text-9xl font-bold transition-all duration-300 ease-out ${scale}`}
-          style={{
-            color,
-            textShadow: `0 0 40px ${color}80, 0 0 80px ${color}40`,
-          }}
-        >
-          {text}
-        </div>
+        {/* Radial gradient flash behind number */}
+        {animPhase === 1 && !isGo && (
+          <div
+            className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] h-[400px] rounded-full pointer-events-none"
+            style={{
+              background: `radial-gradient(circle, ${color}30 0%, ${color}10 40%, transparent 70%)`,
+              animation: 'flash-burst 0.7s ease-out forwards',
+            }}
+          />
+        )}
+
+        {/* Bright flash on GO */}
+        {isGo && animPhase === 1 && (
+          <div
+            className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] rounded-full pointer-events-none"
+            style={{
+              background: 'radial-gradient(circle, rgba(76,175,80,0.5) 0%, rgba(76,175,80,0.2) 30%, transparent 60%)',
+              animation: 'go-flash 0.6s ease-out forwards',
+            }}
+          />
+        )}
+
+        {/* Number / GO text */}
+        {isGo ? (
+          <div
+            className="font-black leading-none select-none"
+            style={{
+              fontSize: 'clamp(8rem, 20vw, 14rem)',
+              color,
+              textShadow: `0 0 60px ${color}AA, 0 0 120px ${color}60, 0 4px 8px rgba(0,0,0,0.5)`,
+              animation: animPhase === 1 ? 'go-text 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards' : 'none',
+              opacity: animPhase === 0 ? 0 : 1,
+              letterSpacing: '0.05em',
+            }}
+          >
+            {text}
+          </div>
+        ) : (
+          <div
+            className="font-black leading-none select-none"
+            style={{
+              fontSize: 'clamp(10rem, 25vw, 16rem)',
+              color,
+              textShadow: `0 0 60px ${color}AA, 0 0 120px ${color}60, 0 4px 8px rgba(0,0,0,0.5)`,
+              animation: animPhase === 1 ? 'countdown-slam 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards' : 'none',
+              opacity: animPhase === 0 ? 0 : 1,
+            }}
+          >
+            {text}
+          </div>
+        )}
+
+        {/* "Rev your engine!" hint during countdown (not on GO) */}
+        {!isGo && (
+          <div className="mt-4 text-white/40 text-sm font-mono uppercase tracking-widest animate-pulse">
+            Hold W to rev
+          </div>
+        )}
       </div>
     </div>
   );

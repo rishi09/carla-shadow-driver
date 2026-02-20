@@ -12,8 +12,8 @@ The perceived lag stack when turning:
 **Total: ~80-140ms (SSH) or ~120-220ms (Cloudflare)**
 
 ### Transport: Kill the Cloudflare middleman
+- [x] **Ngrok tunnel (primary)**: Replaced Cloudflare quick tunnel with ngrok as primary tunnel. Free tier: 1 agent, valid TLS certs, WebSocket support, ~10-20ms overhead (vs Cloudflare's ~40-80ms). Requires `NGROK_AUTHTOKEN` env var. Cloudflare kept as automatic fallback.
 - [ ] **WSS via self-signed cert on GPU**: Generate self-signed TLS cert on instance boot, serve `wss://` directly on port 8765. Browser will warn about self-signed cert but `wss://` won't be blocked by mixed content. Add a "trust this GPU" interstitial page.
-- [ ] **Ngrok alternative**: Try ngrok (free tier supports TCP+TLS) as Cloudflare tunnel replacement — it terminates TLS, giving us `wss://` with a valid cert and no UDP restrictions.
 - [ ] **Tailscale/WireGuard tunnel**: Set up Tailscale on GPU instance — gives stable hostname + encrypted tunnel with ~2ms overhead vs Cloudflare's ~40-80ms.
 - [ ] **Direct Vast.ai with SSL**: Rent instances with "Direct" network mode, use Let's Encrypt or Caddy for auto-TLS on a custom domain pointing to the GPU IP.
 
@@ -62,9 +62,11 @@ The perceived lag stack when turning:
 - [x] Faster steering ramp (~40ms, was ~130ms)
 - [x] Reverse threshold raised to 15 km/h (was 5 km/h)
 - [x] Vehicle physics: reduced mass, boosted torque, increased tire friction, lowered center of mass
-- [ ] Add countersteer assist (auto-correct when sliding)
-- [ ] Add traction control (reduce throttle on wheel spin)
-- [ ] Drift mode: handbrake reduces rear tire friction for controlled slides
+- [x] Add countersteer assist (auto-correct when sliding) -- smoothstep-scaled correction based on heading vs velocity divergence, 15-45deg range, disabled during handbrake
+- [x] Add traction control (reduce throttle on wheel spin) -- detects launch spin and mid-speed traction loss, gradually caps throttle at 0.3-0.4
+- [x] Drift mode: handbrake reduces rear tire friction for controlled slides -- 30% friction on press, restore on release, state-transition only (no per-frame physics apply)
+- [x] Better tire friction model: front/rear split (3.8/3.2), lateral stiffness tuned (front 20, rear 17), stiffer damping
+- [x] Smooth speed-dependent steering: exponential curve replaces step-function thresholds (0.08 + 0.42 * exp(-speed/70))
 
 ## Game Feel / Juice
 - [x] Camera FOV scaling at speed (subtle 1.0→1.05x zoom at 150+ km/h)
@@ -81,10 +83,16 @@ The perceived lag stack when turning:
 Learnings from Forza Horizon 5, Mario Kart, Trackmania, Slow Roads, agar.io.
 
 ### Landing Page
-- [ ] Show CARLA gameplay running as background on landing page (video or live canvas)
-- [ ] One-line value prop: "Race an AI that learned to drive. In your browser."
-- [ ] One big "RACE NOW" button with smart defaults — hide advanced options behind toggle
-- [ ] Lean into the "this runs in a BROWSER?!" disbelief factor
+- [x] Animated canvas background with speed streaks, perspective grid, vanishing point (SpeedCanvas)
+- [x] One-line value prop: "Race an AI. In your browser. On a real GPU."
+- [x] One big "RACE NOW" button with pulse glow animation + hover bloom
+- [x] Lean into the "this runs in a BROWSER?!" disbelief factor
+- [x] Feature cards with scroll-reveal animations (IntersectionObserver)
+- [x] "How it works" 3-step section
+- [x] Technical flex section: stats (30 FPS, <100ms lag, 720p, 24GB VRAM), powered-by badges, GitHub link
+- [x] Responsive design (mobile-first)
+- [x] Dark cinematic theme (#030308 base, cyan/green/blue accents)
+- [ ] Show CARLA gameplay video as hero background (requires video asset)
 
 ### Countdown Sequence
 - [ ] Let player rev engine during countdown (throttle input accepted, car doesn't move)

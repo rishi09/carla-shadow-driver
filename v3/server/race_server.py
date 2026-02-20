@@ -20,6 +20,7 @@ from carla_manager import RaceManager
 from model_manager import ModelManager
 from frame_encoder import FrameEncoder
 from race_logic import RaceState, generate_checkpoints_from_waypoints, RaceDirector, AIMistakeGenerator
+from weather_transitions import WeatherTransitionManager
 
 
 class RaceServer:
@@ -52,6 +53,7 @@ class RaceServer:
         self.difficulty: str = 'easy'  # Current difficulty: 'easy', 'medium', 'hard'
         self.race_director: Optional[RaceDirector] = None
         self.mistake_generator: Optional[AIMistakeGenerator] = None
+        self.weather_manager: Optional[WeatherTransitionManager] = None
         self.pc: Optional[RTCPeerConnection] = None
         self.video_track: Optional[CarlaVideoTrack] = None
 
@@ -253,6 +255,7 @@ class RaceServer:
         self.race_state = None
         self.race_director = None
         self.mistake_generator = None
+        self.weather_manager = None
         self.difficulty = 'easy'
         self.frame_count = 0
         self.fps = 0.0
@@ -374,6 +377,7 @@ class RaceServer:
         self.running = True
         self.race_director = RaceDirector(difficulty=self.difficulty)
         self.mistake_generator = AIMistakeGenerator(difficulty=self.difficulty)
+        self.weather_manager = WeatherTransitionManager(weather, total_laps=laps)
 
         # Run the frame loop (30fps) and telemetry loop (60Hz) concurrently
         self._race_task = asyncio.create_task(self._race_loop())

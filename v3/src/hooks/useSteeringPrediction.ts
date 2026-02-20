@@ -49,33 +49,21 @@ const PERSPECTIVE_PX = 800;
  * Compute the steer limit factor (0-1) based on speed, mirroring the server's
  * speed-dependent steering limits from carla_manager.py.
  *
- * Server limits:
- *   < 30 km/h:  0.5
- *   30-80 km/h: 0.3
- *   80-150 km/h: 0.18
- *   > 150 km/h: 0.10
+ * Server formula (exponential curve):
+ *   steer_limit = 0.08 + 0.42 * exp(-speed / 70)
  *
- * We normalize these against the maximum (0.5) to get a 0-1 factor,
- * then interpolate smoothly between the thresholds to avoid visual pops.
+ * At 0 km/h:   0.50 (factor = 1.0)
+ * At 30 km/h:  0.35 (factor = 0.70)
+ * At 70 km/h:  0.23 (factor = 0.46)
+ * At 120 km/h: 0.16 (factor = 0.31)
+ * At 200 km/h: 0.10 (factor = 0.20)
+ *
+ * We normalize against the maximum (0.5) to get a 0-1 factor.
  */
 function getSteerFactor(speedKmh: number): number {
-  // Smooth interpolation between the server's discrete speed bands
-  if (speedKmh < 30) {
-    // Full authority at low speed (0.5/0.5 = 1.0)
-    return 1.0;
-  } else if (speedKmh < 80) {
-    // Lerp from 1.0 (at 30) to 0.6 (at 80) — corresponds to 0.5 -> 0.3
-    const t = (speedKmh - 30) / 50;
-    return 1.0 - t * 0.4;
-  } else if (speedKmh < 150) {
-    // Lerp from 0.6 (at 80) to 0.36 (at 150) — corresponds to 0.3 -> 0.18
-    const t = (speedKmh - 80) / 70;
-    return 0.6 - t * 0.24;
-  } else {
-    // Lerp from 0.36 (at 150) to 0.2 (at 200+) — corresponds to 0.18 -> 0.10
-    const t = Math.min(1, (speedKmh - 150) / 50);
-    return 0.36 - t * 0.16;
-  }
+  const steerLimit = 0.08 + 0.42 * Math.exp(-speedKmh / 70.0);
+  // Normalize to 0-1 range (max steer_limit is 0.50 at speed=0)
+  return steerLimit / 0.50;
 }
 
 /**

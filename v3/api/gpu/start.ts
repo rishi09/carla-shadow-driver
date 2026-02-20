@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { kv } from '@vercel/kv';
 
 const VASTAI_API_KEY = process.env.VASTAI_API_KEY;
+const NGROK_AUTHTOKEN = process.env.NGROK_AUTHTOKEN;
 const VAST_API_BASE = 'https://console.vast.ai/api/v0';
 
 // v3 callback URL - this project's domain
@@ -50,6 +51,12 @@ report "starting" "Installing dependencies..."
 # Install carla Python package (not in Docker image)
 echo "[onstart] Installing carla Python package..."
 pip install carla==0.9.15 2>&1 | tail -3
+
+# Install ngrok if not already in the Docker image (for lower-latency tunnels)
+if ! command -v ngrok &>/dev/null; then
+  echo "[onstart] Installing ngrok..."
+  curl -sL https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz | tar xz -C /usr/local/bin 2>&1
+fi
 
 # Patch entrypoint.sh: remove set -e so errors don't silently kill it
 # Also fix CARLA root user issue: UE4 refuses to run as root, use 'carla' user
@@ -151,6 +158,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             env: {
               INSTANCE_ID: String(offer.id),
               CALLBACK_URL: CALLBACK_URL,
+              ...(NGROK_AUTHTOKEN ? { NGROK_AUTHTOKEN } : {}),
             },
           }),
         });
