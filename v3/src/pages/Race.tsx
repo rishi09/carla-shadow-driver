@@ -338,6 +338,11 @@ export function Race() {
     voiceCommandEffectsRef.current = voiceCommands.activeEffects;
   }, [voiceCommands.activeEffects]);
 
+  // --- Keep Twitch command ref in sync (so the 30Hz control interval reads latest values) ---
+  useEffect(() => {
+    twitchCommandRef.current = twitchChat.currentCommand;
+  }, [twitchChat.currentCommand]);
+
   // --- Camera countdown zoom state ---
   // During countdown: scale(0.95) translateY(-10px), on GO: scale(1.0) translateY(0)
   const isCountdown = gpu.raceState?.race_status === 'countdown';
@@ -467,6 +472,16 @@ export function Race() {
     if (view !== 'racing' || !cargoMode.isCargoMode) return;
     cargoMode.update(gpu.raceState ?? null);
   }, [view, cargoMode.isCargoMode, cargoMode.update, gpu.raceState]);
+
+  // --- Ambient Light: send weather override to server when brightness zone changes ---
+  const prevAmbientZoneRef = useRef(ambientLight.weatherZone);
+  useEffect(() => {
+    if (view !== 'racing' || !ambientLight.isActive) return;
+    if (ambientLight.weatherZone === prevAmbientZoneRef.current) return;
+    prevAmbientZoneRef.current = ambientLight.weatherZone;
+    const weatherParams = zoneToWeatherParams(ambientLight.weatherZone);
+    gpu.sendAmbientWeather(weatherParams.sun_altitude, weatherParams.cloudiness, weatherParams.precipitation);
+  }, [view, ambientLight.isActive, ambientLight.weatherZone, gpu.sendAmbientWeather]);
 
   // --- Race commentary updates ---
   useEffect(() => {
@@ -1240,6 +1255,16 @@ export function Race() {
       // Voice command effects: overlay onto key state (read from ref for latest values)
       const vc = voiceCommandEffectsRef.current;
 
+      // Twitch chat commands: overlay onto key state (read from ref for latest values)
+      const tc = twitchCommandRef.current;
+      const twitchKeys = {
+        w: tc === 'gas' || tc === 'boost',
+        a: tc === 'left',
+        s: tc === 'brake',
+        d: tc === 'right',
+        space: tc === 'drift',
+      };
+
       if (phoneSteering.isActive) {
         // Phone steering active: use gyroscope for analog controls
         const phoneKeys: KeyState = {
@@ -1289,15 +1314,25 @@ export function Race() {
           handbrake: gamepad.handbrake,
         });
       } else {
-        // Keyboard-only: merge voice command effects into keys
+        // Keyboard-only: merge voice command effects + Twitch chat into keys
         const mergedKeys: KeyState = {
-          w: keysRef.current.w || vc.throttleBoost,
-          a: keysRef.current.a || vc.steerLeft,
-          s: keysRef.current.s || vc.brakeAssist,
-          d: keysRef.current.d || vc.steerRight,
-          space: keysRef.current.space,
+          w: keysRef.current.w || vc.throttleBoost || twitchKeys.w,
+          a: keysRef.current.a || vc.steerLeft || twitchKeys.a,
+          s: keysRef.current.s || vc.brakeAssist || twitchKeys.s,
+          d: keysRef.current.d || vc.steerRight || twitchKeys.d,
+          space: keysRef.current.space || twitchKeys.space,
         };
-        gpu.sendControls(mergedKeys);
+        // When Twitch has analog-level commands, send analog controls for smoother steering
+        if (tc === 'left' || tc === 'right') {
+          gpu.sendControls(mergedKeys, {
+            steer: (tc === 'left' ? -0.5 : 0.5) + (vc.steerLeft ? -0.3 : 0) + (vc.steerRight ? 0.3 : 0),
+            throttle: twitchKeys.w ? 1.0 : (vc.throttleBoost ? 0.5 : 0),
+            brake: twitchKeys.s ? 1.0 : (vc.brakeAssist ? 0.7 : 0),
+            handbrake: twitchKeys.space,
+          });
+        } else {
+          gpu.sendControls(mergedKeys);
+        }
       }
     }, 33);
 
@@ -1322,7 +1357,19 @@ export function Race() {
       keysRef.current = { w: false, a: false, s: false, d: false, space: false };
       countdownRevRef.current = false;
     };
-  }, [view, gpu.sendControls, gpu.sendRespawn, gpu.sendRestartRace, gpu.sendCameraMode, gpu.sendPause, gpu.raceState?.race_status, photoModeActive, gamepad.connected, gamepad.steering, gamepad.throttle, gamepad.brake, gamepad.handbrake, gifExport.isEncoding, gifExport.exportGif]);
+  }, [view, gpu.sendControls, gpu.sendRespawn, gpu.sendRestartRace, gpu.sendCameraMode, gpu.sendPause, gpu.raceState?.race_status, photoModeActive, gamepad.connected, gamepad.steering, gamepad.throttle, gamepad.brake, gamepad.handbrake, phoneSteering.isActive, phoneSteering.steer, phoneSteering.throttle, phoneSteering.brake, gifExport.isEncoding, gifExport.exportGif]);
+
+
+  // --- Phone steering: vibrate on collisions ---
+  useEffect(() => {
+    if (!phoneSteering.isActive) return;
+    const collisions = gpu.raceState?.collisions;
+    if (!collisions || collisions.length === 0) return;
+    const maxIntensity = Math.max(...collisions.map(c => c.intensity));
+    // Scale vibration duration: light taps ~50ms, heavy impacts up to 200ms
+    const vibrationMs = Math.min(200, Math.round(Math.sqrt(maxIntensity) * 3));
+    phoneSteering.vibrate(vibrationMs);
+  }, [phoneSteering.isActive, gpu.raceState?.collisions, phoneSteering.vibrate]);
 
   // --- Dismiss first-time overlay (stable ref to avoid re-render thrashing) ---
   const dismissFirstTimeOverlay = useCallback(() => {
@@ -1794,6 +1841,12 @@ export function Race() {
           voiceCommandsSupported={voiceCommands.isSupported}
           voiceCommandsEnabled={voiceCommands.isListening}
           onToggleVoiceCommands={(on) => on ? voiceCommands.start() : voiceCommands.stop()}
+          phoneSteeringSupported={phoneSteering.isSupported}
+          phoneSteeringEnabled={phoneSteering.isActive}
+          onTogglePhoneSteering={(on) => on ? phoneSteering.enable() : phoneSteering.disable()}
+          ambientLightSupported={ambientLight.isSupported}
+          ambientLightEnabled={ambientLight.isActive}
+          onToggleAmbientLight={(on) => on ? ambientLight.enable() : ambientLight.disable()}
         />
       )}
 
@@ -1889,6 +1942,18 @@ export function Race() {
                   voiceCommands.start();
                 }
               }}
+            />
+          )}
+
+          {/* Twitch Plays overlay (vote bars, chat log, winning command) */}
+          {twitchChat.isConnected && (
+            <TwitchOverlay
+              isConnected={twitchChat.isConnected}
+              viewerCount={twitchChat.viewerCount}
+              currentCommand={twitchChat.currentCommand}
+              votes={twitchChat.votes}
+              chatLog={twitchChat.chatLog}
+              channel={twitchChat.channel}
             />
           )}
 
@@ -2158,6 +2223,28 @@ export function Race() {
               isDamaged={cargoMode.isDamaged}
               lastDamageType={cargoMode.lastDamageType}
               raceFinished={gpu.raceState?.race_status === 'finishing'}
+            />
+          )}
+
+          {/* Ambient Light indicator (room brightness -> weather) */}
+          {ambientLight.isActive && (gpu.raceState?.race_status === 'racing' || gpu.raceState?.race_status === 'countdown') && (
+            <div className="absolute top-4 left-4 z-30 pointer-events-none">
+              <AmbientLightIndicator
+                brightness={ambientLight.brightness}
+                weatherZone={ambientLight.weatherZone}
+                zoneLabel={ambientLight.zoneLabel}
+              />
+            </div>
+          )}
+
+
+          {/* Phone steering overlay (gyroscope visual feedback) */}
+          {phoneSteering.isActive && (
+            <PhoneSteeringOverlay
+              isActive={phoneSteering.isActive}
+              steer={phoneSteering.steer}
+              throttle={phoneSteering.throttle}
+              brake={phoneSteering.brake}
             />
           )}
 

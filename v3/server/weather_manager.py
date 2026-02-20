@@ -125,6 +125,10 @@ class WeatherManager:
         self._close_gap_start: float = 0.0     # When gap first dropped below 2s
         self._close_gap_active: bool = False    # True if gap has been <2s for >10s
 
+        # --- Ambient Light override ---
+        self._ambient_override: bool = False
+        self._ambient_params: Dict[str, float] = {}
+
     def set_target_mood(self, mood: str, transition_time: float = 15.0):
         """Set the target weather preset to transition toward.
 
@@ -132,6 +136,10 @@ class WeatherManager:
             mood: One of the keys in WEATHER_MOODS.
             transition_time: Seconds for the lerp to complete (10-30 typical).
         """
+        # When ambient override is active, ignore automatic mood changes
+        if self._ambient_override:
+            return
+
         if mood not in WEATHER_MOODS:
             print(f"[weather] Unknown mood '{mood}', ignoring")
             return
@@ -144,6 +152,47 @@ class WeatherManager:
         self._transition_time = max(1.0, transition_time)
         self._transition_elapsed = 0.0
         print(f"[weather] Transitioning to {mood} over {transition_time:.0f}s")
+
+    def set_ambient_override(self, sun_altitude: float, cloudiness: float, precipitation: float):
+        """Override the automatic mood system with ambient light values.
+
+        When active, the mood-based weather transitions are suppressed and the
+        weather is driven entirely by the client's room brightness. The override
+        is sticky until explicitly cleared via clear_ambient_override().
+
+        Args:
+            sun_altitude: Sun altitude angle in degrees (-90 to 90).
+            cloudiness: Cloudiness percentage (0-100).
+            precipitation: Precipitation percentage (0-100).
+        """
+        self._ambient_override = True
+        self._ambient_params = {
+            'sun_altitude_angle': sun_altitude,
+            'cloudiness': cloudiness,
+            'precipitation': precipitation,
+            'precipitation_deposits': precipitation * 0.5,
+            'wind_intensity': min(50.0, precipitation * 0.8),
+            'fog_density': max(0, 15.0 - sun_altitude * 0.3) if sun_altitude < 20 else 0.0,
+            'fog_distance': 40.0 if sun_altitude < 10 else 0.0,
+            'wetness': precipitation * 0.7,
+        }
+        # Set these as the new target for smooth lerp
+        self._target = dict(self._ambient_params)
+        self._mood = 'AMBIENT'
+        self._transition_time = 8.0  # 8 seconds for ambient transitions (smooth but responsive)
+        self._transition_elapsed = 0.0
+        print(f"[weather] Ambient override: sun={sun_altitude}, clouds={cloudiness}, precip={precipitation}")
+
+    def clear_ambient_override(self):
+        """Clear the ambient light override and return to mood-based weather."""
+        if not self._ambient_override:
+            return
+        self._ambient_override = False
+        self._ambient_params = {}
+        print("[weather] Ambient override cleared, returning to mood-based weather")
+        # Return to CALM as a safe default
+        self._mood = ''  # Force transition by clearing current mood
+        self.set_target_mood('CALM', transition_time=10.0)
 
     def evaluate_race_events(self, race_state, is_final_lap: bool,
                              final_lap_progress: float, gap_seconds: Optional[float]):
@@ -158,6 +207,10 @@ class WeatherManager:
             final_lap_progress: 0.0-1.0 progress through the final lap (0 if not final).
             gap_seconds: Time gap (positive = player ahead). None if unavailable.
         """
+        # When ambient override is active, skip automatic mood transitions
+        if self._ambient_override:
+            return
+
         # Priority 1: Last 20% of final lap -> FINALE (golden hour)
         if is_final_lap and final_lap_progress >= 0.80:
             self.set_target_mood('FINALE', transition_time=10.0)

@@ -493,6 +493,15 @@ class RaceServer:
                 elif msg_type == 'webrtc_offer':
                     await self._handle_webrtc_offer(websocket, data)
 
+                elif msg_type == 'ambient_weather':
+                    # Ambient Light Racing: client sends weather override based on room brightness
+                    sun_alt = data.get('sun_altitude', 45)
+                    clouds = data.get('cloudiness', 20)
+                    precip = data.get('precipitation', 0)
+                    if self.weather_event_manager:
+                        self.weather_event_manager.set_ambient_override(sun_alt, clouds, precip)
+                    print(f"[ambient] Weather override: sun={sun_alt}, clouds={clouds}, precip={precip}")
+
         except websockets.exceptions.ConnectionClosed:
             print("Client disconnected")
         finally:

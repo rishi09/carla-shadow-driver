@@ -92,6 +92,7 @@ export interface UseGPUConnectionReturn {
   sendCameraMode: (mode: string) => void;
   sendPause: () => void;
   sendResume: () => void;
+  sendAmbientWeather: (sunAltitude: number, cloudiness: number, precipitation: number) => void;
   connectDirect: (wsUrl: string) => void;
   clearError: () => void;
   isConnected: boolean;
@@ -578,6 +579,16 @@ export function useGPUConnection(): UseGPUConnectionReturn {
     wsRef.current.send(JSON.stringify({ type: 'resume' }));
   }, []);
 
+  const sendAmbientWeather = useCallback((sunAltitude: number, cloudiness: number, precipitation: number) => {
+    if (wsRef.current?.readyState !== WebSocket.OPEN) return;
+    wsRef.current.send(JSON.stringify({
+      type: 'ambient_weather',
+      sun_altitude: sunAltitude,
+      cloudiness,
+      precipitation,
+    }));
+  }, []);
+
   const onBinaryFrame = useCallback((handler: ((data: Blob) => void) | null) => {
     binaryFrameHandlerRef.current = handler;
   }, []);
@@ -606,7 +617,7 @@ export function useGPUConnection(): UseGPUConnectionReturn {
     provisioningState, connectionState, instanceData, error,
     raceState, raceFinished, availableModels, activeModel, latencyMs, cameraMode, commentary, latestDriftEnd, aiChat,
     retryCount, maxRetries: MAX_RETRIES, lastFrameTime,
-    startGPU, stopGPU, sendControls, sendStartRace, sendSwitchModel, sendRespawn, sendRestartRace, sendCameraMode, sendPause, sendResume,
+    startGPU, stopGPU, sendControls, sendStartRace, sendSwitchModel, sendRespawn, sendRestartRace, sendCameraMode, sendPause, sendResume, sendAmbientWeather,
     connectDirect, clearError, onBinaryFrame, onRearFrame, remoteStream,
     isConnected: connectionState === 'connected',
     isProvisioningActive: provisioningState === 'starting' || provisioningState === 'running',

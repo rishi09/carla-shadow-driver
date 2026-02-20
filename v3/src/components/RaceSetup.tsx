@@ -126,9 +126,25 @@ interface RaceSetupProps {
   voiceCommandsEnabled?: boolean;
   /** Toggle voice commands on/off */
   onToggleVoiceCommands?: (on: boolean) => void;
+  /** Whether ambient light (webcam brightness) is supported */
+  ambientLightSupported?: boolean;
+  /** Whether ambient light is currently enabled */
+  ambientLightEnabled?: boolean;
+  /** Toggle ambient light on/off */
+  onToggleAmbientLight?: (on: boolean) => void;
+  /** Current Twitch channel name (null if not in Twitch mode) */
+  twitchChannel?: string | null;
+  /** Callback to set Twitch channel name */
+  onSetTwitchChannel?: (channel: string | null) => void;
+  /** Whether phone gyroscope steering is supported (touch device with DeviceOrientationEvent) */
+  phoneSteeringSupported?: boolean;
+  /** Whether phone steering is currently active */
+  phoneSteeringEnabled?: boolean;
+  /** Toggle phone steering on/off (triggers iOS permission request if needed) */
+  onTogglePhoneSteering?: (on: boolean) => void;
 }
 
-export function RaceSetup({ onStartRace, onBack, onStartDailyChallenge, quickstart, isConnected, urlSettings, dareTime, challengeData, isCargoMode, onToggleCargoMode, voiceCommandsSupported, voiceCommandsEnabled, onToggleVoiceCommands }: RaceSetupProps) {
+export function RaceSetup({ onStartRace, onBack, onStartDailyChallenge, quickstart, isConnected, urlSettings, dareTime, challengeData, isCargoMode, onToggleCargoMode, voiceCommandsSupported, voiceCommandsEnabled, onToggleVoiceCommands, ambientLightSupported, ambientLightEnabled, onToggleAmbientLight, twitchChannel, onSetTwitchChannel, phoneSteeringSupported, phoneSteeringEnabled, onTogglePhoneSteering }: RaceSetupProps) {
   const [selectedTrack, setSelectedTrack] = useState(urlSettings?.track || DEFAULT_TRACK);
   const [selectedWeather, setSelectedWeather] = useState(urlSettings?.weather || DEFAULT_WEATHER);
   const [selectedLaps, setSelectedLaps] = useState(urlSettings?.laps || DEFAULT_LAPS);
@@ -532,6 +548,106 @@ export function RaceSetup({ onStartRace, onBack, onStartDailyChallenge, quicksta
                 <div
                   className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${
                     voiceCommandsEnabled ? 'left-[22px] bg-emerald-400' : 'left-0.5 bg-white/40'
+                  }`}
+                />
+              </div>
+            </button>
+          </div>
+        )}
+
+        {/* Phone Steering (gyroscope, touch devices only) */}
+        {phoneSteeringSupported && onTogglePhoneSteering && ('ontouchstart' in window || navigator.maxTouchPoints > 0) && (
+          <div className="mb-6">
+            <button
+              onClick={() => onTogglePhoneSteering(!phoneSteeringEnabled)}
+              className={`w-full flex items-center gap-3 py-3 px-4 rounded-lg border text-left transition-all ${
+                phoneSteeringEnabled
+                  ? 'bg-indigo-500/10 border-indigo-500/40'
+                  : 'bg-black/60 border-white/10 hover:border-white/20'
+              }`}
+            >
+              {/* Steering wheel icon */}
+              <div className="shrink-0">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={phoneSteeringEnabled ? '#818cf8' : 'rgba(255,255,255,0.4)'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="9" />
+                  <circle cx="12" cy="12" r="3" />
+                  <line x1="12" y1="9" x2="12" y2="3" />
+                  <line x1="9" y1="12" x2="3" y2="12" />
+                  <line x1="15" y1="12" x2="21" y2="12" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <span className={`text-sm font-medium ${phoneSteeringEnabled ? 'text-indigo-400' : 'text-white'}`}>
+                    Phone Steering
+                  </span>
+                  {phoneSteeringEnabled && (
+                    <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded border border-indigo-500/40 bg-indigo-500/20 text-indigo-400">
+                      ON
+                    </span>
+                  )}
+                </div>
+                <p className="text-white/40 text-xs mt-0.5">
+                  Hold your phone sideways as a steering wheel. Tilt left/right to steer, forward for gas, back for brake. Vibrates on collisions.
+                </p>
+              </div>
+              {/* Toggle indicator */}
+              <div className={`w-10 h-5 rounded-full relative transition-colors ${phoneSteeringEnabled ? 'bg-indigo-500/40' : 'bg-white/10'}`}>
+                <div
+                  className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${
+                    phoneSteeringEnabled ? 'left-[22px] bg-indigo-400' : 'left-0.5 bg-white/40'
+                  }`}
+                />
+              </div>
+            </button>
+          </div>
+        )}
+
+        {/* Ambient Light Racing (webcam brightness -> weather) */}
+        {ambientLightSupported && onToggleAmbientLight && (
+          <div className="mb-6">
+            <button
+              onClick={() => onToggleAmbientLight(!ambientLightEnabled)}
+              className={`w-full flex items-center gap-3 py-3 px-4 rounded-lg border text-left transition-all ${
+                ambientLightEnabled
+                  ? 'bg-sky-500/10 border-sky-500/40'
+                  : 'bg-black/60 border-white/10 hover:border-white/20'
+              }`}
+            >
+              {/* Sun icon */}
+              <div className="shrink-0">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={ambientLightEnabled ? '#38bdf8' : 'rgba(255,255,255,0.4)'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="5" />
+                  <line x1="12" y1="1" x2="12" y2="3" />
+                  <line x1="12" y1="21" x2="12" y2="23" />
+                  <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
+                  <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+                  <line x1="1" y1="12" x2="3" y2="12" />
+                  <line x1="21" y1="12" x2="23" y2="12" />
+                  <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
+                  <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <span className={`text-sm font-medium ${ambientLightEnabled ? 'text-sky-400' : 'text-white'}`}>
+                    Ambient Light
+                  </span>
+                  {ambientLightEnabled && (
+                    <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded border border-sky-500/40 bg-sky-500/20 text-sky-400">
+                      ON
+                    </span>
+                  )}
+                </div>
+                <p className="text-white/40 text-xs mt-0.5">
+                  Your room lighting controls the weather. Dark room = night race. Bright room = sunny day.
+                </p>
+              </div>
+              {/* Toggle indicator */}
+              <div className={`w-10 h-5 rounded-full relative transition-colors ${ambientLightEnabled ? 'bg-sky-500/40' : 'bg-white/10'}`}>
+                <div
+                  className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${
+                    ambientLightEnabled ? 'left-[22px] bg-sky-400' : 'left-0.5 bg-white/40'
                   }`}
                 />
               </div>
