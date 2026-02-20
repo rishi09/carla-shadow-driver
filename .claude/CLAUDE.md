@@ -15,32 +15,43 @@ Shadow Driver is a browser-based racing game where you race against an AI car in
 
 ## Current Status (Feb 20, 2026)
 
-### Working
+### Working (E2E verified with Safari automation + Vast.ai GPU)
 - CARLA 0.9.15 running on Vast.ai GPU (RTX 3090, root privilege fix applied)
 - Direct WebSocket connection via `?ws=<tunnel_url>` query parameter
+- JPEG video streaming over WebSocket through Cloudflare tunnels (~18 FPS, ~271ms latency)
 - Player car controls: WASD + Space (handbrake), R (respawn), C (camera toggle)
 - Car selection: 6 vehicles (Tesla Model 3, Ford Mustang, Dodge Charger, Audi TT, Mini Cooper, Chevrolet Impala)
 - AI opponent using CARLA autopilot with 3 difficulty levels (Easy/Medium/Hard)
 - AI rubber banding: distance-based speed adjustment keeps races close (50m threshold, per-difficulty scaling)
 - AI mistake injection: periodic speed penalties create overtaking opportunities
+- AI personality system with emotional states (confident, nervous, impressed, desperate)
+- AI trash talk ("Right on your tail...", "Contact! Watch the walls!")
 - Hard mode: 55% over speed limit, aggressive lane changes
 - Steering: progressive ramping (~100-130ms attack, ~130-200ms release), speed-limited (0.7 low, 0.15 high)
 - Faster throttle (~150ms) and brake (~60ms) response; reverse threshold 15 km/h
-- WebRTC video streaming (H.264 via aiortc) with automatic JPEG/WebSocket fallback
-- WebRTC performance instrumentation (server frame_prep + browser RTCPeerConnection.getStats)
+- Traction control + countersteer assist
+- Drift detection and scoring system
 - Compass navigation arrow pointing to next checkpoint
-- Race HUD: speedometer, lap timer, gap timer, throttle/brake/steer bars, connection quality
-- Minimap with player/AI positions
+- Race HUD: speedometer, lap timer, gap timer, throttle/brake/steer bars, connection quality, drift score
+- Minimap with player/AI positions + race progress tracker
 - Countdown overlay (3-2-1-GO with traffic light colors)
 - Screen shake + impact sound on collisions
 - Engine sound + background music with speed-based intensity
 - Camera FOV scaling at speed (1.0→1.05x at 150+ km/h)
 - Speed vignette (GPU-accelerated CSS gradient) + speed lines above 80 km/h
+- Rear-view mirror camera
+- Daily Challenge system (unique track/weather/difficulty per day)
+- Photo mode (F key)
+- Race recording overlay (REC indicator)
+- FirstTimeOverlay with controls tutorial
 - GitHub Actions auto-builds Docker image on push to v3 (server/docker/configs paths)
-- Vercel auto-deploys frontend on push to v3
 
 ### Not Working / TODO
-- **Vercel auto-deploy broken**: Pushes to v3 branch are NOT deploying. The deployed bundle (index-C4bDUZj8.js) is stale. Need to check Vercel dashboard: Project Settings → Git → verify Production Branch is `v3` and Root Directory is `v3/`. TS build errors were blocking builds (now fixed in b10f5f2). May also need to re-link the GitHub integration.
+- **Vercel auto-deploy broken**: Pushes to v3 branch are NOT deploying. The deployed bundle (index-C4bDUZj8.js) is stale. **Fix options:**
+  1. **GitHub Actions** (preferred): `.github/workflows/deploy-frontend.yml` is ready. Add these GitHub secrets: `VERCEL_TOKEN` (from https://vercel.com/account/tokens), `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` (from Vercel dashboard > Project Settings > General). Then push to v3.
+  2. **Vercel dashboard**: Set Root Directory to `v3/` and Production Branch to `v3`.
+  3. **CLI deploy**: `cd v3 && npx vercel login && npx vercel --prod`
+- **WebRTC disabled (intentional)**: WebRTC video was disabled in commit 92e56e0 because Cloudflare quick tunnels don't support UDP. JPEG-over-WebSocket works reliably. TODO: Re-enable WebRTC when using direct IP connections (not tunnels).
 - **Server SIGABRT crash (mitigated)**: Cleanup now disables autopilot and sync mode before destroying actors, sensors destroyed before vehicles. Server no longer calls cleanup on client disconnect — only on new race start. Still close extra tabs to be safe.
 - **No trained model weights**: AI uses CARLA autopilot fallback. PilotNet weights available at HuggingFace (sergiopaniego/OptimizedPilotNet, 200x66 input). Alpamayo is 10B params (~20GB), probably won't fit alongside CARLA on 24GB GPU.
 - **Full provisioning flow untested**: The "Play Game" button flow (Vast.ai auto-provision + Cloudflare tunnel + callback) hasn't been tested end-to-end with the v3 Docker image.
@@ -81,11 +92,19 @@ Vast.ai GPU Instance (Docker: rkshah09/shadow-driver-v3:latest)
 - `components/RaceSetup.tsx` - Pre-race config: track, weather, laps, AI model, car selection
 - `components/RaceHUD.tsx` - HUD overlay: speed, laps, gap, inputs, checkpoint arrow
 - `components/VideoCanvas.tsx` - Renders binary JPEG frames to canvas (fallback path)
-- `components/WebRTCVideo.tsx` - Renders WebRTC H.264 video stream (primary path)
-- `components/SpeedEffects.tsx` - Speed vignette (CSS gradient) + speed lines (canvas)
+- `components/WebGLCanvas.tsx` - WebGL2 renderer with shader post-processing (primary path)
+- `components/WebRTCVideo.tsx` - WebRTC H.264 video stream (disabled for tunnel compat)
+- `components/SpeedEffects.tsx` - Speed vignette + collision/gear flash
+- `components/SpeedLines.tsx` - Anime-style radial speed lines
+- `components/ParticleOverlay.tsx` - Sparks, tire smoke, rain particles
 - `components/Minimap.tsx` - Top-down minimap with positions
-- `hooks/useGPUConnection.ts` - WebSocket + WebRTC connection, GPU provisioning state
+- `components/ArcSpeedometer.tsx` - SVG arc speedometer with animated needle
+- `components/RaceResults.tsx` - Post-race results with Wordle-style share
+- `hooks/useGPUConnection.ts` - WebSocket connection, GPU provisioning state, exposes window.__gameWs
 - `hooks/useEngineSound.ts` - Web Audio API engine sounds
+- `hooks/useGamepad.ts` - Gamepad API support (analog triggers/sticks)
+- `hooks/useSteeringPrediction.ts` - Client-side steering prediction for lag compensation
+- `hooks/useFrameExtrapolation.ts` - Frame interpolation/extrapolation
 - `types/index.ts` - TypeScript interfaces (RaceState, RacerState, etc.)
 
 **Server (v3/server/):**
@@ -181,6 +200,14 @@ ssh -p <PORT> root@<IP> 'tail -30 /tmp/race.log'
 **Cause:** DOCKERHUB_TOKEN secret empty or expired
 **Fix:** Generate new Docker Hub access token, update repository secret
 
+### Issue: Cloudflare tunnel unreliable
+**Cause:** Quick tunnels (`cloudflared tunnel --url ...`) die within minutes, DNS expires, sometimes corrupt WebSocket upgrade headers (`invalid Connection header: keep-alive`)
+**Fix:** Use SSH port forwarding for dev (`ssh -N -L 8765:localhost:8765 -p <PORT> root@<IP>`), or use ngrok for production (more stable, but requires auth token)
+
+### Issue: Mock WebSocket server blocking SSH tunnel
+**Cause:** A test mock server (`node test/mock_ws_server.mjs`) running on port 8765 intercepts connections meant for the SSH tunnel
+**Fix:** Kill the mock server (`kill <pid>`) and verify only the SSH process is on port 8765 (`lsof -i :8765`)
+
 ---
 
 ## Environment Variables
@@ -195,6 +222,9 @@ NGROK_AUTHTOKEN             - ngrok auth token for low-latency tunnels (free at 
 ```
 DOCKERHUB_USERNAME          - Docker Hub username (rkshah09)
 DOCKERHUB_TOKEN             - Docker Hub access token
+VERCEL_TOKEN                - Vercel deploy token (from https://vercel.com/account/tokens)
+VERCEL_ORG_ID               - Vercel org/team ID (from Project Settings > General)
+VERCEL_PROJECT_ID           - Vercel project ID (from Project Settings > General)
 ```
 
 **Vast.ai instance (set via start.ts env or manually):**
