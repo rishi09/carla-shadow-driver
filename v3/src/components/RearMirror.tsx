@@ -141,24 +141,6 @@ export function RearMirror({ onRearFrame, visible }: RearMirrorProps) {
             pointerEvents: 'none',
           }}
         />
-        {/* Mirror text at bottom */}
-        <div
-          style={{
-            position: 'absolute',
-            bottom: 2,
-            left: 0,
-            right: 0,
-            textAlign: 'center',
-            fontSize: 6,
-            fontFamily: 'monospace',
-            color: 'rgba(255, 255, 255, 0.35)',
-            letterSpacing: '0.5px',
-            textTransform: 'uppercase',
-            pointerEvents: 'none',
-          }}
-        >
-          Objects in mirror are closer than they appear
-        </div>
       </div>
     </div>
   );

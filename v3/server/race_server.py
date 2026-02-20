@@ -1451,8 +1451,8 @@ class RaceServer:
                             pass
 
                         # 6c. Drift boost: activate 5% throttle boost for 1.5s on score > 200
-                        if drift_event['score'] > 200:
-                            self.race_manager.activate_drift_boost(drift_event['score'])
+                        if drift_event['score'] > 200 and hasattr(self, 'carla_manager') and self.carla_manager and hasattr(self.carla_manager, 'activate_drift_boost'):
+                            self.carla_manager.activate_drift_boost(drift_event['score'])
 
                         # 6d. Feed drift score to skill matcher for adaptive AI
                         if self.skill_matcher:
