@@ -7,6 +7,7 @@ import { useCommentary } from '../hooks/useCommentary.ts';
 import { useAIEngineSound } from '../hooks/useAIEngineSound.ts';
 import { useDynamicSoundtrack } from '../hooks/useDynamicSoundtrack.ts';
 import type { IntensityLevel } from '../hooks/useDynamicSoundtrack.ts';
+import { useMusicStems } from '../hooks/useMusicStems.ts';
 import { useSteeringPrediction } from '../hooks/useSteeringPrediction.ts';
 import { useFrameExtrapolation } from '../hooks/useFrameExtrapolation.ts';
 import { useLeaderboard } from '../hooks/useLeaderboard.ts';
@@ -136,6 +137,7 @@ export function Race() {
   const keysRef = useRef<KeyState>({ w: false, a: false, s: false, d: false, space: false });
   const keyIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const respawnTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const voiceCommandEffectsRef = useRef(voiceCommands.activeEffects);
   const cameraIndexRef = useRef(0);
   const CAMERA_MODES = ['chase', 'hood', 'bumper'] as const;
   const [cameraMode, setCameraMode] = useState<typeof CAMERA_MODES[number]>('chase');
@@ -150,6 +152,7 @@ export function Race() {
   const engineSound = useEngineSound();
   const aiEngineSound = useAIEngineSound();
   const bgMusic = useDynamicSoundtrack();
+  const musicStems = useMusicStems();
   const crowd = useCrowdAmbiance();
   const leaderboard = useLeaderboard();
   const personalBests = usePersonalBests();
@@ -317,6 +320,11 @@ export function Race() {
   const racingLineRef = useRef<Array<{ x: number; y: number }> | null>(null);
   const [racingLine, setRacingLine] = useState<Array<{ x: number; y: number }> | null>(null);
 
+  // --- Keep voice command effects ref in sync (so the 30Hz control interval reads latest values) ---
+  useEffect(() => {
+    voiceCommandEffectsRef.current = voiceCommands.activeEffects;
+  }, [voiceCommands.activeEffects]);
+
   // --- Camera countdown zoom state ---
   // During countdown: scale(0.95) translateY(-10px), on GO: scale(1.0) translateY(0)
   const isCountdown = gpu.raceState?.race_status === 'countdown';
@@ -399,6 +407,27 @@ export function Race() {
           }
           bgMusic.setIntensity(level);
         }
+
+        // Update music stems system with race state
+        {
+          const gap = player.gap_seconds ?? 0;
+          const absGap = Math.abs(gap);
+          const isFinalLap = player.total_laps > 1 && player.lap === player.total_laps;
+          const isCloseRacing = absGap < 2.0;
+
+          musicStems.updateRaceState({
+            speed: player.speed_kmh,
+            maxSpeed: 200,
+            gap,
+            lapNumber: player.lap,
+            totalLaps: player.total_laps,
+            isCloseRacing,
+            isFinalLap,
+            justOvertook: false, // overtakes are detected separately in the gap effect
+            raceFinished: false,
+            won: false,
+          });
+        }
       }
 
       // Update AI engine sound (spatial Doppler) when positions are available
@@ -418,7 +447,7 @@ export function Race() {
     rafId = requestAnimationFrame(tick);
 
     return () => { cancelAnimationFrame(rafId); };
-  }, [view, gpu.raceState, engineSound.update, bgMusic.setIntensity, aiEngineSound.update, ghostRecorder.recordFrame, highlightDetector.update]);
+  }, [view, gpu.raceState, engineSound.update, bgMusic.setIntensity, musicStems.updateRaceState, aiEngineSound.update, ghostRecorder.recordFrame, highlightDetector.update]);
 
   // --- Cargo mode: update integrity each frame ---
   useEffect(() => {
@@ -981,19 +1010,21 @@ export function Race() {
     }
   }, [view, voiceBoost.boostLevel, triggerScreenShake]);
 
-  // --- Background music + crowd ambiance + AI engine sound lifecycle ---
+  // --- Background music + music stems + crowd ambiance + AI engine sound lifecycle ---
   useEffect(() => {
     const status = gpu.raceState?.race_status;
     if (view === 'racing' && (status === 'racing' || status === 'finishing' || status === 'countdown')) {
       bgMusic.start();
+      musicStems.start();
       crowd.start();
       aiEngineSound.start();
     } else {
       bgMusic.stop();
+      musicStems.stop();
       crowd.stop();
       aiEngineSound.stop();
     }
-  }, [view, gpu.raceState?.race_status, bgMusic.start, bgMusic.stop, crowd.start, crowd.stop, aiEngineSound.start, aiEngineSound.stop]);
+  }, [view, gpu.raceState?.race_status, bgMusic.start, bgMusic.stop, musicStems.start, musicStems.stop, crowd.start, crowd.stop, aiEngineSound.start, aiEngineSound.stop]);
 
   // --- Wake Lock: prevent screen from sleeping during race ---
   useEffect(() => {
@@ -1180,8 +1211,8 @@ export function Race() {
         keysRef.current = e2eKeys;
       }
 
-      // Voice command effects: overlay onto key state
-      const vc = voiceCommands.activeEffects;
+      // Voice command effects: overlay onto key state (read from ref for latest values)
+      const vc = voiceCommandEffectsRef.current;
 
       if (gamepad.connected) {
         // Gamepad connected: send analog controls
@@ -1697,6 +1728,9 @@ export function Race() {
           onToggleCargoMode={cargoMode.setCargoMode}
           dareTime={effectiveDareTime}
           challengeData={challengeData}
+          voiceCommandsSupported={voiceCommands.isSupported}
+          voiceCommandsEnabled={voiceCommands.isListening}
+          onToggleVoiceCommands={(on) => on ? voiceCommands.start() : voiceCommands.stop()}
         />
       )}
 
@@ -1777,6 +1811,23 @@ export function Race() {
             rawVolume={voiceBoost.rawVolume}
             onToggle={voiceBoost.toggleVoiceBoost}
           />
+
+          {/* Voice Command HUD (speech recognition: say go/brake/left/right) */}
+          {voiceCommands.isSupported && (
+            <VoiceCommandHUD
+              isListening={voiceCommands.isListening}
+              transcript={voiceCommands.transcript}
+              lastCommand={voiceCommands.lastCommand}
+              activeEffects={voiceCommands.activeEffects}
+              onToggle={() => {
+                if (voiceCommands.isListening) {
+                  voiceCommands.stop();
+                } else {
+                  voiceCommands.start();
+                }
+              }}
+            />
+          )}
 
           {/* Particle effects overlay (sparks, tire smoke, rain) */}
           <ParticleOverlay
@@ -2161,6 +2212,7 @@ export function Race() {
               engineSound.setMuted(newMuted);
               aiEngineSound.setMuted(newMuted);
               bgMusic.setMuted(newMuted);
+              musicStems.setMuted(newMuted);
               crowd.setMuted(newMuted);
             }}
             className="absolute top-[88px] left-4 z-10 pointer-events-auto bg-black/60 backdrop-blur-sm rounded-lg px-3 py-2 text-white/60 hover:text-white text-sm border border-white/10 transition-colors"

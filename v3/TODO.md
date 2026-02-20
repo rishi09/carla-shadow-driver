@@ -698,10 +698,10 @@ The idea that AI can replace a traditional game engine entirely has exploded:
 - **How**: Use Transformers.js with Whisper-tiny or Whisper-base in the browser (no server cost). Parse transcribed text into intent: speed commands, lane commands, trash talk back to the AI. Could also use Web Speech API for zero-download fallback.
 - **Why it's viral**: "I'm yelling at my browser racing game and it listens" is inherently funny and shareable content.
 - **Implementation sketch**:
-  - [ ] Add microphone permission request on race start
-  - [ ] Use Web Speech API (SpeechRecognition) for real-time transcription (zero download, works in Chrome)
-  - [ ] Parse voice commands: "faster"/"go" -> boost throttle, "brake"/"stop" -> apply brake, "left"/"right" -> steer
-  - [ ] Display recognized commands as floating text on HUD
+  - [x] Add microphone permission request on race start
+  - [x] Use Web Speech API (SpeechRecognition) for real-time transcription (zero download, works in Chrome)
+  - [x] Parse voice commands: "faster"/"go" -> boost throttle, "brake"/"stop" -> apply brake, "left"/"right" -> steer
+  - [x] Display recognized commands as floating text on HUD
   - [ ] Stretch: AI responds to trash talk via the commentary system ("You think telling me to brake will work?")
 
 ##### D. Depth-Aware Parallax (Pseudo-3D from 2D Stream)

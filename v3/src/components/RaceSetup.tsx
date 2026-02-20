@@ -120,9 +120,15 @@ interface RaceSetupProps {
   isCargoMode?: boolean;
   /** Toggle cargo mode on/off */
   onToggleCargoMode?: (on: boolean) => void;
+  /** Whether voice commands are supported in this browser */
+  voiceCommandsSupported?: boolean;
+  /** Whether voice commands are currently enabled */
+  voiceCommandsEnabled?: boolean;
+  /** Toggle voice commands on/off */
+  onToggleVoiceCommands?: (on: boolean) => void;
 }
 
-export function RaceSetup({ onStartRace, onBack, onStartDailyChallenge, quickstart, isConnected, urlSettings, dareTime, challengeData, isCargoMode, onToggleCargoMode }: RaceSetupProps) {
+export function RaceSetup({ onStartRace, onBack, onStartDailyChallenge, quickstart, isConnected, urlSettings, dareTime, challengeData, isCargoMode, onToggleCargoMode, voiceCommandsSupported, voiceCommandsEnabled, onToggleVoiceCommands }: RaceSetupProps) {
   const [selectedTrack, setSelectedTrack] = useState(urlSettings?.track || DEFAULT_TRACK);
   const [selectedWeather, setSelectedWeather] = useState(urlSettings?.weather || DEFAULT_WEATHER);
   const [selectedLaps, setSelectedLaps] = useState(urlSettings?.laps || DEFAULT_LAPS);
@@ -482,6 +488,50 @@ export function RaceSetup({ onStartRace, onBack, onStartDailyChallenge, quicksta
                 <div
                   className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${
                     isCargoMode ? 'left-[22px] bg-amber-400' : 'left-0.5 bg-white/40'
+                  }`}
+                />
+              </div>
+            </button>
+          </div>
+        )}
+
+        {/* Voice Commands (Web Speech API, Chrome/Edge only) */}
+        {voiceCommandsSupported && onToggleVoiceCommands && (
+          <div className="mb-6">
+            <button
+              onClick={() => onToggleVoiceCommands(!voiceCommandsEnabled)}
+              className={`w-full flex items-center gap-3 py-3 px-4 rounded-lg border text-left transition-all ${
+                voiceCommandsEnabled
+                  ? 'bg-emerald-500/10 border-emerald-500/40'
+                  : 'bg-black/60 border-white/10 hover:border-white/20'
+              }`}
+            >
+              {/* Speech bubble icon */}
+              <div className="shrink-0">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={voiceCommandsEnabled ? '#22c55e' : 'rgba(255,255,255,0.4)'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <span className={`text-sm font-medium ${voiceCommandsEnabled ? 'text-emerald-400' : 'text-white'}`}>
+                    Voice Commands
+                  </span>
+                  {voiceCommandsEnabled && (
+                    <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded border border-emerald-500/40 bg-emerald-500/20 text-emerald-400">
+                      ON
+                    </span>
+                  )}
+                </div>
+                <p className="text-white/40 text-xs mt-0.5">
+                  Say &quot;go&quot;, &quot;brake&quot;, &quot;left&quot;, &quot;right&quot; to control your car with your voice. Chrome/Edge only.
+                </p>
+              </div>
+              {/* Toggle indicator */}
+              <div className={`w-10 h-5 rounded-full relative transition-colors ${voiceCommandsEnabled ? 'bg-emerald-500/40' : 'bg-white/10'}`}>
+                <div
+                  className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${
+                    voiceCommandsEnabled ? 'left-[22px] bg-emerald-400' : 'left-0.5 bg-white/40'
                   }`}
                 />
               </div>
