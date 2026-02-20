@@ -84,6 +84,8 @@ class RaceManager:
         self._prev_speed_kmh = 0.0
         self._traction_control_active = False
         self._tc_throttle_cap = 1.0  # 1.0 = no cap
+        self._tc_stuck_time = 0.0  # Time spent stuck with TC active
+        self._tc_recovery_time = 0.0  # Recovery period: TC fully disabled
 
         # Handbrake drift: tracks state to only apply physics changes on transitions
         self._handbrake_was_active = False
@@ -756,9 +758,22 @@ class RaceManager:
         - High throttle input but car isn't accelerating as expected
         - Very low speed with high throttle (launch spin)
 
+        Recovery: When stuck at near-zero speed for >1.5s, TC fully disables
+        for 3 seconds to let the player power out of walls/corners.
+
         Returns:
             Effective throttle value (may be reduced from input).
         """
+        # If in recovery period, skip all TC and let player have full throttle
+        if self._tc_recovery_time > 0:
+            self._tc_recovery_time -= dt
+            self._tc_throttle_cap = 1.0
+            self._traction_control_active = False
+            if self._tc_recovery_time <= 0:
+                self._tc_recovery_time = 0.0
+                self._tc_stuck_time = 0.0
+            return throttle
+
         # Calculate expected vs actual acceleration
         acceleration = (speed_kmh - self._prev_speed_kmh) / dt  # km/h per second
 
@@ -770,6 +785,19 @@ class RaceManager:
         if speed_kmh < 10.0 and throttle > 0.5:
             expected_accel = throttle * 25.0  # Realistic: full throttle ~25 km/h/s in CARLA
             if acceleration < expected_accel * 0.15 and acceleration >= 0:
+                # Track how long we've been stuck with TC active
+                if speed_kmh < 2.0:
+                    self._tc_stuck_time += dt
+                else:
+                    self._tc_stuck_time = 0.0
+
+                # If stuck for >1s, enter recovery mode: fully disable TC for 3s
+                if self._tc_stuck_time > 1.0:
+                    self._tc_recovery_time = 3.0
+                    self._tc_throttle_cap = 1.0
+                    self._traction_control_active = False
+                    return throttle
+
                 # Wheels spinning: almost no acceleration despite throttle.
                 # Cap at 0.5 minimum so TC slows wheelspin without killing launch.
                 self._tc_throttle_cap = max(0.5, self._tc_throttle_cap - dt * 3.0)
@@ -778,7 +806,8 @@ class RaceManager:
 
         # Condition 2: Mid-speed traction loss (e.g., on wet/gravel)
         # If accelerating should produce gain but speed is flat or dropping
-        if speed_kmh < 50.0 and throttle > 0.6 and acceleration < -5.0:
+        # Skip if speed is very low (car stuck against wall, not traction loss)
+        if speed_kmh > 5.0 and speed_kmh < 50.0 and throttle > 0.6 and acceleration < -5.0:
             # Speed is DROPPING despite throttle - definite traction loss
             self._tc_throttle_cap = max(0.4, self._tc_throttle_cap - dt * 3.0)
             self._traction_control_active = True
@@ -786,6 +815,7 @@ class RaceManager:
 
         # No traction issue: gradually release the cap back to 1.0
         self._tc_throttle_cap = min(1.0, self._tc_throttle_cap + dt * 2.0)
+        self._tc_stuck_time = 0.0
         if self._tc_throttle_cap >= 0.99:
             self._traction_control_active = False
 
@@ -1066,6 +1096,8 @@ class RaceManager:
             self._prev_speed_kmh = 0.0
             self._traction_control_active = False
             self._tc_throttle_cap = 1.0
+            self._tc_stuck_time = 0.0
+            self._tc_recovery_time = 0.0
             self._handbrake_was_active = False
 
             print("Player respawned at nearest waypoint")
@@ -1114,6 +1146,8 @@ class RaceManager:
             self._prev_speed_kmh = 0.0
             self._traction_control_active = False
             self._tc_throttle_cap = 1.0
+            self._tc_stuck_time = 0.0
+            self._tc_recovery_time = 0.0
             self._handbrake_was_active = False
 
             # Clear collision buffer
@@ -1282,6 +1316,8 @@ class RaceManager:
         self._prev_speed_kmh = 0.0
         self._traction_control_active = False
         self._tc_throttle_cap = 1.0
+        self._tc_stuck_time = 0.0
+        self._tc_recovery_time = 0.0
         self._handbrake_was_active = False
         self._original_rear_friction = None
 
