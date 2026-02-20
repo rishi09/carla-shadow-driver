@@ -66,12 +66,22 @@ function createNoiseBuffer(ctx: AudioContext): AudioBuffer {
   return buffer;
 }
 
+/** Tension layer nodes for final lap heartbeat bass */
+interface TensionNodes {
+  osc: OscillatorNode;       // 60Hz low bass oscillator
+  gain: GainNode;            // Volume envelope (pulsed by LFO)
+  lfo: OscillatorNode;       // 2Hz LFO for heartbeat pulsing
+  lfoGain: GainNode;         // LFO depth control
+}
+
 export interface UseBackgroundMusicReturn {
   start: () => void;
   stop: () => void;
   updateIntensity: (intensity: number) => void;
   /** Trigger event-driven music changes (overtake celebration, close-gap drums, final-lap intensity) */
   triggerMusicEvent: (event: 'overtake' | 'close_gap_start' | 'close_gap_end' | 'final_lap') => void;
+  /** Final-lap tension: heartbeat bass when gap < 1.0s, layer ducking on final checkpoint approach */
+  setFinalLapTension: (gapSeconds: number, isFinalLap: boolean, checkpointProgress: number) => void;
   setMuted: (muted: boolean) => void;
   isMuted: boolean;
 }
@@ -87,6 +97,9 @@ export function useBackgroundMusic(): UseBackgroundMusicReturn {
   // Event-driven music layer refs
   const closeGapDrumRef = useRef<{ osc: OscillatorNode; gain: GainNode } | null>(null);
   const finalLapBoostRef = useRef(false);
+  const tensionRef = useRef<TensionNodes | null>(null);
+  const tensionActiveRef = useRef(false);
+  const layersDuckedRef = useRef(false);
 
   // Build the audio graph (lazy, called once)
   const ensureNodes = useCallback((): MusicNodes | null => {
@@ -359,6 +372,111 @@ export function useBackgroundMusic(): UseBackgroundMusicReturn {
     }
   }, []);
 
+  // --- Final lap tension: heartbeat bass when gap < 1.0s, layer ducking near finish ---
+  const setFinalLapTension = useCallback((gapSeconds: number, isFinalLap: boolean, checkpointProgress: number) => {
+    const nodes = nodesRef.current;
+    if (!nodes || nodes.ctx.state !== 'running') return;
+
+    const ctx = nodes.ctx;
+    const now = ctx.currentTime;
+    const t = 0.1; // smoothing time constant
+
+    const shouldActivate = isFinalLap && gapSeconds < 1.0;
+
+    if (shouldActivate) {
+      // --- Create tension oscillator if not yet active ---
+      if (!tensionRef.current) {
+        // 60Hz bass oscillator (mimics heartbeat sub-bass)
+        const osc = ctx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.value = 60;
+
+        // Gain node for volume envelope (pulsed by LFO)
+        const gain = ctx.createGain();
+        gain.gain.value = 0; // start silent, ramp in
+
+        // 2Hz LFO for heartbeat pulsing effect
+        const lfo = ctx.createOscillator();
+        lfo.type = 'sine';
+        lfo.frequency.value = 2; // 2 Hz = heartbeat rhythm
+
+        // LFO modulates the gain node's gain parameter
+        const lfoGain = ctx.createGain();
+        lfoGain.gain.value = 0; // LFO depth starts at 0, increased with tension
+
+        // Signal path: osc -> gain -> masterGain
+        osc.connect(gain);
+        gain.connect(nodes.masterGain);
+
+        // LFO path: lfo -> lfoGain -> gain.gain (AudioParam modulation)
+        lfo.connect(lfoGain);
+        lfoGain.connect(gain.gain);
+
+        osc.start(now);
+        lfo.start(now);
+
+        tensionRef.current = { osc, gain, lfo, lfoGain };
+        tensionActiveRef.current = true;
+      }
+
+      const tension = tensionRef.current;
+
+      // --- Scale volume based on gap: 0 at 1.0s, max at 0.0s ---
+      // tensionAmount: 0.0 (gap=1.0s) to 1.0 (gap=0.0s)
+      const tensionAmount = Math.max(0, Math.min(1, 1.0 - gapSeconds));
+
+      // Base gain for the oscillator (constant part)
+      const baseGain = tensionAmount * 0.4;
+      tension.gain.gain.setTargetAtTime(baseGain, now, t);
+
+      // LFO depth increases with tension (heartbeat gets more pronounced)
+      const lfoDepth = tensionAmount * 0.35;
+      tension.lfoGain.gain.setTargetAtTime(lfoDepth, now, t);
+
+      // --- Layer ducking: drop other layers on final checkpoint approach ---
+      if (checkpointProgress > 0.9) {
+        if (!layersDuckedRef.current) {
+          layersDuckedRef.current = true;
+          // Duck all other layers to 0.3x their current level
+          nodes.padMasterGain.gain.setTargetAtTime(nodes.padMasterGain.gain.value * 0.3, now, 0.3);
+          nodes.rhythmGain.gain.setTargetAtTime(nodes.rhythmGain.gain.value * 0.3, now, 0.3);
+          nodes.hihatGain.gain.setTargetAtTime(nodes.hihatGain.gain.value * 0.3, now, 0.3);
+          // Keep bass drone but reduce it
+          nodes.bassGain.gain.setTargetAtTime(nodes.bassGain.gain.value * 0.3, now, 0.3);
+        }
+      } else {
+        // Restore layers if we dropped back below 0.9 progress
+        if (layersDuckedRef.current) {
+          layersDuckedRef.current = false;
+          // Let updateIntensity restore proper levels on next call
+        }
+      }
+    } else {
+      // --- Conditions no longer apply: clean up tension layer ---
+      if (tensionRef.current) {
+        const tension = tensionRef.current;
+        // Fade out over 0.3s then stop
+        tension.gain.gain.setTargetAtTime(0, now, 0.15);
+        tension.lfoGain.gain.setTargetAtTime(0, now, 0.15);
+
+        const capturedTension = tension;
+        setTimeout(() => {
+          try { capturedTension.osc.stop(); } catch { /* ok */ }
+          try { capturedTension.lfo.stop(); } catch { /* ok */ }
+        }, 400);
+
+        tensionRef.current = null;
+        tensionActiveRef.current = false;
+      }
+
+      // Restore ducked layers
+      if (layersDuckedRef.current) {
+        layersDuckedRef.current = false;
+        // updateIntensity will restore proper levels on next call
+      }
+    }
+  }, []);
+
   // Start music playback (fade in over 2 seconds)
   const start = useCallback(() => {
     if (playingRef.current) return;
@@ -394,6 +512,15 @@ export function useBackgroundMusic(): UseBackgroundMusicReturn {
       closeGapDrumRef.current = null;
     }
 
+    // Stop tension layer if active
+    if (tensionRef.current) {
+      try { tensionRef.current.osc.stop(); } catch { /* ok */ }
+      try { tensionRef.current.lfo.stop(); } catch { /* ok */ }
+      tensionRef.current = null;
+      tensionActiveRef.current = false;
+    }
+    layersDuckedRef.current = false;
+
     const nodes = nodesRef.current;
     if (!nodes || nodes.ctx.state === 'closed') return;
 
@@ -428,6 +555,12 @@ export function useBackgroundMusic(): UseBackgroundMusicReturn {
   useEffect(() => {
     return () => {
       stopHihatLoop();
+      // Clean up tension layer
+      if (tensionRef.current) {
+        try { tensionRef.current.osc.stop(); } catch { /* ok */ }
+        try { tensionRef.current.lfo.stop(); } catch { /* ok */ }
+        tensionRef.current = null;
+      }
       const nodes = nodesRef.current;
       if (!nodes) return;
       try {
@@ -444,7 +577,7 @@ export function useBackgroundMusic(): UseBackgroundMusicReturn {
     };
   }, [stopHihatLoop]);
 
-  return { start, stop, updateIntensity, triggerMusicEvent, setMuted, isMuted };
+  return { start, stop, updateIntensity, triggerMusicEvent, setFinalLapTension, setMuted, isMuted };
 }
 
 export default useBackgroundMusic;

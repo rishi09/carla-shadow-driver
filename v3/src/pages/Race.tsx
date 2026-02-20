@@ -18,6 +18,7 @@ import { WebRTCVideo } from '../components/WebRTCVideo.tsx';
 import { RaceHUD } from '../components/RaceHUD.tsx';
 import { SpeedEffects } from '../components/SpeedEffects.tsx';
 import { SpeedLines } from '../components/SpeedLines.tsx';
+import { SlipstreamEffect } from '../components/SlipstreamEffect.tsx';
 import { ParticleOverlay } from '../components/ParticleOverlay.tsx';
 import { DriftScore } from '../components/DriftScore.tsx';
 import { CommentaryOverlay } from '../components/CommentaryOverlay.tsx';
@@ -33,6 +34,7 @@ import { PhotoMode } from '../components/PhotoMode.tsx';
 import { ClipPreview } from '../components/ClipPreview.tsx';
 import { RearMirror } from '../components/RearMirror.tsx';
 import { RecordingControls } from '../components/RecordingControls.tsx';
+import { SplitTimeDelta } from '../components/SplitTimeDelta.tsx';
 import { useReplayRecorder } from '../hooks/useReplayRecorder.ts';
 import { useScreenRecorder } from '../hooks/useScreenRecorder.ts';
 import type { KeyState } from '../types/index.ts';
@@ -143,6 +145,16 @@ export function Race() {
   const [lastLapOvertake, setLastLapOvertake] = useState(false);
   const [niceSave, setNiceSave] = useState(false);
   const speedHistoryRef = useRef<number[]>([]);
+
+  // --- Split time delta tracking ---
+  // Stores lap_time at each checkpoint crossing during the current lap
+  const checkpointTimesRef = useRef<number[]>([]);
+  // The current lap number being tracked (to detect lap resets)
+  const splitLapRef = useRef(0);
+  // State to drive the SplitTimeDelta popup
+  const [splitDelta, setSplitDelta] = useState<number | null>(null);
+  const [splitRawTime, setSplitRawTime] = useState<number>(0);
+  const [splitTrigger, setSplitTrigger] = useState(0);
 
   // --- GO screen shake trigger ---
   const goShakeTriggeredRef = useRef(false);
@@ -385,7 +397,15 @@ export function Race() {
       bgMusic.triggerMusicEvent('final_lap');
     }
     prevLapRef.current = player.lap;
-  }, [view, gpu.raceState?.player?.gap_seconds, gpu.raceState?.player?.lap, gpu.raceState?.player?.total_laps, engineSound.triggerEvent, engineSound.stopCloseGapTension, crowd.cheer, crowd.setAnticipation, bgMusic.triggerMusicEvent]);
+
+    // Final lap tension: heartbeat bass when gap < 1.0s, layer ducking near finish
+    const isFinalLap = player.total_laps > 1 && player.lap === player.total_laps;
+    const absGap = gap != null ? Math.abs(gap) : Infinity;
+    const checkpointProgress = player.total_checkpoints && player.total_checkpoints > 0
+      ? player.checkpoint / player.total_checkpoints
+      : 0;
+    bgMusic.setFinalLapTension(absGap, isFinalLap, checkpointProgress);
+  }, [view, gpu.raceState?.player?.gap_seconds, gpu.raceState?.player?.lap, gpu.raceState?.player?.total_laps, gpu.raceState?.player?.checkpoint, gpu.raceState?.player?.total_checkpoints, engineSound.triggerEvent, engineSound.stopCloseGapTension, crowd.cheer, crowd.setAnticipation, bgMusic.triggerMusicEvent, bgMusic.setFinalLapTension]);
 
   // Collision hit sound (percussive white noise burst, layered on top of existing impact)
   useEffect(() => {
@@ -405,6 +425,64 @@ export function Race() {
     }
     prevCheckpointRef.current = cp;
   }, [view, gpu.raceState?.player?.checkpoint]);
+
+  // --- Split time delta at every checkpoint ---
+  useEffect(() => {
+    if (view !== 'racing') return;
+    const player = gpu.raceState?.player;
+    if (!player) return;
+
+    const cp = player.checkpoint;
+    const lap = player.lap;
+    const lapTime = player.lap_time;
+    const config = raceConfigRef.current;
+
+    // Detect lap change: reset checkpoint times for the new lap
+    if (lap !== splitLapRef.current) {
+      // If completing a lap (lap increased), save splits for the completed lap
+      if (lap > splitLapRef.current && splitLapRef.current > 0 && config) {
+        const completedLapSplits = [...checkpointTimesRef.current];
+        const completedLapTime = player.best_lap ?? lapTime; // best_lap just got updated with the completed lap
+        // Save splits if this lap was a PB
+        if (completedLapSplits.length > 0) {
+          personalBests.saveSplits(config.track, config.laps, completedLapTime, completedLapSplits);
+        }
+      }
+      splitLapRef.current = lap;
+      checkpointTimesRef.current = [];
+      return;
+    }
+
+    // Detect checkpoint advance within the same lap
+    const expectedIdx = checkpointTimesRef.current.length;
+    if (cp === expectedIdx + 1 || (cp > 0 && cp > expectedIdx)) {
+      // Fill any skipped checkpoints (unlikely but defensive)
+      while (checkpointTimesRef.current.length < cp - 1) {
+        checkpointTimesRef.current.push(lapTime);
+      }
+      // Record the current lap_time for this checkpoint
+      checkpointTimesRef.current.push(lapTime);
+
+      // Compute delta against PB splits
+      const cpIndex = checkpointTimesRef.current.length - 1;
+      if (config) {
+        const pbSplits = personalBests.getSplits(config.track, config.laps);
+        if (pbSplits && cpIndex < pbSplits.length) {
+          const delta = lapTime - pbSplits[cpIndex];
+          setSplitDelta(delta);
+          setSplitRawTime(lapTime);
+        } else {
+          // No PB splits for this checkpoint -- show raw time
+          setSplitDelta(null);
+          setSplitRawTime(lapTime);
+        }
+      } else {
+        setSplitDelta(null);
+        setSplitRawTime(lapTime);
+      }
+      setSplitTrigger(prev => prev + 1);
+    }
+  }, [view, gpu.raceState?.player?.checkpoint, gpu.raceState?.player?.lap, gpu.raceState?.player?.lap_time, personalBests.getSplits, personalBests.saveSplits]);
 
   // --- "LAST LAP OVERTAKE!" detection ---
   useEffect(() => {
@@ -742,6 +820,17 @@ export function Race() {
         const pbResultData = personalBests.getResult(config.track, config.laps, gpu.raceFinished.player_time);
         setPbResult(pbResultData);
 
+        // Save final lap's checkpoint splits if they exist
+        if (checkpointTimesRef.current.length > 0) {
+          // Use the last lap time from server data, or fall back to estimating from total
+          const lastLapTime = gpu.raceFinished.player_laps.length > 0
+            ? gpu.raceFinished.player_laps[gpu.raceFinished.player_laps.length - 1]
+            : gpu.raceFinished.player_time;
+          if (lastLapTime != null) {
+            personalBests.saveSplits(config.track, config.laps, lastLapTime, [...checkpointTimesRef.current]);
+          }
+        }
+
         // Save personal best
         personalBests.saveBest({
           time: gpu.raceFinished.player_time,
@@ -831,6 +920,9 @@ export function Race() {
     };
     setView('racing');
     setRaceWeather(weather);
+    // Reset split time tracking for the new race
+    checkpointTimesRef.current = [];
+    splitLapRef.current = 0;
     if (isDemo || directWsUrl) {
       pendingDemoRaceRef.current = { track, laps, weather, model, player_car: playerCar, time_of_day: timeOfDay };
       const wsUrl = directWsUrl || DEMO_WS_URL;
@@ -981,6 +1073,15 @@ export function Race() {
           {/* Speed lines overlay (anime-style radial lines at high speed) */}
           <SpeedLines speedKmh={gpu.raceState?.player.speed_kmh ?? 0} />
 
+          {/* Slipstream / drafting visual: converging blue-white streaks when behind AI */}
+          <SlipstreamEffect
+            playerX={gpu.raceState?.player?.x ?? 0}
+            playerY={gpu.raceState?.player?.y ?? 0}
+            aiX={gpu.raceState?.ai?.x ?? 0}
+            aiY={gpu.raceState?.ai?.y ?? 0}
+            speedKmh={gpu.raceState?.player?.speed_kmh ?? 0}
+          />
+
           {/* Speed effects overlay (vignette + warp + collision flash + gear flash) */}
           <SpeedEffects
             speedKmh={gpu.raceState?.player.speed_kmh ?? 0}
@@ -1023,6 +1124,13 @@ export function Race() {
               }}
             />
           )}
+
+          {/* Split time delta popup at checkpoints */}
+          <SplitTimeDelta
+            delta={splitDelta}
+            rawTime={splitRawTime}
+            trigger={splitTrigger}
+          />
 
           {/* LAST LAP OVERTAKE! dramatic text overlay */}
           {lastLapOvertake && (

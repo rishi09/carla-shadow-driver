@@ -111,21 +111,24 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
     const trackName = raceSettings?.track ?? 'Unknown';
     const timeStr = result.player_time != null ? formatRaceTime(result.player_time) : 'DNF';
     const difficulty = raceSettings?.model ? (DIFFICULTY_MAP[raceSettings.model] ?? raceSettings.model) : 'Easy';
+    const laps = raceSettings?.laps ?? result.player_laps.length;
 
     // Gap description
     let gapStr = '';
     if (result.player_time != null && result.ai_time != null) {
       const gap = Math.abs(result.player_time - result.ai_time).toFixed(1);
-      gapStr = playerWon ? `beat AI by ${gap}s` : `lost to AI by ${gap}s`;
+      gapStr = playerWon ? `Beat AI by ${gap}s` : `Lost to AI by ${gap}s`;
     }
 
-    const topSpeed = result.player_max_speed != null ? `${result.player_max_speed.toFixed(0)} km/h` : '?';
+    const topSpeed = result.player_max_speed != null ? `Top Speed: ${result.player_max_speed.toFixed(0)} km/h` : '';
+
+    const line2Parts = [timeStr, gapStr, topSpeed].filter(Boolean);
 
     const lines = [
       `Shadow Driver v3 - ${trackName}`,
-      `${timeStr} (${gapStr})`,
-      `Top Speed: ${topSpeed} | Difficulty: ${difficulty}`,
-      `shadow-driver-v3.vercel.app/race`,
+      line2Parts.join(' | '),
+      `${difficulty} | ${laps} laps`,
+      `shadow-driver-v3.vercel.app`,
     ];
 
     navigator.clipboard.writeText(lines.join('\n')).then(() => {

@@ -11,6 +11,7 @@
 import { useCallback, useState, useEffect } from 'react';
 
 const STORAGE_KEY = 'shadow-driver-pb';
+const SPLITS_STORAGE_KEY = 'shadow-driver-pb-splits';
 
 export interface PersonalBest {
   time: number;        // Total race time in seconds
@@ -41,6 +42,10 @@ export interface UsePersonalBestsReturn {
   getMedal: (track: string, laps: number, time: number) => 'gold' | 'silver' | 'bronze' | null;
   /** Get full result info (medal, previous best, improvement) for a completed race */
   getResult: (track: string, laps: number, time: number) => PersonalBestResult;
+  /** Get PB checkpoint split times for a track/lap combo, or null if none */
+  getSplits: (track: string, laps: number) => number[] | null;
+  /** Save checkpoint split times if the lap was a PB */
+  saveSplits: (track: string, laps: number, lapTime: number, splits: number[]) => void;
 }
 
 function makeKey(track: string, laps: number): string {
@@ -65,13 +70,37 @@ function saveBestsToStorage(bests: Record<string, PersonalBest>) {
   }
 }
 
+function loadSplits(): Record<string, { lapTime: number; splits: number[] }> {
+  try {
+    const raw = localStorage.getItem(SPLITS_STORAGE_KEY);
+    if (!raw) return {};
+    return JSON.parse(raw) as Record<string, { lapTime: number; splits: number[] }>;
+  } catch {
+    return {};
+  }
+}
+
+function saveSplitsToStorage(splits: Record<string, { lapTime: number; splits: number[] }>) {
+  try {
+    localStorage.setItem(SPLITS_STORAGE_KEY, JSON.stringify(splits));
+  } catch {
+    // localStorage might be full or disabled
+  }
+}
+
 export function usePersonalBests(): UsePersonalBestsReturn {
   const [bests, setBests] = useState<Record<string, PersonalBest>>(loadBests);
+  const [splits, setSplits] = useState<Record<string, { lapTime: number; splits: number[] }>>(loadSplits);
 
   // Sync to localStorage whenever bests change
   useEffect(() => {
     saveBestsToStorage(bests);
   }, [bests]);
+
+  // Sync splits to localStorage whenever they change
+  useEffect(() => {
+    saveSplitsToStorage(splits);
+  }, [splits]);
 
   const getBest = useCallback((track: string, laps: number): PersonalBest | null => {
     const key = makeKey(track, laps);
@@ -130,5 +159,25 @@ export function usePersonalBests(): UsePersonalBestsReturn {
     return { ...bests };
   }, [bests]);
 
-  return { getBest, saveBest, getAllBests, getMedal, getResult };
+  const getSplits = useCallback((track: string, laps: number): number[] | null => {
+    const key = makeKey(track, laps);
+    return splits[key]?.splits ?? null;
+  }, [splits]);
+
+  const saveSplits = useCallback((track: string, laps: number, lapTime: number, newSplits: number[]) => {
+    const key = makeKey(track, laps);
+    const existing = splits[key];
+
+    // Only save if this lap is faster than the existing PB splits (or no existing)
+    if (existing && lapTime >= existing.lapTime) {
+      return;
+    }
+
+    setSplits(prev => ({
+      ...prev,
+      [key]: { lapTime, splits: newSplits },
+    }));
+  }, [splits]);
+
+  return { getBest, saveBest, getAllBests, getMedal, getResult, getSplits, saveSplits };
 }
