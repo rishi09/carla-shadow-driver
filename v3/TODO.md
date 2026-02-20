@@ -298,3 +298,294 @@ These are marked with :star: above. Summary:
 4. **Daily track challenge** -- ~3 hours (date-seeded track selection + simple KV leaderboard). Creates daily retention without any infrastructure cost. The leaderboard IS the competition.
 
 5. **Sub-3-second cold start** -- ~2 hours (service worker + auto-reconnect). Eliminates the "do I want to wait for this to load?" decision. The speed IS the feature.
+
+---
+
+## AI-Powered Features (Deep Research, Feb 2026)
+
+Comprehensive research into AI in games beyond self-driving, with concrete implementation plans for Shadow Driver v3. Each item includes who's done it, technical requirements, feasibility on our 24GB GPU, and impressiveness to first-time players.
+
+### TOP 5 AI Features -- Build ASAP
+
+#### :star: 1. AI Race Commentary (LLM + TTS) -- The Showstopper
+- **What**: Real-time race announcer that calls out events: "He's closing the gap in turn 3!", "Massive collision!", "New fastest lap!", "The AI is pulling away on the straight!"
+- **Who's done it**: No racing game has done this with generative AI. This would be a genuine first. Sports broadcasting AI is emerging (see NVIDIA ACE's suite for game character speech) but nobody has applied it to live race commentary.
+- **How it works**:
+  - Server-side: Feed race telemetry (speed, gap, collisions, overtakes, lap times) into an LLM with a system prompt defining an excitable motorsport commentator persona.
+  - **LLM options**: Claude Haiku ($1/$5 per MTok, ~500ms latency, 0 VRAM) or local Qwen-2.5-3B via llama.cpp (~200ms latency, ~6GB VRAM -- tight but fits alongside CARLA's ~8-10GB).
+  - **TTS options**: Kokoro-82M (open source, 35-100x realtime speed on GPU, ~300ms first-token latency via streaming, ~350MB VRAM, supports emotion markers like [laughter] and emphasis via CAPS). Alternative: Bark by Suno (transformer-based, ~12GB VRAM for full model -- too heavy; smaller variants available). Cloud: ElevenLabs API (~500ms latency, high quality, per-character pricing, WebSocket streaming support).
+  - Event-driven, not continuous: commentary triggered by overtakes, collisions, gap changes, fastest laps. Max 1 line per 5 seconds.
+  - Audio streamed to browser as PCM/opus chunks via WebSocket binary frames.
+- **VRAM budget**: Kokoro-82M (~350MB) is trivial. Claude Haiku API uses 0 VRAM. Local 3B LLM (~6GB) is tight but possible on 24GB with CARLA.
+- **Impressiveness**: 10/10. A first-time player hearing an AI announcer calling their race live would be jaw-dropping. Best demo feature by far.
+- **References**: Kokoro-FastAPI (github.com/remsky/Kokoro-FastAPI), NVIDIA ACE (developer.nvidia.com/ace), Bark (github.com/suno-ai/bark)
+- **Implementation plan**:
+  - [ ] Define commentary event triggers in race_logic.py: overtake, collision, fastest_lap, close_gap (<1s), large_gap (>5s), final_lap, race_finish, high_speed_moment (>180km/h)
+  - [ ] Create commentary prompt template: excited British F1-style commentator persona, 10-30 word responses, reference driver positions and track features
+  - [ ] Integrate Claude Haiku API call from race_server.py (simplest path -- add `anthropic` pip package)
+  - [ ] Integrate Kokoro-82M for TTS (pip install kokoro, load model once at server start)
+  - [ ] Stream audio chunks to browser via WebSocket (binary frames with 1-byte type prefix: 0x01=JPEG, 0x02=audio)
+  - [ ] Frontend: Web Audio API playback with AudioBufferSourceNode, queue chunks for gapless playback
+  - [ ] Rate-limit: max 1 commentary line per 5 seconds, priority queue (overtakes > collisions > gap changes)
+  - [ ] Fallback: if TTS too slow, send text-only commentary as toast notifications on HUD
+
+#### :star: 2. AI Driving Coach (Post-Race Analysis) -- The Easy Win
+- **What**: After each race, analyze player telemetry and generate specific coaching tips: "You lost 1.8s in Turn 3 -- you braked 15m too early" or "Your racing line was 3m wider than optimal through the chicane."
+- **Who's done it**: iRacing has basic telemetry overlays. No game generates natural-language coaching from race data. AWS DeepRacer (now open source as of Dec 2025) shows training metrics but not coaching.
+- **How it works**:
+  - All telemetry data is ALREADY recorded (ghost car recording has per-frame position, speed, steer, throttle, brake at every checkpoint).
+  - After race ends, compute sector split times (time between each checkpoint) for player vs AI.
+  - Send telemetry summary to Claude Haiku API: "You are a professional racing coach. Here are the player's sector times vs the AI. Give 3 specific, actionable tips."
+  - Display tips in RaceResults.tsx alongside the existing racing line visualization.
+  - Highlight problem corners on the racing line viz with red sections.
+- **Feasibility**: 9/10. Zero VRAM cost (API call). All data already exists. Just need a prompt template and one API call after race_finished. Claude Haiku processes full lap data in <1s.
+- **Impressiveness**: 8/10. Creates a retention loop -- "I'll try that tip on my next lap." Makes players feel like they have a personal coach.
+- **Implementation plan**:
+  - [ ] Collect sector split times (time between each checkpoint) for player and AI -- data already in race_logic.py
+  - [ ] Compute per-corner metrics: braking point (position where brake first applied), apex position (closest point to inside of corner), exit speed
+  - [ ] Build analysis prompt: sector data + track layout + player vs AI comparison
+  - [ ] Call Claude Haiku API from race_server.py after race_finished event
+  - [ ] Return coaching tips (3-5 bullet points) in race_finished WebSocket message
+  - [ ] Display tips in RaceResults.tsx below the racing line visualization
+  - [ ] Color-code racing line sections: green (faster than AI), red (slower than AI), with time delta labels
+
+#### :star: 3. Ghost Car AI Clone (Imitation Learning) -- The Unique Differentiator
+- **What**: Train a small neural network on YOUR driving data, then race against a ghost car that drives exactly like you. "Can you beat yourself?"
+- **Who's done it**:
+  - **Forza Drivatar** (Microsoft Research): Records player behavior across millions of players, creates AI opponents that mimic individual driving styles. Uses neural networks trained on per-player telemetry.
+  - **GT Sophy** (Sony AI, Nature 2022): Superhuman racing RL, trained in Gran Turismo Sport. Used deep RL with multi-agent league (similar to AlphaStar's approach). Key innovation: reward shaping for clean racing (not just speed).
+  - **PilotNet** (NVIDIA): 5 conv + 4 FC layers, ~250K params, <10MB. Trained on steering angle from camera images. Pre-trained weights available at HuggingFace (sergiopaniego/OptimizedPilotNet, 200x66 input).
+- **How it works**:
+  - Record (downscaled_camera_frame, player_controls) pairs during each race. Already have frames from JPEG encoding + controls from WebSocket messages.
+  - After N laps (~1000 frames), fine-tune PilotNet on the player's data using behavioral cloning (supervised learning: predict controls from frames).
+  - Training: ~2-5 minutes on RTX 3090 for 50 epochs on 1000 samples. ~2GB VRAM for training.
+  - On subsequent races, clone drives using the trained model: receives camera frame, outputs steering/throttle/brake.
+  - Display as visible ghost car on minimap or as a second CARLA vehicle.
+- **Challenge**: Keyboard input is binary (0 or 1 for each key), making imitation learning harder than analog controller data. Mitigation: use the ramped/smoothed control values (post-ramping) as training targets, not raw key states.
+- **Impressiveness**: 9/10. "Race against an AI that drives like you" is an incredible hook for social sharing and retention.
+- **Implementation plan**:
+  - [ ] Record (200x66 downscaled frame, smoothed controls) pairs in race_server.py during gameplay
+  - [ ] Store recordings per player session (in-memory ring buffer, cap at 5000 frames)
+  - [ ] Build training pipeline: PilotNet architecture from sergiopaniego weights, MSE loss for steer + BCE for throttle/brake, Adam optimizer lr=1e-4
+  - [ ] Add "Train My Clone" button on RaceResults screen
+  - [ ] Train for 50 epochs on recorded data (~2-3 min on RTX 3090, ~2GB VRAM)
+  - [ ] Run clone inference in race loop: feed camera frame -> model -> controls at 30Hz
+  - [ ] Show clone car on minimap + spawn as translucent CARLA vehicle in 3D view
+
+#### :star: 4. Optimal Racing Line Overlay -- The Educational Feature
+- **What**: Show the mathematically optimal racing line as a glowing guide path, color-coded by target speed.
+- **Who's done it**:
+  - **TUMFTM global_racetrajectory_optimization** (github.com/TUMFTM/global_racetrajectory_optimization): Open source Python, uses CVXPY for convex optimization. Supports 4 objectives: shortest path, minimum curvature, minimum time, and minimum time with powertrain modeling. Takes track boundaries as input, outputs optimal waypoints.
+  - **F1TENTH / RoboRacer**: Autonomous 1/10 scale racing community with extensive racing line optimization research.
+  - iRacing, Assetto Corsa: Have community-created racing line overlays as training aids.
+- **How it works**:
+  - Extract track centerline and boundaries from CARLA's OpenDRIVE map data (XML format).
+  - Run minimum-curvature optimization offline (TUMFTM optimizer, Python + CVXPY).
+  - Store result as JSON: array of {x, y, target_speed} waypoints.
+  - Server sends racing line data in race_config message at race start.
+  - Frontend renders on Minimap.tsx as colored polyline: green = full throttle, yellow = lift off, red = braking zone.
+  - Phase 2: project racing line into 3D camera view as AR-style overlay using CARLA's world-to-screen projection matrix.
+- **Feasibility**: 9/10. TUMFTM optimizer is ready to use. Minimap rendering is trivial (add polyline to existing component). Pre-compute once per track.
+- **Impressiveness**: 7/10. Educational and helpful for new players. The "learning the line" experience is core to real racing.
+- **Implementation plan**:
+  - [ ] Extract track centerline and boundaries from CARLA OpenDRIVE map data (carla.Map.get_topology() + get_waypoints())
+  - [ ] Run TUMFTM minimum-curvature optimization (pip install cvxpy, ~10 seconds per track)
+  - [ ] Store optimal line as JSON: server/data/racing_lines/{map_name}.json
+  - [ ] Send racing line data in race_config message at race start
+  - [ ] Render on Minimap.tsx as colored polyline (green/yellow/red by target speed)
+  - [ ] Add "Show Racing Line" toggle in RaceSetup.tsx (on by default for Easy, off for Hard)
+  - [ ] Phase 2: 3D projection into camera view using CARLA sensor calibration matrix
+
+#### :star: 5. AI Trash-Talking Opponent -- Zero-Cost Fun
+- **What**: AI opponent sends chat messages during races: taunts when winning, excuses when losing, congratulations on good moves. Personality-driven -- not generic.
+- **Who's done it**: No racing game has an AI opponent with generated personality chat. NVIDIA ACE provides personality-driven NPC systems with emotion detection, but for conversation NPCs, not racing rivals.
+- **How it works (zero runtime AI cost)**:
+  - Pre-generate a bank of 50-100 lines per event type offline using Claude. Each line fits the AI's racing personality (cocky, competitive, grudgingly respectful).
+  - At runtime, pick a random line on event trigger: overtake, collision, gap change, final lap.
+  - Display as a speech bubble toast on the HUD, near the AI position indicator.
+  - Phase 2: use Kokoro TTS to voice the trash talk (adds ~300ms but sounds incredible).
+- **Feasibility**: 10/10. Pre-generate lines offline (5 minutes of Claude prompting), store as JSON, zero runtime cost.
+- **Impressiveness**: 7/10. Gives the AI personality and makes racing feel social even in single-player. Players will screenshot and share funny taunts.
+- **Implementation plan**:
+  - [ ] Define event types: ai_overtakes, player_overtakes, player_crashes, ai_crashes, close_gap, big_lead, final_lap, race_start, race_finish_win, race_finish_lose
+  - [ ] Generate 10-15 lines per event type using Claude with racing rival persona
+  - [ ] Store as server/data/trash_talk.json
+  - [ ] Pick random line on event trigger in race_logic.py, send as {type: 'ai_chat', text: '...'} message
+  - [ ] Frontend: render as animated speech bubble toast, auto-dismiss after 3 seconds
+  - [ ] Phase 2: voice the trash talk using Kokoro TTS (run on server, stream audio chunk)
+
+---
+
+### Additional AI Features by Category
+
+#### AI Opponents & Racing Intelligence
+
+**Reinforcement Learning Racing Agent (GT Sophy-Inspired)**
+- **Background**: GT Sophy (Sony AI + Polyphony Digital, Nature 2022) achieved superhuman Gran Turismo racing using deep RL with a multi-agent league system. AlphaStar (DeepMind) used the same league concept for StarCraft II -- training diverse agents that counter each other produces more robust strategies than training against one opponent. OpenAI Five demonstrated PPO at massive scale (128K CPUs, 256 GPUs) for Dota 2. Learn-to-Race (ICCV 2021) trained Soft Actor-Critic agents that complete laps using only visual features. DreamerV3 (Danijar Hafner) learns from pixels via world models -- first to collect diamonds in Minecraft without human data. AWS DeepRacer (now open source Dec 2025) uses RL for 1/18 scale racing.
+- **For Shadow Driver**: Train PPO agent (Stable Baselines 3) on one CARLA track. Observation: (speed, heading, centerline_distance, boundary_distances, curvature, checkpoint_bearing). Action: continuous (steer, throttle, brake). Reward: +track_progress, -centerline_deviation, -collision, +speed_bonus.
+- **VRAM**: Training ~4-6GB (small MLP policy), inference <500MB. Fits alongside CARLA.
+- **Feasibility**: 3/10. Needs days of GPU training time. But a basic "stays on track" agent is achievable in hours.
+- [ ] Define observation/action spaces for CARLA racing
+- [ ] Implement Gym wrapper around CARLA (observation from world state, not camera -- faster training)
+- [ ] Train with PPO (Stable Baselines 3) in headless CARLA
+- [ ] Target: consistent lap completion on one track after ~100K episodes
+- [ ] Deploy as "Extreme" difficulty opponent
+
+**Adaptive AI That Learns Mid-Race**
+- **What**: AI adjusts behavior based on player skill during the race, not just preset difficulty. Different from rubber-banding (which adjusts speed) -- this changes driving quality (braking precision, cornering lines, mistake frequency).
+- Track player metrics over first 1-2 laps: average speed, cornering efficiency, collision rate.
+- Compute skill score, map to AI parameters. Keep gap competitive (1-3 seconds).
+- **Feasibility**: 8/10. No ML needed -- just heuristics on existing telemetry. The data is already there.
+- [ ] Compute rolling skill metrics from existing telemetry
+- [ ] Map skill score to autopilot speed factor + mistake frequency + cornering adherence
+- [ ] Adjust every 30 seconds, smooth transitions
+- [ ] Never let adaptation feel punitive
+
+**AI Personality / Emotion System**
+- **What**: AI has emotional states that affect driving and are visible to the player.
+- States: CONFIDENT (leading comfortably, clean driving), AGGRESSIVE (just overtaken, pushing hard, risky), NERVOUS (close racing, more braking, occasional mistakes), DESPERATE (far behind on last lap, all-out speed, high crash risk).
+- NVIDIA ACE provides Audio2Emotion for NPC emotional modeling, but nobody has applied this to racing AI.
+- **Feasibility**: 7/10. Parameterize existing autopilot with emotional state modifiers. Show emotion in HUD (icon or text). Feed emotion state to the commentary LLM for richer narration.
+- [ ] Define emotion state machine with event-triggered transitions
+- [ ] Map emotional states to autopilot parameter overrides
+- [ ] Add emotion indicator to race_state telemetry + HUD display
+- [ ] Feed AI emotion to commentary LLM for context-aware narration
+
+#### AI-Generated Content
+
+**Dynamic Weather Reacting to Race State**
+- CARLA's weather API (carla.WeatherParameters) supports real-time changes: cloudiness, precipitation, sun_altitude, fog_density, wetness, wind_intensity. Changes are instant API calls.
+- Map race state to weather moods: CALM (clear, big lead), TENSE (overcast + wind, gap closing), DRAMATIC (rain + fog, final lap), EPIC (storm + sunset, close finish).
+- Smooth parameter interpolation over 10-30 seconds prevents jarring transitions.
+- **Feasibility**: 8/10. Trivial to implement -- just add weather transitions to race_logic.py.
+- [ ] Define weather mood presets with CARLA parameter values
+- [ ] Map race events to weather transitions (close gap -> TENSE, final lap -> DRAMATIC)
+- [ ] Interpolate weather parameters smoothly (lerp over 10-30 seconds)
+- [ ] Add weather state to telemetry for frontend rain/fog overlay effects
+
+**AI-Generated Music Stems (Reactive Soundtrack)**
+- Pre-generate stems using Meta's MusicGen (text-to-music with melodic conditioning, MIT code / CC-BY-NC weights) or Stability AI's Stable Audio (text-to-audio, audio-to-audio, inpainting, leading inference speed, enterprise licensing required).
+- Generate 4 mood stem sets offline: cruise, chase, final_lap, victory. Each set has 4 layers: drums, bass, pad, lead (~30s WAV loops).
+- At runtime, crossfade between stem layers based on race state using Web Audio API. This is what AAA games actually do (dynamic stems, not real-time generation).
+- Real-time AI music generation is NOT feasible at game latency.
+- **Feasibility**: 6/10. Pre-generating stems is free. Runtime crossfading is straightforward with existing Web Audio infrastructure.
+- [ ] Generate stem sets using MusicGen or Stable Audio Open (offline)
+- [ ] Load stems as AudioBuffers at race start
+- [ ] Crossfade layers based on race intensity (gap, speed, lap number)
+- [ ] Sync transitions to bar boundaries for musical coherence
+- [ ] Replace current oscillator-based background music
+
+#### AI for Streaming & Visual Quality
+
+**Client-Side Frame Upscaling (Browser Neural Super Resolution)**
+- Stream 640x360 from server (50% smaller = 50% less bandwidth = lower latency), upscale to 1280x720 in browser via neural network on client's GPU.
+- NVIDIA DLSS uses transformer-based super resolution with temporal data (motion vectors + history frames) for up to 8x frame rate boost. RIFE does frame interpolation at 30+fps for 720p on a 2080Ti.
+- **Browser stack**: ONNX Runtime Web (supports WebGPU, all ONNX operators via WASM, GPU subset via WebGPU). Need a tiny super-res model: FSRCNN (~12K params) or ESPCN (sub-pixel convolution). Real-ESRGAN is too heavy.
+- **Feasibility**: 3/10. Groundbreaking if it works. Challenge is finding a model small enough for 30fps browser inference. Need to benchmark.
+- [ ] Research and benchmark smallest viable super-resolution models (FSRCNN, ESPCN)
+- [ ] Export to ONNX, quantize to int8
+- [ ] Benchmark ONNX Runtime Web + WebGPU at 640x360->1280x720 (target: <15ms)
+- [ ] If viable: add upscaling pipeline in VideoCanvas.tsx
+
+**Client-Side Frame Interpolation (Pseudo-60fps)**
+- Between 30fps server frames, generate intermediate frame for perceived 60fps.
+- Three approaches (easy to hard): (1) alpha-blend crossfade between consecutive frames, (2) velocity-based pixel shifting using telemetry speed+steering to compute 2D motion vector, (3) small optical flow network in ONNX Runtime Web.
+- DLSS Frame Generation creates up to 3 extra frames per rendered frame; Oasis (Decart + Etched) generates entire game worlds at 20fps via Diffusion Transformer -- but both require dedicated GPU hardware.
+- **Feasibility**: 4/10 for neural approach, 6/10 for motion-compensated blending.
+- [ ] Implement simple alpha-blend crossfade at 60fps in VideoCanvas.tsx
+- [ ] Implement velocity-based pixel shifting using telemetry motion vector
+- [ ] Benchmark and evaluate visual quality vs native 30fps
+
+**Neural Style Transfer (Visual Themes)**
+- Apply artistic styles in real-time: comic book, neon wireframe, watercolor, pixel art.
+- ONNX model zoo has fast_neural_style models (~6MB). Load in browser via ONNX Runtime Web + WebGPU.
+- Offer style selection in RaceSetup: Normal, Comic, Neon, Retro.
+- Alternative: apply server-side on GPU via TensorRT (NVIDIA, up to 36x faster than CPU inference, supports FP8/INT8 quantization). Would add ~10ms latency but guarantee performance.
+- **Feasibility**: 5/10. Depends on WebGPU inference speed at 720p.
+- [ ] Download fast_neural_style ONNX models
+- [ ] Benchmark in browser with ONNX Runtime Web + WebGPU
+- [ ] If viable (<20ms per frame), integrate as toggle
+
+#### AI Replay & Social
+
+**AI Replay Highlights**
+- Automatically identify highlight moments from telemetry: overtakes, close gaps (<0.5s), high-speed sections, collisions, final corner.
+- Ring-buffer last 5 seconds of frames in server memory (~7.5MB per highlight at 30fps * 50KB).
+- After race, send highlight clips to frontend, play sequentially with commentary overlay.
+- **Feasibility**: 5/10. Memory pressure from frame buffering. Medium complexity.
+- [ ] Define highlight criteria from telemetry patterns
+- [ ] Implement ring-buffer for recent frames in server memory
+- [ ] Snapshot buffer on highlight event
+- [ ] Frontend playback with transition effects
+
+#### Wild / Experimental Ideas
+
+**Live RL Training Visualization** -- "Watch an AI learn to race in 5 minutes"
+- Show the RL agent going from crashing into walls to completing laps. DreamerV3 learns from pixels across 150+ tasks with a single configuration. GameNGen generates DOOM via diffusion at 20fps on TPU. Oasis generates interactive Minecraft at 20fps using ViT spatial autoencoder + Diffusion Transformer.
+- Could pre-record training progression and play back as time-lapse, or use world-model approach (DreamerV3) for faster convergence.
+- **Impressiveness**: 10/10. Watching AI learn is inherently fascinating and viral.
+- **Feasibility**: 2/10. Needs extensive engineering.
+
+**Multiplayer with Secret AI Players** -- Turing Test Racing
+- Some opponents are AI bots trained on real player data (Drivatar-style). Players can't tell who's human.
+- Requires multiplayer infrastructure + convincing AI behavior.
+- **Feasibility**: 3/10. Multiplayer first, then AI integration.
+
+**AI Track Generator** -- "Describe your dream track"
+- LLM generates checkpoint sequences on existing CARLA maps from natural language.
+- Full custom maps would need OpenDRIVE XML generation -- CARLA map format is complex.
+- More practical: generate different "tracks" (checkpoint routes) on the same CARLA map.
+- **Feasibility**: 4/10 for checkpoint routes, 2/10 for full map generation.
+
+---
+
+### Technical Reference: AI Infrastructure
+
+#### VRAM Budget (24GB RTX 3090)
+| Component | VRAM Usage | Notes |
+|-----------|-----------|-------|
+| CARLA 0.9.15 (headless, 1 camera) | ~8-10GB | Base requirement |
+| PilotNet inference (200x66 input) | ~50MB | Tiny model |
+| Kokoro-82M TTS | ~350MB | Open source, 35-100x realtime |
+| PPO training (small MLP policy) | ~2-4GB | Stable Baselines 3 |
+| Qwen-2.5-3B (local LLM, llama.cpp) | ~6GB | For frequent commentary |
+| SDXL Turbo (image generation) | ~10GB | Won't fit alongside CARLA |
+| Bark TTS (full model) | ~12GB | Won't fit; use smaller variant |
+| **Comfortable total** | **~12-14GB** | CARLA + PilotNet + Kokoro + Claude API |
+
+#### On-Device vs Cloud AI Inference Tradeoffs
+| Approach | Latency | Cost | VRAM | Best For |
+|----------|---------|------|------|----------|
+| Claude Haiku API | ~500ms | $1/$5 MTok | 0 | Commentary text, coaching, analysis |
+| Local 3B LLM (llama.cpp) | ~200ms | Free | ~6GB | Frequent short responses |
+| Kokoro-82M TTS (server) | ~300ms 1st token | Free | ~350MB | Voice commentary, trash talk |
+| ElevenLabs API (cloud) | ~500ms | Per-char | 0 | Highest quality voice |
+| ONNX Runtime Web (browser) | 5-20ms/frame | Free | Client GPU | Super-res, style transfer |
+| TensorRT (server) | 1-5ms/frame | Free | ~1-2GB | Fast model inference |
+| Transformers.js (browser) | Varies | Free | Client GPU | Text models, CLIP, Whisper |
+| Web-LLM (browser WebGPU) | ~200ms/tok | Free | Client GPU | Full LLM client-side |
+
+#### Browser AI Stack Reference
+- **ONNX Runtime Web**: Runs ONNX models via WebGPU/WASM. All operators via WASM, GPU subset via WebGPU. Best for vision models.
+- **Transformers.js** (HuggingFace, 15K+ stars): ONNX backend, supports BERT/CLIP/Whisper and many more. Quantization: fp16, q8, q4. npm install @huggingface/transformers.
+- **Web-LLM** (MLC-AI): Full LLMs in browser via WebGPU. Supports Llama/Phi/Gemma/Mistral/Qwen. OpenAI-compatible API. Could run commentary entirely client-side.
+- **WebGPU**: Chrome 113+, Edge 113+, Firefox (behind flag), Safari (partial). ~78% browser coverage. Enables near-native GPU compute.
+
+#### Priority Matrix (All AI Features)
+| Feature | Impact | Feasibility | Build When |
+|---------|--------|-------------|------------|
+| AI Race Commentary (LLM+TTS) | 10/10 | 6/10 | NOW -- top priority |
+| AI Driving Coach (post-race) | 8/10 | 9/10 | NOW -- easiest win |
+| AI Clone Ghost Car | 9/10 | 5/10 | NOW -- unique differentiator |
+| Optimal Racing Line | 7/10 | 9/10 | NOW -- educational, easy |
+| AI Trash-Talk Messages | 7/10 | 10/10 | NOW -- zero cost |
+| Adaptive AI Difficulty | 6/10 | 8/10 | Soon |
+| AI Emotion System | 6/10 | 7/10 | Soon |
+| Dynamic Weather | 5/10 | 8/10 | Soon |
+| AI-Generated Music Stems | 6/10 | 6/10 | Later |
+| Client-Side Super Resolution | 9/10 | 3/10 | Research |
+| Frame Interpolation | 7/10 | 4/10 | Research |
+| Neural Style Transfer | 5/10 | 5/10 | Nice-to-have |
+| RL Racing Agent (PPO) | 8/10 | 3/10 | Long-term |
+| Live Training Viz | 9/10 | 2/10 | Dream |
+| AI Track Generator | 6/10 | 2/10 | Dream |

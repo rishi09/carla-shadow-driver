@@ -49,7 +49,6 @@ export function ArcSpeedometer({ speedKmh, maxSpeed = 220, size = 120 }: ArcSpee
   const cx = viewSize / 2;
   const cy = viewSize / 2;
   const outerR = 42;
-  const innerR = 36;
   const tickOuterR = 44;
   const tickInnerR = 38;
   const tickLabelR = 32;
