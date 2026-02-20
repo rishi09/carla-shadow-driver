@@ -9,7 +9,7 @@ from typing import Optional, Tuple
 class FrameEncoder:
     """Encodes frames to JPEG for WebSocket transmission."""
 
-    def __init__(self, quality: int = 70, max_width: int = 1280, max_height: int = 720):
+    def __init__(self, quality: int = 50, max_width: int = 1280, max_height: int = 720):
         self.quality = quality
         self.max_width = max_width
         self.max_height = max_height

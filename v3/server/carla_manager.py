@@ -145,6 +145,28 @@ class RaceManager:
             if not self.player_car:
                 return False
 
+            # Tune player car physics for snappier, more arcade-like feel
+            try:
+                physics = self.player_car.get_physics_control()
+                # Reduce mass for quicker acceleration (default ~1800kg)
+                physics.mass = max(1200.0, physics.mass * 0.7)
+                # Increase torque curve for more power
+                if physics.torque_curve:
+                    boosted = []
+                    for point in physics.torque_curve:
+                        boosted.append(carla.Vector2D(point.x, point.y * 1.4))
+                    physics.torque_curve = boosted
+                # Stiffer suspension for less body roll
+                for wheel in physics.wheels:
+                    wheel.tire_friction = max(wheel.tire_friction, 3.5)
+                    wheel.damping_rate = wheel.damping_rate * 1.3
+                # Lower center of mass for stability
+                physics.center_of_mass = carla.Vector3D(0.0, 0.0, -0.3)
+                self.player_car.apply_physics_control(physics)
+                print(f"Physics tuned: mass={physics.mass:.0f}kg, tire_friction={physics.wheels[0].tire_friction:.1f}")
+            except Exception as e:
+                print(f"Physics tuning failed (non-critical): {e}")
+
             # Spawn AI car next to player (offset sideways for side-by-side start)
             ai_spawn = carla.Transform(
                 carla.Location(
@@ -366,11 +388,11 @@ class RaceManager:
 
         # --- Throttle ramping ---
         if keys.get('w', False):
-            # Ramp up fast (~150ms to full) for snappy acceleration
-            self._current_throttle = min(1.0, self._current_throttle + dt * 6.5)
+            # Near-instant throttle (~80ms to full) for arcade-like acceleration
+            self._current_throttle = min(1.0, self._current_throttle + dt * 12.0)
         else:
-            # Decay quickly (~100ms) so car responds to lift-off
-            self._current_throttle = max(0.0, self._current_throttle - dt * 10.0)
+            # Decay quickly (~70ms) so car responds to lift-off
+            self._current_throttle = max(0.0, self._current_throttle - dt * 14.0)
 
         # --- Brake ramping ---
         if keys.get('s', False):
