@@ -298,3 +298,15 @@ Format: `## [timestamp] Category: Short description`
 - **Rule**: When adding overlay components at the same corner, check z-index stacking. Use Tailwind spacing utilities to offset them.
 
 ---
+
+## [2026-02-19 10:00] Client-side steering prediction: speed-dependent CSS transforms
+
+- **Implemented**: `useSteeringPrediction.ts` hook applies immediate CSS transforms (rotateY + translateX for steering, rotateX for throttle/brake pitch) to the video canvas wrapper the instant the player presses A/D/W/S, before any server frame arrives.
+- **Speed-dependent scaling**: The rotation/shift magnitude is scaled by a factor that mirrors the server's speed-dependent steer limits (`carla_manager.py`). At low speed (<30 km/h, steer_limit=0.5), the client applies up to ~2.8 degrees of yaw rotation and ~18px lateral shift. At high speed (>150 km/h, steer_limit=0.10), the rotation drops to ~0.56 degrees and ~3.6px shift. The transitions between speed bands are linearly interpolated rather than stepped, avoiding visual pops when crossing thresholds.
+- **Why speed matters**: Without speed-dependent scaling, the prediction applies the same visual shift at 200 km/h as at 10 km/h. But the server barely turns the wheels at high speed (steer_limit=0.10), so the server frame would show almost no turn -- causing a jarring correction snap. By matching the server's steering authority curve, the prediction always looks proportional to the actual turn.
+- **Interpolation via rAF**: The yaw and pitch values are smoothly interpolated using exponential moving average in a `requestAnimationFrame` loop (attack rate 0.08, release rate 0.055 per frame). This prevents instant snapping when keys are pressed/released. Speed is read from a ref (not a dependency) to avoid re-mounting the rAF loop on every speed change.
+- **Perspective transform for depth**: Using `perspective(800px) rotateY(...)` instead of flat `rotate(...)` gives a subtle 3D "looking into the turn" effect rather than a flat image rotation. Combined with `translateX(...)`, it simulates the camera panning into the corner.
+- **Rule**: For client-side prediction overlays, always match the server's authority curves. The prediction's visual magnitude must be proportional to what the server will actually do -- otherwise the correction snap when the real frame arrives is MORE disorienting than the latency you're trying to mask.
+- **Rule**: Store rapidly-changing values (like speed) in refs, not effect dependencies. Putting `speedKmh` in the useEffect dependency array would tear down and restart the rAF loop on every speed update (60Hz), defeating the purpose of smooth animation.
+
+---

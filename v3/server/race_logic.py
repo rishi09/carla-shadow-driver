@@ -3,7 +3,278 @@ Race Logic - Checkpoints, lap times, positions, race state
 """
 import time
 import math
+import random
 from typing import List, Tuple, Dict, Optional
+
+
+class DriftDetector:
+    """Detects drifting by comparing vehicle heading vs velocity direction.
+
+    A drift occurs when:
+      - The angle between heading and velocity direction exceeds a threshold
+      - The car is moving fast enough (>30 km/h)
+      - Steering input is applied
+
+    Scoring:
+      drift_score = drift_angle_deg * speed_kmh * duration_seconds * chain_multiplier
+    """
+
+    MIN_SPEED_KMH = 30.0
+    MIN_DRIFT_ANGLE_DEG = 8.0   # Minimum angle to count as drifting
+    MAX_DRIFT_ANGLE_DEG = 90.0  # Cap angle contribution
+    CHAIN_TIMEOUT = 2.0          # Seconds between drifts to keep chain alive
+
+    def __init__(self):
+        self.is_drifting = False
+        self.drift_start_time: float = 0.0
+        self.current_drift_score: float = 0.0
+        self.current_drift_angle: float = 0.0
+        self.chain_multiplier: int = 1
+        self.last_drift_end_time: float = 0.0
+        self.total_drift_score: float = 0.0
+        self.best_single_drift: float = 0.0
+        self.drift_count: int = 0
+        self._pending_drift_end: Optional[Dict] = None
+
+    def update(self, heading_deg: float, velocity_x: float, velocity_y: float,
+               speed_kmh: float, steer: float) -> Optional[Dict]:
+        """Update drift state. Returns a drift event dict if state changed.
+
+        Args:
+            heading_deg: Vehicle yaw in degrees
+            velocity_x, velocity_y: World-space velocity components
+            speed_kmh: Current speed
+            steer: Current steering input [-1, 1]
+
+        Returns:
+            Dict with drift state info, or None if no change.
+        """
+        now = time.time()
+
+        # Calculate the angle between heading and velocity direction
+        if speed_kmh < self.MIN_SPEED_KMH:
+            drift_angle = 0.0
+        else:
+            vel_angle_deg = math.degrees(math.atan2(velocity_y, velocity_x))
+            # Compute smallest angle difference
+            angle_diff = heading_deg - vel_angle_deg
+            # Normalize to [-180, 180]
+            while angle_diff > 180:
+                angle_diff -= 360
+            while angle_diff < -180:
+                angle_diff += 360
+            drift_angle = abs(angle_diff)
+
+        # Check if currently drifting
+        is_now_drifting = (
+            drift_angle >= self.MIN_DRIFT_ANGLE_DEG
+            and speed_kmh >= self.MIN_SPEED_KMH
+            and abs(steer) > 0.05
+        )
+
+        result = None
+
+        if is_now_drifting and not self.is_drifting:
+            # Drift started
+            self.is_drifting = True
+            self.drift_start_time = now
+            self.current_drift_score = 0.0
+            self.current_drift_angle = drift_angle
+
+            # Check chain: if last drift ended recently, increase multiplier
+            if now - self.last_drift_end_time < self.CHAIN_TIMEOUT and self.last_drift_end_time > 0:
+                self.chain_multiplier = min(5, self.chain_multiplier + 1)
+            else:
+                self.chain_multiplier = 1
+
+            result = {
+                'event': 'drift_start',
+                'chain_multiplier': self.chain_multiplier,
+            }
+
+        elif is_now_drifting and self.is_drifting:
+            # Drift continuing - accumulate score
+            dt = 1.0 / 30.0  # Frame delta
+            capped_angle = min(drift_angle, self.MAX_DRIFT_ANGLE_DEG)
+            # Score per frame: angle * speed * dt * multiplier, scaled down
+            frame_score = (capped_angle * speed_kmh * dt * self.chain_multiplier) / 100.0
+            self.current_drift_score += frame_score
+            self.current_drift_angle = drift_angle
+
+            result = {
+                'event': 'drift_update',
+                'score': round(self.current_drift_score),
+                'angle': round(drift_angle, 1),
+                'chain_multiplier': self.chain_multiplier,
+                'duration': round(now - self.drift_start_time, 1),
+            }
+
+        elif not is_now_drifting and self.is_drifting:
+            # Drift ended
+            self.is_drifting = False
+            self.last_drift_end_time = now
+            self.drift_count += 1
+            final_score = round(self.current_drift_score)
+            self.total_drift_score += final_score
+            if final_score > self.best_single_drift:
+                self.best_single_drift = final_score
+
+            result = {
+                'event': 'drift_end',
+                'score': final_score,
+                'chain_multiplier': self.chain_multiplier,
+                'total_score': round(self.total_drift_score),
+            }
+            self.current_drift_score = 0.0
+
+        return result
+
+    def get_stats(self) -> Dict:
+        """Return drift statistics for post-race results."""
+        return {
+            'total_drift_score': round(self.total_drift_score),
+            'best_single_drift': round(self.best_single_drift),
+            'drift_count': self.drift_count,
+        }
+
+
+class RaceCommentary:
+    """Generates contextual commentary messages during a race.
+
+    Monitors race events and produces text commentary with appropriate
+    timing to avoid spamming the player.
+    """
+
+    COOLDOWN = 4.0  # Minimum seconds between messages
+
+    def __init__(self):
+        self._last_message_time: float = 0.0
+        self._pending_messages: List[Dict] = []
+        self._last_gap: Optional[float] = None
+        self._last_position: Optional[int] = None
+        self._start_notified = False
+        self._overtake_notified_at: float = 0.0
+        self._last_lap_notified: bool = False
+        self._collision_count_at_last_msg: int = 0
+        self._best_lap_notified_for: Optional[float] = None
+        self._close_finish_notified: bool = False
+
+    def _queue(self, text: str, category: str, priority: int = 0):
+        """Queue a commentary message. Higher priority = shown first."""
+        self._pending_messages.append({
+            'text': text,
+            'category': category,
+            'priority': priority,
+            'time': time.time(),
+        })
+        # Sort by priority descending
+        self._pending_messages.sort(key=lambda m: -m['priority'])
+
+    def update(self, race_state: 'RaceState', collision_count: int,
+               drift_score: float = 0, drift_event: Optional[Dict] = None) -> Optional[Dict]:
+        """Check race events and return a commentary message if appropriate.
+
+        Returns:
+            Dict with 'text' and 'category', or None.
+        """
+        now = time.time()
+
+        # Don't send messages during countdown
+        if race_state.status != "racing":
+            return None
+
+        gap = race_state.get_gap_seconds()
+        position = race_state.get_position()
+        player_pos = position.get('player', 1)
+
+        # --- Race start ---
+        if not self._start_notified and race_state.race_start_time:
+            elapsed = now - race_state.race_start_time
+            if elapsed > 1.5 and elapsed < 5.0:
+                self._start_notified = True
+                if gap is not None and gap > 0.5:
+                    self._queue("Great start! You're pulling ahead!", 'positive', 3)
+                elif gap is not None and gap < -0.5:
+                    self._queue("The AI got the better launch!", 'warning', 3)
+                else:
+                    self._queue("Side by side off the line!", 'info', 3)
+
+        # --- Position change (overtake) ---
+        if self._last_position is not None and player_pos != self._last_position:
+            if now - self._overtake_notified_at > 8.0:
+                self._overtake_notified_at = now
+                if player_pos < self._last_position:
+                    self._queue("Overtake! You take the lead!", 'positive', 5)
+                else:
+                    self._queue("The AI takes the lead!", 'warning', 5)
+        self._last_position = player_pos
+
+        # --- Gap commentary ---
+        if gap is not None and self._last_gap is not None:
+            # AI closing in
+            if self._last_gap > 2.0 and gap < 1.5 and gap > 0:
+                self._queue("The AI is closing in...", 'warning', 2)
+            # Player pulling away
+            elif self._last_gap < 1.5 and gap > 3.0:
+                self._queue("You're building a gap! Keep pushing!", 'positive', 2)
+            # Massive lead
+            elif gap > 8.0 and self._last_gap < 8.0:
+                self._queue("Dominant lead! The AI can't keep up!", 'positive', 1)
+        self._last_gap = gap
+
+        # --- Collision ---
+        if collision_count > self._collision_count_at_last_msg:
+            new_collisions = collision_count - self._collision_count_at_last_msg
+            self._collision_count_at_last_msg = collision_count
+            if new_collisions >= 1:
+                msgs = [
+                    "Impact! Keep it clean!",
+                    "Ouch! That's going to cost you!",
+                    "Big hit! Try to stay on track!",
+                    "Contact! Watch the walls!",
+                ]
+                self._queue(random.choice(msgs), 'collision', 4)
+
+        # --- Best lap ---
+        if race_state.player_best_lap is not None:
+            if self._best_lap_notified_for != race_state.player_best_lap:
+                if self._best_lap_notified_for is not None:
+                    # New personal best (not the first lap)
+                    self._queue("New personal best lap!", 'positive', 6)
+                self._best_lap_notified_for = race_state.player_best_lap
+
+        # --- Final lap ---
+        if (race_state.player_lap == race_state.total_laps - 1
+                and not self._last_lap_notified):
+            self._last_lap_notified = True
+            self._queue("Final lap! Give it everything!", 'critical', 7)
+
+        # --- Drift commentary ---
+        if drift_event and drift_event.get('event') == 'drift_end':
+            score = drift_event.get('score', 0)
+            chain = drift_event.get('chain_multiplier', 1)
+            if score > 500:
+                self._queue(f"INCREDIBLE drift! {score} points!", 'drift', 5)
+            elif score > 200:
+                if chain > 1:
+                    self._queue(f"Drift chain x{chain}! {score} points!", 'drift', 4)
+                else:
+                    self._queue(f"Nice drift! {score} points!", 'drift', 3)
+
+        # --- Close finish ---
+        if (race_state.player_lap >= race_state.total_laps - 1
+                and gap is not None and abs(gap) < 2.0
+                and not self._close_finish_notified):
+            self._close_finish_notified = True
+            self._queue("Photo finish! It's going to be close!", 'critical', 8)
+
+        # --- Emit one message if cooldown has passed ---
+        if self._pending_messages and now - self._last_message_time >= self.COOLDOWN:
+            msg = self._pending_messages.pop(0)
+            self._last_message_time = now
+            return {'text': msg['text'], 'category': msg['category']}
+
+        return None
 
 
 class RaceState:
@@ -68,6 +339,12 @@ class RaceState:
         self.race_start_time: Optional[float] = None
         self.countdown_start: Optional[float] = None
         self.winner: Optional[str] = None
+
+        # Drift detection
+        self.drift_detector = DriftDetector()
+
+        # Commentary system
+        self.commentary = RaceCommentary()
 
     def start_countdown(self):
         """Begin 3-second countdown."""
@@ -163,14 +440,40 @@ class RaceState:
         """Increment the player collision counter."""
         self.player_collisions_count += 1
 
+    def update_drift(self, heading_deg: float, velocity_x: float, velocity_y: float,
+                      speed_kmh: float, steer: float) -> Optional[Dict]:
+        """Update drift detection with current vehicle state.
+
+        Returns a drift event dict if the drift state changed, or None.
+        """
+        return self.drift_detector.update(heading_deg, velocity_x, velocity_y,
+                                          speed_kmh, steer)
+
+    def get_commentary(self, drift_event: Optional[Dict] = None) -> Optional[Dict]:
+        """Get the next commentary message based on race events.
+
+        Returns:
+            Dict with 'text' and 'category', or None.
+        """
+        return self.commentary.update(
+            self,
+            self.player_collisions_count,
+            drift_score=self.drift_detector.total_drift_score,
+            drift_event=drift_event,
+        )
+
     def get_stats(self) -> Dict:
         """Return accumulated race statistics."""
+        drift_stats = self.drift_detector.get_stats()
         return {
             'player_max_speed': round(self.player_max_speed, 1),
             'ai_max_speed': round(self.ai_max_speed, 1),
             'player_distance': round(self.player_total_distance, 1),
             'ai_distance': round(self.ai_total_distance, 1),
             'player_collisions': self.player_collisions_count,
+            'total_drift_score': drift_stats['total_drift_score'],
+            'best_single_drift': drift_stats['best_single_drift'],
+            'drift_count': drift_stats['drift_count'],
         }
 
     def update_player(self, x: float, y: float, speed_kmh: float):

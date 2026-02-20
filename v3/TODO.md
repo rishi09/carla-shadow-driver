@@ -25,7 +25,7 @@ The perceived lag stack when turning:
 - [ ] **Resolution downscale at speed**: At 200+ km/h you can't see detail anyway — drop to 960x540 at high speed, full res when slow/stopped.
 
 ### Client-side prediction (biggest perceived improvement)
-- [ ] **Steering prediction overlay**: When A/D pressed, immediately rotate the canvas by a few degrees in the steering direction BEFORE the next server frame arrives. Undo rotation when frame arrives. This masks ~60-100ms of latency.
+- [x] **Steering prediction overlay**: When A/D pressed, immediately rotate the canvas by a few degrees in the steering direction BEFORE the next server frame arrives. Speed-dependent: matches server's steer limits (2.8deg at <30km/h, 0.56deg at >150km/h). Smooth rAF interpolation with attack/release curves. Also includes pitch tilt on W/S and lateral translateX shift.
 - [ ] **Camera motion extrapolation**: Use current velocity vector to shift the camera view by `velocity * dt` between server frames. Smooth interpolation, corrected on next frame.
 - [ ] **Input echo in HUD**: Steering/throttle/brake bars already update instantly from local input — consider adding a subtle visual indicator (steering wheel icon, wheel turn animation) that responds instantly to input.
 
