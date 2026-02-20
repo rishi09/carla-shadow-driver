@@ -119,8 +119,9 @@ class RaceServer:
                     laps = data.get('laps', 3)
                     weather = data.get('weather', 'clear')
                     model = data.get('model', 'carla_pilotnet')
+                    player_car = data.get('player_car')
                     self.current_model_name = model
-                    await self._start_race(track, laps, weather, model)
+                    await self._start_race(track, laps, weather, model, player_car=player_car)
 
                 elif msg_type == 'ping':
                     await websocket.send(json.dumps({
@@ -257,11 +258,11 @@ class RaceServer:
         'alpamayo': 'hard',
     }
 
-    async def _start_race(self, track: str, laps: int, weather: str = 'clear', model: str = 'carla_pilotnet'):
+    async def _start_race(self, track: str, laps: int, weather: str = 'clear', model: str = 'carla_pilotnet', player_car: str = None):
         """Initialize and start a race."""
         difficulty = self.MODEL_DIFFICULTY_MAP.get(model, 'medium')
         self.difficulty = difficulty
-        print(f"Starting race: track={track}, laps={laps}, weather={weather}, model={model}, difficulty={difficulty}")
+        print(f"Starting race: track={track}, laps={laps}, weather={weather}, model={model}, difficulty={difficulty}, player_car={player_car}")
 
         # Stop any existing race loop first
         await self._reset_race()
@@ -282,7 +283,7 @@ class RaceServer:
                 }))
             return
 
-        if not self.carla.setup_race(track):
+        if not self.carla.setup_race(track, player_car=player_car):
             if self.ws_client:
                 await self.ws_client.send(json.dumps({
                     'type': 'error',
@@ -417,20 +418,26 @@ class RaceServer:
                         ai_telem['x'], ai_telem['y'], ai_telem['speed_kmh']
                     )
 
-                    # Race Director: dynamically adjust AI speed
+                    # Race Director: dynamically adjust AI speed (distance-based rubber banding)
                     if self.race_director and self.carla._ai_autopilot:
                         gap = self.race_state.get_gap_seconds()
                         progress = self.race_director.get_race_progress(self.race_state)
-                        speed_adj = self.race_director.get_speed_adjustment(gap, progress, time.time())
+                        speed_adj = self.race_director.get_speed_adjustment(
+                            gap, progress, time.time(), race_state=self.race_state
+                        )
                         if abs(speed_adj) > 0.5:  # Only apply if meaningful
                             self.carla.adjust_ai_speed(speed_adj)
 
                     # AI Mistakes: periodically slow the AI to create overtaking opportunities
                     if self.mistake_generator and self.carla._ai_autopilot:
                         gap = self.race_state.get_gap_seconds()
+                        was_active = self.mistake_generator._active_mistake is not None
                         mistake = self.mistake_generator.update(time.time(), gap)
                         if mistake:
                             self.carla.apply_ai_mistake(mistake)
+                        elif was_active and self.mistake_generator._active_mistake is None:
+                            # Mistake just ended this frame: reset AI speed to base
+                            self.carla.adjust_ai_speed(0.0)
 
                     # 5. Record player position for ghost replay
                     lap_time = self.race_state.get_current_lap_time("player")

@@ -95,7 +95,7 @@ class RaceManager:
             print(f"Failed to connect to CARLA: {e}")
             return False
 
-    def setup_race(self, track: str = "Town03") -> bool:
+    def setup_race(self, track: str = "Town03", player_car: str = None) -> bool:
         """Set up the race: load map, spawn cars, attach cameras."""
         if not self.world:
             print("Not connected to CARLA")
@@ -134,10 +134,13 @@ class RaceManager:
                 print("Not enough spawn points")
                 return False
 
+            # Determine player vehicle model: use client-provided car or config default
+            player_model = player_car or self.config['vehicle'].get('player_model', 'vehicle.tesla.model3')
+
             # Spawn player car
             self.player_car = self._spawn_vehicle(
                 spawn_points[0],
-                self.config['vehicle'].get('player_model', 'vehicle.tesla.model3')
+                player_model
             )
             if not self.player_car:
                 return False
@@ -445,7 +448,7 @@ class RaceManager:
         Difficulty levels adjust autopilot aggressiveness:
           - easy:   Slow and cautious, follows some traffic rules
           - medium: 20% over speed limit, ignores lights, auto lane changes
-          - hard:   50% over speed limit, ignores all rules, tailgates aggressively
+          - hard:   55% over speed limit, ignores all rules, aggressive lane changes
         """
         if not self.ai_car or not self.client:
             return
@@ -466,14 +469,21 @@ class RaceManager:
                 tm.distance_to_leading_vehicle(self.ai_car, 5.0)
                 tm.auto_lane_change(self.ai_car, False)
             elif difficulty == 'hard':
-                # Maximum aggression: 50% over speed limit, ignores everything
-                speed_diff = -50.0  # 50% faster than limit
+                # Maximum aggression: 55% over speed limit, ignores everything
+                speed_diff = -55.0  # 55% faster than limit
                 tm.ignore_lights_percentage(self.ai_car, 100.0)
                 tm.ignore_signs_percentage(self.ai_car, 100.0)
                 tm.ignore_walkers_percentage(self.ai_car, 100.0)
                 tm.vehicle_percentage_speed_difference(self.ai_car, speed_diff)
-                tm.distance_to_leading_vehicle(self.ai_car, 0.5)
+                tm.distance_to_leading_vehicle(self.ai_car, 1.0)
                 tm.auto_lane_change(self.ai_car, True)
+                # Force lane changes more aggressively by setting
+                # a very short keep-right time (percentage-based)
+                try:
+                    tm.random_left_lanechange_percentage(self.ai_car, 50.0)
+                    tm.random_right_lanechange_percentage(self.ai_car, 50.0)
+                except Exception:
+                    pass  # Older CARLA versions may not have these methods
             else:
                 # Medium (default): 20% over speed limit, ignores lights, auto lane changes
                 speed_diff = -20.0  # 20% faster than limit
@@ -578,21 +588,28 @@ class RaceManager:
 
         For autopilot-driven AI, we temporarily increase the speed_difference
         to simulate the AI slowing down (braking late, hesitating, etc.)
+
+        The mistake dict uses 'speed_penalty' (percentage points added to
+        speed_difference, making the AI slower) rather than a multiplier.
         """
         if not self.ai_car or not self.client or not self._ai_autopilot:
             return
         try:
             tm = self.client.get_trafficmanager()
             base = getattr(self, '_base_speed_difference', -20)
-            # Speed reduction: multiply the "over-speed" by the reduction factor
-            # e.g., base=-40 (40% over), reduction=0.5 -> effective=-20 (20% over)
-            speed_factor = mistake.get('speed_reduction', 1.0)
-            if base < 0:
-                # AI is driving over the speed limit
-                adjusted = base * speed_factor  # e.g., -40 * 0.6 = -24 (less over limit)
-            else:
-                # AI is driving under the speed limit
-                adjusted = base + (1 - speed_factor) * 20  # Slow down more
+            # speed_penalty is in percentage points: e.g., 25 means +25% to speed_difference
+            # For base=-40 (40% over limit), adding 25 -> -15 (only 15% over limit)
+            penalty = mistake.get('speed_penalty', 0.0)
+            # Also support legacy 'speed_reduction' format for backwards compatibility
+            if penalty == 0.0 and 'speed_reduction' in mistake:
+                speed_factor = mistake['speed_reduction']
+                if base < 0:
+                    penalty = abs(base) * (1 - speed_factor)
+                else:
+                    penalty = (1 - speed_factor) * 20
+            adjusted = base + penalty
+            # Clamp: don't let AI go slower than 20% under the speed limit
+            adjusted = min(adjusted, 20.0)
             tm.vehicle_percentage_speed_difference(self.ai_car, adjusted)
         except Exception:
             pass

@@ -372,71 +372,125 @@ class RaceState:
 
 
 class RaceDirector:
-    """Monitors race gap and dynamically adjusts AI speed to keep races close."""
+    """Monitors race gap and dynamically adjusts AI speed to keep races close.
+
+    Uses both distance-based rubber banding (primary, based on 50m threshold)
+    and time-based gap tightening in the final stretch for drama.
+    """
+
+    # Distance threshold in meters for rubber banding
+    RUBBER_BAND_DISTANCE = 50.0
 
     def __init__(self, difficulty: str = 'medium'):
         self.difficulty = difficulty
 
-        # Target gap windows in seconds (positive = player ahead)
-        self.target_gaps = {
-            'easy':   {'min': -3.0, 'max': 5.0},   # AI can be 3s behind to 5s ahead
-            'medium': {'min': -2.0, 'max': 3.0},
-            'hard':   {'min': -1.0, 'max': 2.0},
+        # How strongly rubber banding affects AI speed per difficulty.
+        # Higher = stronger pull back toward the player.
+        # The value is the max speed_difference adjustment in percentage points.
+        self._rubber_band_strength = {
+            'easy':   25.0,   # Strong: AI slows a lot when ahead, speeds up a lot when behind
+            'medium': 12.0,   # Moderate
+            'hard':    5.0,   # Minimal: AI barely adjusts
         }
 
-        # Max speed adjustment percentage
-        self.max_adjustment = {
-            'easy': 0.15,
-            'medium': 0.10,
-            'hard': 0.05,
+        # How quickly the adjustment ramps per meter beyond the threshold.
+        # Units: percentage points of speed_difference per meter of excess distance.
+        self._ramp_per_meter = {
+            'easy':   0.5,    # Reaches max adjustment at ~50m beyond threshold
+            'medium': 0.3,
+            'hard':   0.15,
         }
 
         self._smoothed_modifier = 0.0  # Smoothed speed modifier (0 = no change)
-        self._update_interval = 2.0    # Update every 2 seconds
+        self._update_interval = 2.5    # Update every 2.5 seconds (TM calls are expensive)
         self._last_update = 0.0
 
-    def get_speed_adjustment(self, gap_seconds: float, race_progress: float, current_time: float) -> float:
+    def _compute_distance(self, race_state: 'RaceState') -> float:
+        """Compute Euclidean distance between player and AI cars."""
+        dx = race_state.player_x - race_state.ai_x
+        dy = race_state.player_y - race_state.ai_y
+        return math.sqrt(dx * dx + dy * dy)
+
+    def _who_is_ahead(self, race_state: 'RaceState') -> str:
+        """Return 'player' or 'ai' based on checkpoint/lap progress."""
+        player_progress = (race_state.player_lap * len(race_state.checkpoints)
+                           + (race_state.player_checkpoint % len(race_state.checkpoints)))
+        ai_progress = (race_state.ai_lap * len(race_state.checkpoints)
+                       + (race_state.ai_checkpoint % len(race_state.checkpoints)))
+        return 'player' if player_progress >= ai_progress else 'ai'
+
+    def get_speed_adjustment(self, gap_seconds: float, race_progress: float,
+                             current_time: float,
+                             race_state: 'RaceState' = None) -> float:
         """Returns speed difference adjustment for the AI car.
 
+        Uses distance-based rubber banding when race_state is provided.
+        Falls back to time-based gap when race_state is None.
+
         Args:
-            gap_seconds: positive = player ahead, negative = AI ahead
+            gap_seconds: positive = player ahead, negative = AI ahead (used as fallback)
             race_progress: 0.0 to 1.0
             current_time: current time.time()
+            race_state: RaceState for distance-based rubber banding
 
         Returns:
-            Adjustment to add to the base speed_difference (e.g., +5 means 5% slower, -5 means 5% faster)
+            Adjustment to add to the base speed_difference
+            (positive = AI slower, negative = AI faster)
         """
         # Only update every _update_interval seconds for smooth changes
         if current_time - self._last_update < self._update_interval:
             return self._smoothed_modifier
         self._last_update = current_time
 
-        target = dict(self.target_gaps.get(self.difficulty, self.target_gaps['medium']))
-        max_adj = self.max_adjustment.get(self.difficulty, 0.10)
+        max_adj = self._rubber_band_strength.get(self.difficulty, 12.0)
+        ramp = self._ramp_per_meter.get(self.difficulty, 0.3)
 
-        # Tighten gap target in final 25% of race for drama
-        if race_progress > 0.75:
-            intensity = (race_progress - 0.75) / 0.25
-            target['min'] *= (1.0 - intensity * 0.4)
-            target['max'] *= (1.0 - intensity * 0.4)
+        # --- Distance-based rubber banding (primary) ---
+        if race_state is not None:
+            distance = self._compute_distance(race_state)
+            leader = self._who_is_ahead(race_state)
 
-        if gap_seconds is None:
-            target_modifier = 0.0
-        elif gap_seconds > target['max']:
-            # Player too far ahead - speed up AI (make speed_difference more negative)
-            excess = gap_seconds - target['max']
-            raw = min(excess * 0.03, max_adj)  # 3% per second of excess
-            target_modifier = -raw * 100  # Convert to speed_difference scale (e.g., -10 = 10% faster)
-        elif gap_seconds < target['min']:
-            # AI too far ahead - slow down AI (make speed_difference more positive)
-            excess = target['min'] - gap_seconds
-            raw = min(excess * 0.03, max_adj)
-            target_modifier = raw * 100
+            if distance > self.RUBBER_BAND_DISTANCE:
+                excess = distance - self.RUBBER_BAND_DISTANCE
+                raw_adj = min(excess * ramp, max_adj)
+
+                if leader == 'ai':
+                    # AI is ahead and far away: slow it down
+                    target_modifier = raw_adj
+                else:
+                    # Player is ahead and far away: speed up AI
+                    target_modifier = -raw_adj
+            else:
+                # Within 50m: use base difficulty setting (no adjustment)
+                target_modifier = 0.0
         else:
-            target_modifier = 0.0
+            # Fallback: time-based gap (legacy behavior)
+            if gap_seconds is None:
+                target_modifier = 0.0
+            elif gap_seconds > 3.0:
+                # Player far ahead: speed up AI
+                excess = gap_seconds - 3.0
+                raw = min(excess * 3.0, max_adj)
+                target_modifier = -raw
+            elif gap_seconds < -3.0:
+                # AI far ahead: slow it down
+                excess = abs(gap_seconds) - 3.0
+                raw = min(excess * 3.0, max_adj)
+                target_modifier = raw
+            else:
+                target_modifier = 0.0
 
-        # Smooth the adjustment
-        self._smoothed_modifier += (target_modifier - self._smoothed_modifier) * 0.1
+        # Tighten rubber banding in final 25% of race for drama
+        if race_progress > 0.75:
+            intensity = (race_progress - 0.75) / 0.25  # 0..1
+            # Amplify the existing adjustment by up to 40%
+            target_modifier *= (1.0 + intensity * 0.4)
+            # Clamp back to max
+            target_modifier = max(-max_adj, min(max_adj, target_modifier))
+
+        # Smooth the adjustment (exponential moving average)
+        # ~30% blend per update means it takes ~3 updates (~7.5s) to converge
+        self._smoothed_modifier += (target_modifier - self._smoothed_modifier) * 0.3
 
         return self._smoothed_modifier
 
@@ -453,15 +507,49 @@ class RaceDirector:
 
 
 class AIMistakeGenerator:
-    """Periodically introduces controlled mistakes into AI driving."""
+    """Periodically introduces controlled mistakes into AI driving.
+
+    On Easy difficulty, the AI makes frequent, noticeable mistakes:
+    - Every 10-15 seconds, temporarily increases speed_difference by 20-30%
+      for 2-3 seconds, simulating late braking or hesitation.
+    - Intervals are randomized so mistakes feel natural.
+
+    On Medium, mistakes are less frequent and smaller.
+    On Hard, mistakes are rare and barely noticeable.
+    """
 
     def __init__(self, difficulty: str = 'medium'):
         self.difficulty = difficulty
+
+        # Base interval between mistakes (seconds)
         self._base_intervals = {
-            'easy': 8.0,
-            'medium': 25.0,
-            'hard': 50.0,
+            'easy': 12.0,    # Every 10-15s (with jitter)
+            'medium': 25.0,  # Every ~20-30s
+            'hard': 60.0,    # Rarely
         }
+
+        # Mistake definitions per difficulty
+        self._mistake_pools = {
+            'easy': [
+                # Late braking: significant slowdown, simulates braking too early before turns
+                {'speed_penalty': 25.0, 'duration': 2.5, 'type': 'late_brake'},
+                {'speed_penalty': 30.0, 'duration': 2.0, 'type': 'late_brake'},
+                # Hesitation: moderate slowdown, simulates indecision
+                {'speed_penalty': 20.0, 'duration': 3.0, 'type': 'hesitation'},
+                # Wide exit: slight slowdown for longer duration
+                {'speed_penalty': 22.0, 'duration': 2.8, 'type': 'wide_exit'},
+            ],
+            'medium': [
+                {'speed_penalty': 12.0, 'duration': 1.5, 'type': 'late_brake'},
+                {'speed_penalty': 15.0, 'duration': 1.2, 'type': 'hesitation'},
+                {'speed_penalty': 10.0, 'duration': 2.0, 'type': 'wide_exit'},
+            ],
+            'hard': [
+                {'speed_penalty': 5.0, 'duration': 1.0, 'type': 'minor_wobble'},
+                {'speed_penalty': 8.0, 'duration': 0.8, 'type': 'late_brake'},
+            ],
+        }
+
         self._last_mistake_time = 0.0
         self._active_mistake = None
         self._mistake_end_time = 0.0
@@ -469,7 +557,10 @@ class AIMistakeGenerator:
     def update(self, current_time: float, gap_seconds: float) -> dict | None:
         """Check if AI should make a mistake. Returns mistake dict or None.
 
-        Returns dict with keys: 'speed_reduction' (0-1 multiplier), 'steering_offset' (added to steering), 'duration' (seconds)
+        Returns dict with keys:
+            'speed_penalty': percentage points to add to speed_difference (positive = slower)
+            'duration': seconds the mistake lasts
+            'type': string describing the mistake
         """
         import random
 
@@ -478,6 +569,7 @@ class AIMistakeGenerator:
             return self._active_mistake
         elif self._active_mistake and current_time >= self._mistake_end_time:
             self._active_mistake = None
+            return None  # Signal that mistake just ended (caller resets speed)
 
         # Check if it's time for a new mistake
         interval = self._base_intervals.get(self.difficulty, 25.0)
@@ -485,27 +577,25 @@ class AIMistakeGenerator:
         # More mistakes when AI is ahead (gives player catch-up chances)
         if gap_seconds is not None:
             if gap_seconds < -2.0:
-                interval *= 0.5  # Twice as frequent
+                interval *= 0.6   # More frequent when AI is leading
             elif gap_seconds > 3.0:
-                interval *= 2.0  # Half as frequent
+                interval *= 1.8   # Less frequent when player is leading
 
-        # Add randomness (+-30%)
-        jittered_interval = interval * (0.7 + random.random() * 0.6)
+        # Add randomness: +/- 25% for Easy (10-15s range), +/- 30% for others
+        if self.difficulty == 'easy':
+            jittered_interval = interval * (0.83 + random.random() * 0.42)  # ~10-15s
+        else:
+            jittered_interval = interval * (0.7 + random.random() * 0.6)
 
         if current_time - self._last_mistake_time < jittered_interval:
             return None
 
-        # Generate a mistake
+        # Generate a mistake from the difficulty-specific pool
         self._last_mistake_time = current_time
 
-        mistakes = [
-            {'speed_reduction': 0.6, 'steering_offset': 0.0, 'duration': 1.5, 'type': 'late_brake'},
-            {'speed_reduction': 0.8, 'steering_offset': 0.12, 'duration': 2.0, 'type': 'wide_exit'},
-            {'speed_reduction': 0.5, 'steering_offset': 0.0, 'duration': 1.0, 'type': 'hesitation'},
-            {'speed_reduction': 0.9, 'steering_offset': -0.08, 'duration': 0.8, 'type': 'overcorrect'},
-        ]
+        pool = self._mistake_pools.get(self.difficulty, self._mistake_pools['medium'])
+        mistake = dict(random.choice(pool))  # Copy so we don't mutate the template
 
-        mistake = random.choice(mistakes)
         self._active_mistake = mistake
         self._mistake_end_time = current_time + mistake['duration']
 
