@@ -655,6 +655,67 @@ export function RaceSetup({ onStartRace, onBack, onStartDailyChallenge, quicksta
           </div>
         )}
 
+        {/* Twitch Plays Mode */}
+        {onSetTwitchChannel && (
+          <div className="mb-6">
+            <button
+              onClick={() => onSetTwitchChannel(twitchChannel ? null : '')}
+              className={`w-full flex items-center gap-3 py-3 px-4 rounded-lg border text-left transition-all ${
+                twitchChannel != null
+                  ? 'bg-[#9146ff]/10 border-[#9146ff]/40'
+                  : 'bg-black/60 border-white/10 hover:border-white/20'
+              }`}
+            >
+              {/* Twitch icon */}
+              <div className="shrink-0">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill={twitchChannel != null ? '#9146ff' : 'rgba(255,255,255,0.4)'}>
+                  <path d="M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714z" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <span className={`text-sm font-medium ${twitchChannel != null ? 'text-[#9146ff]' : 'text-white'}`}>
+                    Twitch Plays
+                  </span>
+                  {twitchChannel != null && (
+                    <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded border border-[#9146ff]/40 bg-[#9146ff]/20 text-[#9146ff]">
+                      ON
+                    </span>
+                  )}
+                </div>
+                <p className="text-white/40 text-xs mt-0.5">
+                  Let Twitch chat vote on controls every 500ms. The most popular command drives the car!
+                </p>
+              </div>
+              {/* Toggle indicator */}
+              <div className={`w-10 h-5 rounded-full relative transition-colors ${twitchChannel != null ? 'bg-[#9146ff]/40' : 'bg-white/10'}`}>
+                <div
+                  className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${
+                    twitchChannel != null ? 'left-[22px] bg-[#9146ff]' : 'left-0.5 bg-white/40'
+                  }`}
+                />
+              </div>
+            </button>
+            {/* Channel input (shown when Twitch mode is enabled) */}
+            {twitchChannel != null && (
+              <div className="mt-2 pl-1">
+                <input
+                  type="text"
+                  value={twitchChannel}
+                  onChange={(e) => onSetTwitchChannel(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
+                  placeholder="Enter Twitch channel name"
+                  maxLength={25}
+                  className="w-full bg-black/60 backdrop-blur-sm border border-[#9146ff]/30 rounded-lg px-4 py-2.5 text-white text-sm placeholder-white/30 focus:outline-none focus:border-[#9146ff]/60 transition-colors"
+                  style={{ caretColor: '#9146ff' }}
+                />
+                <p className="text-white/30 text-[10px] mt-1 pl-1">
+                  Viewers type LEFT, RIGHT, GAS, BRAKE, DRIFT, or BOOST in chat
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Advanced Settings - collapsible */}
         <div className="mb-6">
           <button

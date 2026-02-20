@@ -1847,6 +1847,8 @@ export function Race() {
           ambientLightSupported={ambientLight.isSupported}
           ambientLightEnabled={ambientLight.isActive}
           onToggleAmbientLight={(on) => on ? ambientLight.enable() : ambientLight.disable()}
+          twitchChannel={twitchChannel}
+          onSetTwitchChannel={setTwitchChannel}
         />
       )}
 
