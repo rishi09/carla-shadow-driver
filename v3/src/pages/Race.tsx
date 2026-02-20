@@ -525,6 +525,11 @@ export function Race() {
     };
   }, [view, gpu.sendControls, gpu.sendRespawn, gpu.sendRestartRace, gpu.sendCameraMode, gpu.sendPause, gpu.raceState?.race_status, photoModeActive, gamepad.connected, gamepad.steering, gamepad.throttle, gamepad.brake, gamepad.handbrake]);
 
+  // --- Dismiss first-time overlay (stable ref to avoid re-render thrashing) ---
+  const dismissFirstTimeOverlay = useCallback(() => {
+    setShowFirstTimeOverlay(false);
+  }, []);
+
   // --- Photo Mode exit handler ---
   const handleExitPhotoMode = useCallback(() => {
     setPhotoModeActive(false);
@@ -1016,7 +1021,7 @@ export function Race() {
           {/* First-time player overlay: full controls guide, dismiss with any key */}
           <FirstTimeOverlay
             visible={showFirstTimeOverlay}
-            onDismiss={() => setShowFirstTimeOverlay(false)}
+            onDismiss={dismissFirstTimeOverlay}
           />
         </div>
       )}
