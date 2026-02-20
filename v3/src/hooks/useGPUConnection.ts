@@ -173,7 +173,6 @@ export function useGPUConnection(): UseGPUConnectionReturn {
   const frameTimestampsRef = useRef<number[]>([]); // recent frame arrival timestamps (performance.now)
   const frameIntervalsRef = useRef<number[]>([]); // intervals between consecutive frames (ms)
   const networkQualityIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const lastPingTimestampRef = useRef<number | null>(null); // for dedicated ABR ping/pong RTT
   const lastRttRef = useRef<number>(0); // most recent RTT measurement (ms)
   const framesExpectedRef = useRef<number>(0); // frames expected since last report
   const framesReceivedRef = useRef<number>(0); // frames received since last report
