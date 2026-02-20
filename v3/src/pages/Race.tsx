@@ -256,6 +256,11 @@ export function Race() {
     const shakeDuration = 200 + Math.min(300, magnitude * 20);
     triggerScreenShake(magnitude, shakeDuration);
 
+    // Haptic feedback on mobile (Vibration API)
+    if (navigator.vibrate) {
+      navigator.vibrate(Math.min(100, Math.round(magnitude * 7)));
+    }
+
     return () => {
       if (shakeRafRef.current !== null) {
         cancelAnimationFrame(shakeRafRef.current);

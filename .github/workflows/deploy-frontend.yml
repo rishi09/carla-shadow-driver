@@ -1,0 +1,49 @@
+name: Deploy Frontend to Vercel
+
+on:
+  push:
+    branches: [v3]
+    paths:
+      - 'v3/src/**'
+      - 'v3/public/**'
+      - 'v3/package.json'
+      - 'v3/vite.config.ts'
+      - 'v3/tsconfig.json'
+      - 'v3/tailwind.config.*'
+      - 'v3/postcss.config.*'
+      - 'v3/index.html'
+      - 'v3/vercel.json'
+      - 'v3/api/**'
+
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: v3/package-lock.json
+
+      - name: Install dependencies
+        working-directory: v3
+        run: npm ci
+
+      - name: Type check
+        working-directory: v3
+        run: npx tsc --noEmit
+
+      - name: Build
+        working-directory: v3
+        run: npx vite build
+
+      - name: Deploy to Vercel
+        working-directory: v3
+        run: npx vercel deploy --prod --token=${{ secrets.VERCEL_TOKEN }}
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
