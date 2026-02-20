@@ -28,7 +28,7 @@ The perceived lag stack when turning:
 ### Client-side prediction (biggest perceived improvement)
 - [x] **Steering prediction overlay**: When A/D pressed, immediately rotate the canvas by a few degrees in the steering direction BEFORE the next server frame arrives. Speed-dependent: matches server's steer limits (2.8deg at <30km/h, 0.56deg at >150km/h). Smooth rAF interpolation with attack/release curves. Also includes pitch tilt on W/S and lateral translateX shift.
 - [x] **Camera motion extrapolation**: `useFrameExtrapolation.ts` applies subtle CSS translateX/Y between server frames based on steer and speed. Clamps to ±5px, max 50ms extrapolation, smooth 30ms reset on new frame arrival.
-- [ ] **Input echo in HUD**: Steering/throttle/brake bars already update instantly from local input — consider adding a subtle visual indicator (steering wheel icon, wheel turn animation) that responds instantly to input.
+- [x] **Input echo in HUD**: Steering/throttle/brake bars already update instantly from local input — consider adding a subtle visual indicator (steering wheel icon, wheel turn animation) that responds instantly to input.
 
 ### WebRTC (Phase 2-4 from original plan)
 - [ ] Test with Vast.ai "Direct" network mode (UDP ports 10000-10010 exposed)
@@ -119,8 +119,8 @@ Learnings from Forza Horizon 5, Mario Kart, Trackmania, Slow Roads, agar.io.
 - [x] Simple leaderboard (per track, stored in localStorage) -- LeaderboardPanel.tsx shows records per track/lap combo
 
 ### Browser Advantage
-- [ ] Minimize time from URL click to gameplay (target: <5 seconds for returning players)
-- [ ] Show something exciting during GPU provisioning wait (replays, leaderboards, tips)
+- [x] Minimize time from URL click to gameplay (target: <5 seconds for returning players)
+- [x] Show something exciting during GPU provisioning wait (replays, leaderboards, tips)
 - [x] Make the `?ws=` URL shareable -- post-race "Share this race" button copies URL with settings
 
 ---
@@ -139,7 +139,7 @@ Learnings from Forza Horizon 5, Mario Kart, Trackmania, Slow Roads, agar.io.
 - [ ] **Auto-provisioning e2e test**: Test the full Play Game → Vast.ai provision → callback → tunnel → connect flow
 - [ ] **Instance cost tracking**: Log GPU cost per session, alert if spending > $X/day
 - [x] **Auto-shutdown**: `AutoShutdownManager` in race_server.py — 10-minute idle timer, logs countdown every minute, self-destroys via Vast.ai API. VASTAI_API_KEY passed from start.ts to container env.
-- [ ] **Deploy script improvements**: deploy.sh should also start CARLA if not running
+- [x] **Deploy script improvements**: deploy.sh should also start CARLA if not running
 - [ ] **Health monitoring**: Endpoint that returns CARLA status, GPU temp, VRAM usage, active connections
 
 ---

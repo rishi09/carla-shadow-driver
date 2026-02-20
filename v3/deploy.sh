@@ -19,8 +19,28 @@ echo "=== Restarting server + tunnel ==="
 $SSH bash -s -- "$NGROK_TOKEN" <<'REMOTE'
 NGROK_TOKEN="$1"
 
-# Kill old processes
-pkill -9 -f python3 2>/dev/null; pkill -9 -f cloudflared 2>/dev/null; pkill -9 -f ngrok 2>/dev/null; sleep 2
+# Kill old processes (server + tunnels only, NOT CARLA)
+pkill -9 -f race_server 2>/dev/null; pkill -9 -f cloudflared 2>/dev/null; pkill -9 -f ngrok 2>/dev/null; sleep 2
+
+# Ensure CARLA is running (start if not)
+if ! pgrep -f CarlaUE4 > /dev/null 2>&1; then
+    echo "CARLA not running, starting..."
+    # CARLA must run as 'carla' user (not root) to avoid UE4 privilege check
+    su -s /bin/bash -c "/opt/carla-simulator/CarlaUE4.sh -RenderOffScreen -nosound -carla-rpc-port=2000" carla > /tmp/carla.log 2>&1 &
+    echo "Waiting for CARLA to start..."
+    for i in $(seq 1 30); do
+        if python3 -c "import carla; carla.Client('localhost', 2000).get_server_version()" 2>/dev/null; then
+            echo "CARLA ready!"
+            break
+        fi
+        sleep 2
+    done
+    if ! pgrep -f CarlaUE4 > /dev/null 2>&1; then
+        echo "WARNING: CARLA failed to start! Check /tmp/carla.log"
+    fi
+else
+    echo "CARLA already running (PID $(pgrep -f CarlaUE4))"
+fi
 
 # Start server
 cd /opt/shadow-driver

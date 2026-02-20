@@ -144,12 +144,16 @@ export function RaceHUD({ raceState, latencyMs, gamepadConnected = false, classN
               Gear {player.gear}
             </div>
           )}
-          {/* Input visualization bars */}
+          {/* Input visualization: steering wheel + bars */}
           {player.throttle !== undefined && (
-            <div className="mt-2 space-y-1">
-              <InputBar label="THR" value={player.throttle} color="#4CAF50" />
-              <InputBar label="BRK" value={player.brake ?? 0} color="#f44336" />
-              <InputBar label="STR" value={(player.steer ?? 0) * 0.5 + 0.5} color="#2196F3" centered />
+            <div className="mt-2 flex items-center gap-2">
+              {/* Mini steering wheel that rotates with input */}
+              <SteeringWheelIcon steer={player.steer ?? 0} />
+              <div className="space-y-1">
+                <InputBar label="THR" value={player.throttle} color="#4CAF50" />
+                <InputBar label="BRK" value={player.brake ?? 0} color="#f44336" />
+                <InputBar label="STR" value={(player.steer ?? 0) * 0.5 + 0.5} color="#2196F3" centered />
+              </div>
             </div>
           )}
         </div>
@@ -431,6 +435,32 @@ function GapTimer({ gap }: { gap: number }) {
       style={{ textShadow: '0 1px 4px rgba(0,0,0,0.8)' }}
     >
       {sign}{absGap.toFixed(1)}s
+    </div>
+  );
+}
+
+/** Mini steering wheel icon that rotates with steer input */
+function SteeringWheelIcon({ steer }: { steer: number }) {
+  // steer: -1 (full left) to +1 (full right)
+  // Rotate up to ±90 degrees for visual clarity
+  const rotation = steer * 90;
+  return (
+    <div
+      className="w-8 h-8 shrink-0"
+      style={{ transform: `rotate(${rotation}deg)`, transition: 'transform 80ms ease-out' }}
+    >
+      <svg viewBox="0 0 32 32" width="32" height="32" fill="none" xmlns="http://www.w3.org/2000/svg">
+        {/* Outer ring */}
+        <circle cx="16" cy="16" r="13" stroke="white" strokeOpacity="0.4" strokeWidth="2" />
+        {/* Three spokes */}
+        <line x1="16" y1="16" x2="16" y2="3" stroke="white" strokeOpacity="0.3" strokeWidth="1.5" />
+        <line x1="16" y1="16" x2="5" y2="23" stroke="white" strokeOpacity="0.3" strokeWidth="1.5" />
+        <line x1="16" y1="16" x2="27" y2="23" stroke="white" strokeOpacity="0.3" strokeWidth="1.5" />
+        {/* Center dot */}
+        <circle cx="16" cy="16" r="2" fill="white" fillOpacity="0.3" />
+        {/* Top marker for orientation */}
+        <circle cx="16" cy="3" r="2" fill="#2196F3" fillOpacity="0.7" />
+      </svg>
     </div>
   );
 }
