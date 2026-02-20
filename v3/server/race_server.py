@@ -1190,7 +1190,9 @@ class RaceServer:
 
         # Frame delta detection: check if this frame is similar to the last sent
         # This is fast (<0.5ms) and saves encoding + bandwidth when idle
-        if self.encoder.is_frame_similar(frame):
+        # Disable during countdown -- scene is static but client needs frames for HUD
+        is_countdown = self.race_state and self.race_state.status == "countdown"
+        if not is_countdown and self.encoder.is_frame_similar(frame):
             self._delta_skip_count += 1
             # Send a lightweight no_change message so the client knows
             # the connection is alive and can keep displaying the last frame
