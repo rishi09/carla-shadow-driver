@@ -69,6 +69,34 @@ Cloudflare quick tunnels do NOT support UDP. Options:
 - [x] Speed vignette: GPU-accelerated CSS radial gradient, scales with speed
 - [ ] Camera shake on acceleration/hard braking (collision shake already exists)
 
+## First-Time User Experience (FTUE) — Future
+Learnings from Forza Horizon 5, Mario Kart, Trackmania, Slow Roads, agar.io.
+
+### Landing Page
+- [ ] Show CARLA gameplay running as background on landing page (video or live canvas)
+- [ ] One-line value prop: "Race an AI that learned to drive. In your browser."
+- [ ] One big "RACE NOW" button with smart defaults — hide advanced options behind toggle
+- [ ] Lean into the "this runs in a BROWSER?!" disbelief factor
+
+### Countdown Sequence
+- [ ] Let player rev engine during countdown (throttle input accepted, car doesn't move)
+- [ ] Camera starts wider/higher, pulls into gameplay position on GO
+- [ ] Screen shake or zoom burst on GO
+- [ ] Hide HUD during countdown, fade in on GO
+- [ ] Engine rev sound builds through 3-2-1
+
+### Post-Race / Retention
+- [ ] "Race Again" button that's instant — no menus (Trackmania-style)
+- [ ] Ghost replay of your previous best lap
+- [ ] Personal best times with medals (Bronze/Silver/Gold per track)
+- [ ] Simple leaderboard (per track, stored in KV or DB)
+- [ ] "Challenge a Friend" button that copies a ready-to-play URL with same track/settings
+
+### Browser Advantage
+- [ ] Minimize time from URL click to gameplay (target: <5 seconds for returning players)
+- [ ] Show something exciting during GPU provisioning wait (replays, leaderboards, tips)
+- [ ] Make the `?ws=` URL shareable — post-race "Share this track" button
+
 ## AI Opponent
 - [x] Distance-based rubber banding (50m threshold, per-difficulty scaling: easy strong, hard minimal)
 - [x] AI mistake injection (easy: every 10-15s, medium: 20-30s, hard: 60s) — creates overtaking windows
