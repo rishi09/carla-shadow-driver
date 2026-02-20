@@ -174,9 +174,9 @@ The key insight from Trackmania: you don't need real-time multiplayer to create 
 
 - [x] **:star: Daily track challenge**: One track per day, same for everyone (seeded by date). Global leaderboard for that day's track. Resets at midnight UTC. This is the single most effective retention mechanic in Trackmania -- players come back daily to compete. Implementation: server-side seed from `Date.now() / 86400000 | 0` picks map + weather + spawn point deterministically.
 
-- [ ] **Ghost replay storage**: Store ghost data (position/yaw/speed at 10Hz) in Vercel KV or Cloudflare R2. Each ghost is ~10-30KB. Store the top 100 ghosts per track. Players can race against any ghost from the leaderboard. Data format: `{ frames: [{t, x, y, yaw, speed}], metadata: { player_name, lap_time, date, track } }`.
+- [x] **Ghost replay storage**: Store ghost data (position/yaw/speed at 10Hz) in Vercel KV or Cloudflare R2. Each ghost is ~10-30KB. Store the top 100 ghosts per track. Players can race against any ghost from the leaderboard. Data format: `{ frames: [{t, x, y, yaw, speed}], metadata: { player_name, lap_time, date, track } }`.
 
-- [ ] **Leaderboard with replays**: Per-track leaderboard showing top 50 times. Each entry links to a ghost replay. Click any entry to race against that ghost. This creates a "can I beat rank #37?" motivation loop. Store in Vercel KV (free tier: 256MB, enough for ~10K ghosts).
+- [x] **Leaderboard with replays**: Per-track leaderboard showing top 50 times. Each entry links to a ghost replay. Click any entry to race against that ghost. This creates a "can I beat rank #37?" motivation loop. Store in Vercel KV (free tier: 256MB, enough for ~10K ghosts).
 
 - [ ] **Seasonal tournaments**: Monthly themed events (night race series, rain championship, reverse tracks). Aggregate scores across multiple tracks. Prizes: cosmetic badges on leaderboard profile.
 
@@ -320,14 +320,14 @@ Comprehensive research into AI in games beyond self-driving, with concrete imple
 - **Impressiveness**: 10/10. A first-time player hearing an AI announcer calling their race live would be jaw-dropping. Best demo feature by far.
 - **References**: Kokoro-FastAPI (github.com/remsky/Kokoro-FastAPI), NVIDIA ACE (developer.nvidia.com/ace), Bark (github.com/suno-ai/bark)
 - **Implementation plan**:
-  - [ ] Define commentary event triggers in race_logic.py: overtake, collision, fastest_lap, close_gap (<1s), large_gap (>5s), final_lap, race_finish, high_speed_moment (>180km/h)
-  - [ ] Create commentary prompt template: excited British F1-style commentator persona, 10-30 word responses, reference driver positions and track features
-  - [ ] Integrate Claude Haiku API call from race_server.py (simplest path -- add `anthropic` pip package)
+  - [x] Define commentary event triggers: overtake, collision, close_gap, large_gap, final_lap, race_finish, high_speed, drift, nice_save, checkpoint, pb (15 event types)
+  - [x] Create commentary line bank: 200+ pre-generated lines in motorsport commentator style (v3/src/data/commentary.ts)
+  - [ ] Integrate Claude Haiku API call from race_server.py for dynamic generation (simplest path -- add `anthropic` pip package)
   - [ ] Integrate Kokoro-82M for TTS (pip install kokoro, load model once at server start)
   - [ ] Stream audio chunks to browser via WebSocket (binary frames with 1-byte type prefix: 0x01=JPEG, 0x02=audio)
   - [ ] Frontend: Web Audio API playback with AudioBufferSourceNode, queue chunks for gapless playback
-  - [ ] Rate-limit: max 1 commentary line per 5 seconds, priority queue (overtakes > collisions > gap changes)
-  - [ ] Fallback: if TTS too slow, send text-only commentary as toast notifications on HUD
+  - [x] Rate-limit: 3s cooldown between lines, priority system (higher-priority events override cooldown)
+  - [x] Fallback: text-only commentary as cinematic subtitle bar (CommentarySubtitle.tsx) with typing effect
 
 #### :star: 2. AI Driving Coach (Post-Race Analysis) -- The Easy Win
 - **What**: After each race, analyze player telemetry and generate specific coaching tips: "You lost 1.8s in Turn 3 -- you braked 15m too early" or "Your racing line was 3m wider than optimal through the chicane."
@@ -407,11 +407,11 @@ Comprehensive research into AI in games beyond self-driving, with concrete imple
 - **Feasibility**: 10/10. Pre-generate lines offline (5 minutes of Claude prompting), store as JSON, zero runtime cost.
 - **Impressiveness**: 7/10. Gives the AI personality and makes racing feel social even in single-player. Players will screenshot and share funny taunts.
 - **Implementation plan**:
-  - [ ] Define event types: ai_overtakes, player_overtakes, player_crashes, ai_crashes, close_gap, big_lead, final_lap, race_start, race_finish_win, race_finish_lose
-  - [ ] Generate 10-15 lines per event type using Claude with racing rival persona
-  - [ ] Store as server/data/trash_talk.json
-  - [ ] Pick random line on event trigger in race_logic.py, send as {type: 'ai_chat', text: '...'} message
-  - [ ] Frontend: render as animated speech bubble toast, auto-dismiss after 3 seconds
+  - [x] Define event types: ai_overtakes, player_overtakes, player_crashes, ai_crashes, close_gap, big_lead, final_lap, race_start, race_finish_win, race_finish_lose
+  - [x] Generate 10-15 lines per event type using Claude with racing rival persona
+  - [x] Store as client-side data bank (v3/src/data/aiPersonalities.ts) -- 5 personalities, 540 lines
+  - [x] Pick random line on event trigger client-side (useAIPersonality.ts), 5s cooldown, grudge system
+  - [x] Frontend: render as animated speech bubble toast (AIChat.tsx), auto-dismiss after 3.5 seconds
   - [ ] Phase 2: voice the trash talk using Kokoro TTS (run on server, stream audio chunk)
 
 ---
@@ -436,10 +436,10 @@ Comprehensive research into AI in games beyond self-driving, with concrete imple
 - Track player metrics over first 1-2 laps: average speed, cornering efficiency, collision rate.
 - Compute skill score, map to AI parameters. Keep gap competitive (1-3 seconds).
 - **Feasibility**: 8/10. No ML needed -- just heuristics on existing telemetry. The data is already there.
-- [ ] Compute rolling skill metrics from existing telemetry
-- [ ] Map skill score to autopilot speed factor + mistake frequency + cornering adherence
-- [ ] Adjust every 30 seconds, smooth transitions
-- [ ] Never let adaptation feel punitive
+- [x] Compute rolling skill metrics from existing telemetry
+- [x] Map skill score to autopilot speed factor + mistake frequency + cornering adherence
+- [x] Adjust every 30 seconds, smooth transitions
+- [x] Never let adaptation feel punitive
 
 **AI Personality / Emotion System**
 - **What**: AI has emotional states that affect driving and are visible to the player.

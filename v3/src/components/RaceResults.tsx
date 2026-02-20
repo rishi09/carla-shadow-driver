@@ -7,6 +7,9 @@ import { RacingLineViz } from './RacingLineViz.tsx';
 import { RaceResultCard } from './RaceResultCard.tsx';
 import { HighlightReel } from './HighlightReel.tsx';
 import type { Highlight } from '../hooks/useHighlightDetector.ts';
+import { useCloudLeaderboard } from '../hooks/useCloudLeaderboard.ts';
+import type { CloudSubmitResult, CloudLeaderboardEntry } from '../hooks/useCloudLeaderboard.ts';
+import { CloudLeaderboard } from './CloudLeaderboard.tsx';
 
 interface RaceResultsProps {
   result: RaceFinished;
@@ -41,6 +44,10 @@ interface RaceResultsProps {
   cargoScore?: number;
   /** Detected highlights from the race */
   highlights?: Highlight[];
+  /** Whether this is a demo session (skip cloud leaderboard) */
+  isDemo?: boolean;
+  /** Called when user wants to race against a ghost from the leaderboard */
+  onRaceGhost?: (ghostId: string, entry: CloudLeaderboardEntry) => void;
 }
 
 const MEDAL_ICONS: Record<string, string> = {
@@ -99,7 +106,7 @@ function formatGap(seconds: number): string {
   return abs.toFixed(1);
 }
 
-export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onInstantReplay, personalBestResult, isDailyChallenge, dailyChallengePosition, streakResult, ghostFrames, dareTime, cargoIntegrity, cargoScore, highlights }: RaceResultsProps) {
+export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onInstantReplay, personalBestResult, isDailyChallenge, dailyChallengePosition, streakResult, ghostFrames, dareTime, cargoIntegrity, cargoScore, highlights, isDemo, onRaceGhost }: RaceResultsProps) {
   const playerWon = result.winner === 'player';
 
   // Staggered reveal animation state
@@ -141,6 +148,45 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
   // Challenge a friend: ghost encoding state
   const [challengeCopied, setChallengeCopied] = useState(false);
   const [challengeEncoding, setChallengeEncoding] = useState(false);
+
+  // Cloud leaderboard state
+  const cloudLeaderboard = useCloudLeaderboard();
+  const [cloudRank, setCloudRank] = useState<CloudSubmitResult | null>(null);
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
+  const cloudSubmittedRef = useRef(false);
+
+  // Auto-submit to cloud leaderboard on mount (if not demo mode)
+  useEffect(() => {
+    if (isDemo || cloudSubmittedRef.current) return;
+    if (!raceSettings || result.player_time == null || result.player_time <= 0) return;
+    cloudSubmittedRef.current = true;
+
+    const bestLap = result.player_laps.length > 0
+      ? Math.min(...result.player_laps)
+      : result.player_time;
+
+    // Get player name from localStorage
+    let playerName = 'Anonymous';
+    try {
+      playerName = localStorage.getItem('shadow_driver_player_name')?.trim() || 'Anonymous';
+    } catch { /* ignore */ }
+
+    cloudLeaderboard.submitResult(
+      {
+        track: raceSettings.track,
+        laps: raceSettings.laps,
+        time: result.player_time,
+        bestLap,
+        playerName,
+        difficulty: raceSettings.model || 'carla_pilotnet',
+      },
+      ghostFrames,
+    ).then((submitResult) => {
+      if (submitResult) {
+        setCloudRank(submitResult);
+      }
+    });
+  }, [raceSettings, result.player_time, result.player_laps, isDemo, ghostFrames]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Race history: load previous attempts and save current one on mount
   const [raceHistory, setRaceHistory] = useState<RaceHistoryEntry[]>([]);
@@ -720,6 +766,66 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
               )}
             </div>
             <TimeProgressionChart history={raceHistory} />
+          </div>
+        )}
+
+        {/* Cloud Leaderboard rank + toggle */}
+        {!isDemo && raceSettings && (
+          <div style={revealStyle(9)}>
+            {/* Rank banner (shown after cloud submit completes) */}
+            {cloudRank && (
+              <div className="mb-4">
+                <div className="rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-4 py-3 text-center">
+                  <div className="text-cyan-400 text-sm font-bold">
+                    {cloudRank.isTop50 ? (
+                      <>You placed <span className="text-cyan-300 text-lg font-black">#{cloudRank.rank}</span> out of {cloudRank.totalEntries} {cloudRank.totalEntries === 1 ? 'racer' : 'racers'}!</>
+                    ) : (
+                      <>Rank #{cloudRank.rank} of {cloudRank.totalEntries} {cloudRank.totalEntries === 1 ? 'racer' : 'racers'}</>
+                    )}
+                  </div>
+                  {cloudRank.rank <= 3 && (
+                    <div className="text-cyan-300/60 text-xs font-mono mt-1">
+                      {cloudRank.rank === 1 ? 'You hold the record!' : `Only ${cloudRank.rank - 1} ${cloudRank.rank - 1 === 1 ? 'racer is' : 'racers are'} faster`}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Leaderboard toggle button */}
+            <div className="mb-4 text-center">
+              <button
+                onClick={() => setShowLeaderboard(!showLeaderboard)}
+                className="text-cyan-400/60 hover:text-cyan-400 text-xs font-mono transition-colors inline-flex items-center gap-1.5"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M8 21h8" />
+                  <path d="M12 17V21" />
+                  <path d="M7 4h10" />
+                  <path d="M5 8h14" />
+                  <path d="M4 12h16" />
+                  <rect x="2" y="4" width="20" height="12" rx="2" />
+                </svg>
+                {showLeaderboard ? 'Hide Leaderboard' : 'View Global Leaderboard'}
+              </button>
+            </div>
+
+            {/* Inline leaderboard */}
+            {showLeaderboard && (
+              <div className="mb-6">
+                <CloudLeaderboard
+                  track={raceSettings.track}
+                  laps={raceSettings.laps}
+                  playerName={(() => {
+                    try { return localStorage.getItem('shadow_driver_player_name')?.trim() || 'Anonymous'; }
+                    catch { return 'Anonymous'; }
+                  })()}
+                  onRaceGhost={onRaceGhost}
+                  visible={showLeaderboard}
+                  onClose={() => setShowLeaderboard(false)}
+                />
+              </div>
+            )}
           </div>
         )}
 
