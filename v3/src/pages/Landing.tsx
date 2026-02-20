@@ -451,6 +451,15 @@ export function Landing() {
         </div>
       </section>
 
+      {/* ===================== RECENT RACES TICKER ===================== */}
+      {social.recentRaces.length > 0 && (
+        <section className="relative z-10 py-8 sm:py-12 px-4 sm:px-6">
+          <div className="max-w-6xl mx-auto">
+            <RecentRaces results={social.recentRaces} />
+          </div>
+        </section>
+      )}
+
       {/* ===================== TECHNICAL FLEX ===================== */}
       <section className="relative z-10 py-20 sm:py-28 px-4 sm:px-6">
         <div className="max-w-4xl mx-auto">

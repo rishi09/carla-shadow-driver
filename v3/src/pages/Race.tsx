@@ -505,7 +505,13 @@ export function Race() {
       keysRef.current = { w: false, a: false, s: false, d: false, space: false };
       countdownRevRef.current = false;
     };
-  }, [view, gpu.sendControls, gpu.sendRespawn, gpu.sendRestartRace, gpu.sendCameraMode, gpu.raceState?.race_status, gamepad.connected, gamepad.steering, gamepad.throttle, gamepad.brake, gamepad.handbrake]);
+  }, [view, gpu.sendControls, gpu.sendRespawn, gpu.sendRestartRace, gpu.sendCameraMode, gpu.sendPause, gpu.raceState?.race_status, photoModeActive, gamepad.connected, gamepad.steering, gamepad.throttle, gamepad.brake, gamepad.handbrake]);
+
+  // --- Photo Mode exit handler ---
+  const handleExitPhotoMode = useCallback(() => {
+    setPhotoModeActive(false);
+    gpu.sendResume();
+  }, [gpu.sendResume]);
 
   // --- Gamepad button actions (rising-edge: respawn, camera toggle, countdown rev) ---
   useEffect(() => {
