@@ -788,10 +788,10 @@ See `LEARNINGS.md` section "What Makes Racing Games Fun" for full rationale behi
 ### TIER 1: High Impact, Low Effort (build today)
 
 #### Speed Perception
-- [ ] **Aggressive FOV curve**: Change FOV scaling from current linear 1.0-1.05 to exponential: `scale = 1.0 + 0.08 * Math.pow(Math.min(speed/200, 1), 1.5)`. Starts subtle, ramps aggressively above 150 km/h. Max 1.08. In `Race.tsx` where CSS transform is applied.
-- [ ] **Camera G-force shift**: On hard throttle (>0.8), apply `translateY(+2px)` that eases to 0 over 200ms. On hard brake (>0.8), `translateY(-2px)`. Creates a visceral "pushed back in seat" / "thrown forward" feel. Implement in `Race.tsx` alongside existing steering prediction transforms.
+- [x] **Aggressive FOV curve**: Change FOV scaling from current linear 1.0-1.05 to exponential: `scale = 1.0 + 0.08 * Math.pow(Math.min(speed/200, 1), 1.5)`. Starts subtle, ramps aggressively above 150 km/h. Max 1.08. In `Race.tsx` where CSS transform is applied.
+- [x] **Camera G-force shift**: On hard throttle (>0.8), apply `translateY(+2px)` that eases to 0 over 200ms. On hard brake (>0.8), `translateY(-2px)`. Creates a visceral "pushed back in seat" / "thrown forward" feel. Implement in `Race.tsx` alongside existing steering prediction transforms.
 - [ ] **Wind/air rush noise at speed**: Add a white noise layer to `useEngineSound.ts`. Highpass filter at `1000 + speed * 5` Hz, volume `Math.min(0.15, (speed - 80) / 800)`. Start at 80 km/h. Creates the constant backdrop that makes high speed feel intense and silence feel peaceful.
-- [ ] **Camera tilt on brake/accelerate (GT7 weight feel)**: On braking, apply `rotateX(0.3deg)` (camera dips forward). On acceleration, `rotateX(-0.2deg)` (camera leans back). Very subtle -- more than 0.5deg looks wrong. CSS transform in `Race.tsx`, smoothed with 150ms transition.
+- [x] **Camera tilt on brake/accelerate (GT7 weight feel)**: On braking, apply `rotateX(0.3deg)` (camera dips forward). On acceleration, `rotateX(-0.2deg)` (camera leans back). Very subtle -- more than 0.5deg looks wrong. CSS transform in `Race.tsx`, smoothed with 150ms transition.
 
 #### Audio Enhancements
 - [ ] **Tire screech frequency modulation**: In `useEngineSound.ts`, modulate the screech bandpass center frequency based on steer magnitude: `3500 - Math.abs(steer) * 1500` Hz. Mild turns = clean high squeal (3500 Hz). Aggressive turns = rough low scrub (2000 Hz). Gives audio feedback about traction state.
@@ -802,7 +802,7 @@ See `LEARNINGS.md` section "What Makes Racing Games Fun" for full rationale behi
 
 #### Game Flow / Retention
 - [ ] **Live PB split at checkpoints**: When passing a checkpoint, show "+0.3s" or "-0.2s" vs personal best for that checkpoint. Store per-checkpoint split times in `usePersonalBests.ts`. Display as a brief toast near the checkpoint arrow that fades after 1.5s. This is Trackmania's core retention mechanic.
-- [ ] **Checkpoint celebration flash**: On checkpoint hit, brief green edge flash (100ms, reuse collision flash code but green, lower intensity 0.15). Play a short ascending "ding" tone (800 Hz, 50ms). Turn every checkpoint into a micro-reward.
+- [x] **Checkpoint celebration flash**: On checkpoint hit, brief green edge flash (100ms, reuse collision flash code but green, lower intensity 0.15). Play a short ascending "ding" tone (800 Hz, 50ms). Turn every checkpoint into a micro-reward.
 - [ ] **"PHOTO FINISH!" effect**: When gap < 1.0s on final checkpoint, trigger special treatment: screen-edge golden glow, dramatic audio swell (engine volume 1.5x, add chord), and "PHOTO FINISH!" text overlay. If final gap < 0.3s, show gap to 3 decimal places on results screen.
 - [ ] **Time improvement trajectory**: On RaceResults screen, show last 5 race times as a simple sparkline/list: "1:23 -> 1:21 -> 1:19 -> 1:18". Stored in localStorage per track. Seeing the downward trend is deeply satisfying.
 - [ ] **Hidden difficulty adaptation**: Track win/loss ratio in localStorage. If player wins >60% at current difficulty, subtly boost AI performance next race (+5% speed factor). If winning <30%, reduce by 5%. Separate from the explicit difficulty selector. Target: 40% win rate.
@@ -812,7 +812,7 @@ See `LEARNINGS.md` section "What Makes Racing Games Fun" for full rationale behi
 - [ ] **Drift exit speed boost**: When a drift ends (DriftEndEvent with score > 200), apply a 5% speed boost for 1.5 seconds (server-side in `carla_manager.py`: temporarily increase throttle multiplier). Show "DRIFT BOOST!" text popup. Makes drifting feel like a rewarding SKILL, not just style (Ridge Racer lesson).
 - [ ] **Tiered drift celebrations**: In `DriftScore.tsx`, add text tiers based on score: <200 = "DRIFT!", 200-500 = "GREAT DRIFT!", 500-1000 = "AMAZING DRIFT!", >1000 = "INSANE DRIFT!" with escalating visual effects (larger text, brighter glow, screen flash at 1000+). Sound sting at 500+ points.
 - [ ] **Near-miss visual effect**: Compare player and AI positions from telemetry. If distance < 3m and relative speed > 30 km/h, flash white streaks across screen edges for 100ms. "CLOSE CALL!" text popup. Burnout Paradise's signature mechanic -- makes close racing feel dangerous.
-- [ ] **Crash desaturation**: On large collisions (intensity > 2000), briefly apply CSS `filter: grayscale(50%)` for 200ms with increased shake. Makes big crashes feel cinematic (Burnout lesson) rather than just a frustrating bump.
+- [x] **Crash desaturation**: On large collisions (intensity > 2000), briefly apply CSS `filter: grayscale(50%)` for 200ms with increased shake. Makes big crashes feel cinematic (Burnout lesson) rather than just a frustrating bump.
 
 ### TIER 2: High Impact, Medium Effort (build this week)
 
@@ -827,7 +827,7 @@ See `LEARNINGS.md` section "What Makes Racing Games Fun" for full rationale behi
 
 #### Dramatic Moments Detection
 - [ ] **"NICE SAVE!" detection and popup**: Track speed history. If speed drops >50% then recovers within 2 seconds, OR car goes >5m off racing line then returns, show "NICE SAVE!" text popup with a brief cyan flash. These moments feel heroic and are clip-worthy.
-- [ ] **"LAST LAP OVERTAKE!" celebration**: If player position changes from P2 to P1 in the final 20% of the last lap, show dramatic "LAST LAP OVERTAKE!" overlay with screen glow and audio sting. The most shareable moment in racing.
+- [x] **"LAST LAP OVERTAKE!" celebration**: If player position changes from P2 to P1 in the final 20% of the last lap, show dramatic "LAST LAP OVERTAKE!" overlay with screen glow and audio sting. The most shareable moment in racing.
 - [ ] **Race drama music adaptation**: In `useEngineSound.ts` or `useBackgroundMusic.ts`, when gap < 1.0s in the final lap, add a tension layer: low pulsing bass at 2 Hz (mimicking heartbeat), increasing in volume as gap decreases. Drop all music to just bass drone on final checkpoint approach (Mario Kart "clutch moment" audio design).
 
 #### HUD Improvements

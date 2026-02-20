@@ -137,6 +137,10 @@ export function Race() {
   const [shakeY, setShakeY] = useState(0);
   const shakeRef = useRef<{ x: number; y: number; decay: number }>({ x: 0, y: 0, decay: 0 });
   const shakeRafRef = useRef<number | null>(null);
+  const [crashDesaturate, setCrashDesaturate] = useState(false);
+  const [checkpointFlash, setCheckpointFlash] = useState(false);
+  const prevCheckpointRef = useRef(0);
+  const [lastLapOvertake, setLastLapOvertake] = useState(false);
 
   // --- GO screen shake trigger ---
   const goShakeTriggeredRef = useRef(false);
@@ -275,6 +279,12 @@ export function Race() {
       navigator.vibrate(Math.min(100, Math.round(magnitude * 7)));
     }
 
+    // Crash desaturation: brief grayscale on big impacts
+    if (maxIntensity > 2000) {
+      setCrashDesaturate(true);
+      setTimeout(() => setCrashDesaturate(false), 250);
+    }
+
     return () => {
       if (shakeRafRef.current !== null) {
         cancelAnimationFrame(shakeRafRef.current);
@@ -382,6 +392,36 @@ export function Race() {
     engineSound.triggerEvent('collision_hit');
     crowd.gasp();
   }, [gpu.raceState?.collisions, engineSound.triggerEvent, crowd.gasp]);
+
+  // --- Checkpoint celebration flash ---
+  useEffect(() => {
+    if (view !== 'racing') return;
+    const cp = gpu.raceState?.player?.checkpoint ?? 0;
+    if (cp > 0 && cp !== prevCheckpointRef.current && prevCheckpointRef.current > 0) {
+      setCheckpointFlash(true);
+      setTimeout(() => setCheckpointFlash(false), 150);
+    }
+    prevCheckpointRef.current = cp;
+  }, [view, gpu.raceState?.player?.checkpoint]);
+
+  // --- "LAST LAP OVERTAKE!" detection ---
+  useEffect(() => {
+    if (view !== 'racing') return;
+    const player = gpu.raceState?.player;
+    if (!player) return;
+    const gap = player.gap_seconds;
+    if (
+      gap != null && gap < 0 && // player ahead
+      player.total_laps > 1 &&
+      player.lap === player.total_laps &&
+      player.total_checkpoints &&
+      player.checkpoint >= player.total_checkpoints * 0.8 && // last 20% of final lap
+      prevGapSignRef.current > 0 // just overtook
+    ) {
+      setLastLapOvertake(true);
+      setTimeout(() => setLastLapOvertake(false), 3000);
+    }
+  }, [view, gpu.raceState?.player?.gap_seconds, gpu.raceState?.player?.lap, gpu.raceState?.player?.checkpoint]);
 
   // --- Background music + crowd ambiance lifecycle ---
   useEffect(() => {
@@ -710,12 +750,26 @@ export function Race() {
   }, []);
 
   // --- Speed-based FOV zoom ---
-  // Subtle scale from 1.0 at rest to 1.05 at 150+ km/h to simulate FOV widening
+  // Exponential scale: subtle at low speed, ramps aggressively above 150 km/h
   const speedFovScale = useMemo(() => {
     const speed = gpu.raceState?.player?.speed_kmh ?? 0;
-    const t = Math.min(1, speed / 150);
-    return 1.0 + t * 0.05;
+    const t = Math.min(1, speed / 200);
+    return 1.0 + 0.08 * Math.pow(t, 1.5);
   }, [gpu.raceState?.player?.speed_kmh]);
+
+  // --- Camera G-force shift + brake/accel tilt ---
+  // Hard throttle: pushed back (translateY +2px, slight lean back)
+  // Hard brake: thrown forward (translateY -2px, slight lean forward)
+  const gForceTransform = useMemo(() => {
+    const throttle = gpu.raceState?.player?.throttle ?? 0;
+    const brake = gpu.raceState?.player?.brake ?? 0;
+    const speed = gpu.raceState?.player?.speed_kmh ?? 0;
+    if (speed < 5) return '';
+    const gY = throttle > 0.6 ? (throttle - 0.6) * 5 : brake > 0.6 ? -(brake - 0.6) * 5 : 0;
+    const tiltX = throttle > 0.6 ? -(throttle - 0.6) * 0.5 : brake > 0.6 ? (brake - 0.6) * 0.75 : 0;
+    if (Math.abs(gY) < 0.1 && Math.abs(tiltX) < 0.01) return '';
+    return `translateY(${gY.toFixed(1)}px) rotateX(${tiltX.toFixed(2)}deg)`;
+  }, [gpu.raceState?.player?.throttle, gpu.raceState?.player?.brake, gpu.raceState?.player?.speed_kmh]);
 
   // --- Speed-based motion blur ---
   // Subtle CSS blur: 0px at rest, max 1.5px at 200+ km/h
@@ -866,8 +920,13 @@ export function Race() {
                     `scale(${speedFovScale})`,
                     steeringPrediction.transform !== 'none' ? steeringPrediction.transform : '',
                     frameExtrapolation.transform !== 'none' ? frameExtrapolation.transform : '',
+                    gForceTransform,
                   ].filter(Boolean).join(' '),
-              filter: motionBlurPx > 0.05 ? `blur(${motionBlurPx.toFixed(2)}px)` : 'none',
+              filter: [
+                motionBlurPx > 0.05 ? `blur(${motionBlurPx.toFixed(2)}px)` : '',
+                crashDesaturate ? 'grayscale(50%)' : '',
+              ].filter(Boolean).join(' ') || 'none',
+              transition: 'filter 100ms ease-out',
             }}
           >
           {gpu.remoteStream ? (
@@ -914,6 +973,45 @@ export function Race() {
             weatherMood={gpu.raceState?.weather_mood}
             speedKmh={gpu.raceState?.player.speed_kmh ?? 0}
           />
+
+          {/* Checkpoint celebration: brief green edge flash */}
+          {checkpointFlash && (
+            <div
+              className="absolute inset-0 pointer-events-none z-20"
+              style={{
+                boxShadow: 'inset 0 0 60px 15px rgba(76, 175, 80, 0.3)',
+                animation: 'checkpointFlash 150ms ease-out',
+              }}
+            />
+          )}
+
+          {/* LAST LAP OVERTAKE! dramatic text overlay */}
+          {lastLapOvertake && (
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-30">
+              <div
+                className="text-center"
+                style={{ animation: 'lastLapOvertake 3s ease-out forwards' }}
+              >
+                <div className="text-4xl sm:text-6xl font-black text-yellow-400 tracking-wider" style={{ textShadow: '0 0 30px rgba(250,204,21,0.5), 0 2px 8px rgba(0,0,0,0.8)' }}>
+                  LAST LAP OVERTAKE!
+                </div>
+              </div>
+            </div>
+          )}
+
+          <style>{`
+            @keyframes checkpointFlash {
+              from { opacity: 1; }
+              to { opacity: 0; }
+            }
+            @keyframes lastLapOvertake {
+              0% { opacity: 0; transform: scale(0.5); }
+              10% { opacity: 1; transform: scale(1.1); }
+              20% { transform: scale(1.0); }
+              70% { opacity: 1; }
+              100% { opacity: 0; transform: scale(1.0) translateY(-20px); }
+            }
+          `}</style>
 
           {/* HUD overlay */}
           <RaceHUD raceState={gpu.raceState} latencyMs={gpu.latencyMs} gamepadConnected={gamepad.connected} />
