@@ -5,11 +5,12 @@
 ### Current bottleneck analysis
 The perceived lag stack when turning:
 1. **Server-side steering ramp**: ~40ms (was ~130ms, fixed)
-2. **JPEG encode**: ~5-10ms (quality=50, 1280x720)
-3. **Network transit**: ~30-60ms (SSH tunnel) or ~80-140ms (Cloudflare tunnel)
-4. **Browser JPEG decode + canvas paint**: ~5-15ms
-5. **rAF sync wait**: 0-16ms (requestAnimationFrame)
-**Total: ~80-140ms (SSH) or ~120-220ms (Cloudflare)**
+2. **NvFBC GPU capture**: <1ms (was ~3-5ms via CARLA sensor → numpy → CPU)
+3. **NVENC H.264 encode**: ~2-4ms (hardware h264_nvenc, spatial-aq, zero-latency preset; was ~5-10ms JPEG)
+4. **Network transit**: ~30-60ms (SSH tunnel) or ~80-140ms (Cloudflare tunnel)
+5. **Browser hardware H.264 decode (WebCodecs)**: ~1-3ms (was ~5-15ms JPEG decode + canvas paint; falls back to JPEG/ImageBitmap on Firefox)
+6. **rAF sync wait**: 0-16ms (requestAnimationFrame)
+**Total: ~75-125ms (SSH) or ~125-205ms (Cloudflare)**
 
 ### Transport: Kill the Cloudflare middleman
 - [x] **Ngrok tunnel (primary)**: Replaced Cloudflare quick tunnel with ngrok as primary tunnel. Free tier: 1 agent, valid TLS certs, WebSocket support, ~10-20ms overhead (vs Cloudflare's ~40-80ms). Requires `NGROK_AUTHTOKEN` env var. Cloudflare kept as automatic fallback.
@@ -18,7 +19,10 @@ The perceived lag stack when turning:
 - [ ] **Direct Vast.ai with SSL**: Rent instances with "Direct" network mode, use Let's Encrypt or Caddy for auto-TLS on a custom domain pointing to the GPU IP.
 
 ### Encoding: Faster frame pipeline
-- [ ] **NVENC JPEG encoding**: Replace OpenCV JPEG with `nvjpeg` (CUDA JPEG encoder). Drops encode from ~5-10ms to <1ms. Available via `pip install pynvjpeg` or PyTorch's `torchvision.io.encode_jpeg` with CUDA tensors.
+- [x] **NVENC H.264 hardware encoding**: FFmpeg subprocess with h264_nvenc, spatial-aq, zero-latency preset. Raw BGRA from CARLA → H.264 access units via NALU parsing. Codec negotiation with client. Auto-fallback to JPEG.
+- [x] **NvFBC zero-copy GPU capture**: GPU framebuffer capture via pynvfbc, bypasses CARLA sensor → numpy → CPU path. Falls back to x11grab → CARLA sensor.
+- [x] **Adaptive bitrate QoS**: Client reports network quality (jitter, drop rate, RTT) every 2s. Server adjusts NVENC bitrate 2-12 Mbps with asymmetric scaling (20% down, 10% up) and keyframe-boundary restarts.
+- [x] **WebCodecs hardware decode**: Browser uses VideoDecoder API for hardware H.264 decode. Falls back to JPEG/ImageBitmap on Firefox or older browsers.
 - [ ] **WebRTC with direct UDP**: Test on Vast.ai "Direct" mode with UDP ports exposed. This is the real WebRTC win — browser hardware H.264 decode + no rAF sync.
 - [x] **Skip unchanged frames**: Frame delta detection using block-mean perceptual hash (8x8 blocks, <0.5ms overhead). When frames are similar, sends lightweight `no_change` JSON instead of re-encoding JPEG. Combined with position-based skip for stationary cars.
 - [x] **Adaptive quality**: Four-tier latency-based quality: >150ms->q25/960x540, 80-150ms->q40/720p, 50-80ms->q60/720p, <50ms->q75/720p. Asymmetric stepping (fast down=8/call, slow up=2/call) prevents oscillation. Auto-reduces quality if average encode time >15ms.
@@ -31,6 +35,7 @@ The perceived lag stack when turning:
 - [x] **Input echo in HUD**: Steering/throttle/brake bars already update instantly from local input — consider adding a subtle visual indicator (steering wheel icon, wheel turn animation) that responds instantly to input.
 
 ### WebRTC (Phase 2-4 from original plan)
+- [x] **WebRTC data channel for input**: Unreliable/unordered mode for UDP-like input transport. Falls back to WebSocket over tunnels.
 - [ ] Test with Vast.ai "Direct" network mode (UDP ports 10000-10010 exposed)
 - [ ] Tune H.264 bitrate (start 1.5 Mbps, auto-adjust via WebRTC congestion control)
 - [ ] NVENC via GStreamer pipeline if CPU x264 can't sustain 30fps
@@ -48,6 +53,7 @@ The perceived lag stack when turning:
 - [x] **Better camera settings**: Cinematic camera: FOV 90, motion_blur_intensity 0.3, histogram exposure, shutter_speed 60, ISO 100. Applied on camera attach + mode switch.
 - [x] **Time of day**: Dynamic sun path transitions during race via WeatherTransitionManager. Sun moves from dawn to sunset over the course of a race.
 - [x] **Rain/wet roads**: CARLA has wet road reflections when precipitation > 0. Looks dramatically better than dry roads. (Partial: storm event triggers at 70% race progress for 3+ lap races)
+- [x] **Depth-of-field presets**: Three visual presets (Cinematic: DoF focal_distance=1000cm fstop=2.8 blade_count=5 motion_blur=0.25, Balanced: motion_blur=0.2 bloom=0.4, Raw: no post-processing). Selectable in Race Setup advanced settings.
 
 ### Frontend visual polish
 - [x] **Motion blur shader**: CSS `filter: blur()` on video canvas, driven by speed (0-1.5px). Hides JPEG artifacts at high speed.
@@ -1110,11 +1116,11 @@ See `LEARNINGS.md` for detailed implementation plans for these top 10.
 Current: ~18 FPS, ~271ms latency over JPEG-over-WebSocket through Cloudflare tunnels.
 Target: 60 FPS, <50ms additional latency.
 
-1. [ ] **NVENC H.264 encoding on server** — Replace JPEG-per-frame with hardware H.264 encoding via NVENC. Use GStreamer or FFmpeg with `nvenc` + `zerolatency` tune. Single biggest latency win.
+1. [x] **NVENC H.264 encoding on server** — FFmpeg subprocess with h264_nvenc, spatial-aq, zero-latency preset. Raw BGRA → H.264 access units via NALU parsing. Codec negotiation with client. Auto-fallback to JPEG.
 2. [ ] **WebRTC transport** — Replace WebSocket (TCP, head-of-line blocking) with WebRTC (UDP, jitter-buffered). Requires direct IP or TURN server, NOT Cloudflare tunnels.
-3. [ ] **Frame capture via NvFBC** — Replace OpenCV camera read with NVIDIA Frame Buffer Capture for <1ms GPU-side frame grab.
+3. [x] **Frame capture via NvFBC** — GPU framebuffer capture via pynvfbc, bypasses CARLA sensor → numpy → CPU path. Falls back to x11grab → CARLA sensor.
 4. [ ] **Kill Cloudflare tunnels** — Use ngrok TCP tunnels, Tailscale, or direct Vast.ai IP. Cloudflare adds 40-80ms and doesn't support UDP.
-5. [ ] **Client-side hardware decode** — Browser's MediaSource Extensions or WebRTC built-in H.264 decode (hardware accelerated, no rAF sync needed).
+5. [x] **Client-side hardware decode** — Browser's WebCodecs VideoDecoder API for hardware H.264 decode. Falls back to JPEG/ImageBitmap on Firefox or older browsers.
 
 ### P1: Polish the core loop
 The 60-second experience of: connect → setup → countdown → race → results → share.

@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Shadow Driver is a browser-based racing game where you race against an AI car in CARLA simulator running on a cloud GPU. The frontend is a React/Vite app deployed on Vercel. The backend is a Python WebSocket server running inside a Docker container on Vast.ai GPU instances, streaming JPEG frames from CARLA.
+Shadow Driver is a browser-based racing game where you race against an AI car in CARLA simulator running on a cloud GPU. The frontend is a React/Vite app deployed on Vercel. The backend is a Python WebSocket server running inside a Docker container on Vast.ai GPU instances, streaming H.264 video from CARLA via NVENC hardware encoding (with JPEG fallback).
 
 **Key URLs:**
 - Game (v3): https://shadow-driver-v3.vercel.app
@@ -18,7 +18,8 @@ Shadow Driver is a browser-based racing game where you race against an AI car in
 ### Working (E2E verified with Safari automation + Vast.ai GPU)
 - CARLA 0.9.15 running on Vast.ai GPU (RTX 3090, root privilege fix applied)
 - Direct WebSocket connection via `?ws=<tunnel_url>` query parameter
-- JPEG video streaming over WebSocket through Cloudflare tunnels (~18 FPS, ~271ms latency)
+- H.264 video via NVENC hardware encoding + WebCodecs decode (~30 FPS, ~80-120ms latency target). Falls back to JPEG when unavailable.
+- NVENC spatial-AQ for 10-15% better perceived quality at zero latency cost
 - NVENC H.264 encoding pipeline (server) + WebCodecs VideoDecoder (client) — auto-fallback to JPEG if unavailable
 - Player car controls: WASD + Space (handbrake), R (respawn), C (camera toggle)
 - Car selection: 6 vehicles (Tesla Model 3, Ford Mustang, Dodge Charger, Audi TT, Mini Cooper, Chevrolet Impala)
@@ -46,6 +47,12 @@ Shadow Driver is a browser-based racing game where you race against an AI car in
 - Race recording overlay (REC indicator)
 - FirstTimeOverlay with controls tutorial
 - GitHub Actions auto-builds Docker image on push to v3 (server/docker/configs paths)
+- NvFBC zero-copy GPU framebuffer capture (with x11grab fallback, then CARLA sensor fallback)
+- Adaptive bitrate (2-12 Mbps) based on client network quality (jitter, drop rate, RTT)
+- CARLA depth-of-field post-processing presets (Cinematic/Balanced/Raw) selectable in Race Setup
+- WebRTC data channel for low-latency input (~30-50ms savings, falls back to WebSocket over tunnels)
+- Xvfb virtual display (:99) for NvFBC capture compatibility
+- Visual Style selector in Race Setup advanced settings
 
 ### Not Working / TODO
 - **Vercel deploy**: Project is `shadow-driver-v3` under team `rishi09-3609s-projects`. Root directory is `v3/`.
@@ -59,6 +66,8 @@ Shadow Driver is a browser-based racing game where you race against an AI car in
 - **No trained model weights**: AI uses CARLA autopilot fallback. PilotNet weights available at HuggingFace (sergiopaniego/OptimizedPilotNet, 200x66 input). Alpamayo is 10B params (~20GB), probably won't fit alongside CARLA on 24GB GPU.
 - **Full provisioning flow untested**: The "Play Game" button flow (Vast.ai auto-provision + Cloudflare tunnel + callback) hasn't been tested end-to-end with the v3 Docker image.
 - **Docker Hub token**: Secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` are set in GitHub. Push to v3 branch (paths: `v3/server/**`, `v3/docker/**`, `v3/configs/**`) triggers auto-build via `.github/workflows/docker-build.yml`.
+- **Cloudflare tunnels unreliable on some datacenters**: QUIC connections timeout on some Vast.ai hosts. Workaround: use `--protocol http2` flag, or SSH port forwarding (`ssh -N -L 8765:localhost:8765 -p PORT root@IP`), or local dev server (`npm run dev` + SSH tunnel). ngrok is preferred but requires valid auth token.
+- **ngrok auth token expired**: The stored ngrok token is invalid. Generate a new one at https://dashboard.ngrok.com/get-started/your-authtoken
 
 ---
 
@@ -85,7 +94,7 @@ Vast.ai GPU Instance (Docker: rkshah09/shadow-driver-v3:latest)
     │
     ├─ CARLA 0.9.15 (headless, run as 'carla' user)
     ├─ Race Server (Python, WebSocket on port 8765)
-    └─ Cloudflare Tunnel (exposes WS to browser)
+    └─ Tunnel (Cloudflare/ngrok/SSH port forward)
 ```
 
 ### Key Files
@@ -115,6 +124,7 @@ Vast.ai GPU Instance (Docker: rkshah09/shadow-driver-v3:latest)
 - `carla_manager.py` - CARLA vehicle/camera/control management, physics, AI speed adjustment, raw BGRA frame buffer
 - `race_logic.py` - Checkpoints, lap tracking, race state, RaceDirector (rubber banding), AIMistakeGenerator
 - `nvenc_encoder.py` - FFmpeg NVENC subprocess H.264 encoder, NAL unit parsing, codec config extraction
+- `nvfbc_capture.py` - NvFBC zero-copy GPU framebuffer capture with x11grab fallback
 - `webrtc_track.py` - CarlaVideoTrack (MediaStreamTrack) for H.264 streaming via aiortc
 - `model_manager.py` - AI model loading (PilotNet/Alpamayo)
 
@@ -172,6 +182,18 @@ cd /opt/shadow-driver && python3 -u server/race_server.py &
 ssh -p <PORT> root@<IP> 'tail -30 /tmp/race.log'
 ```
 
+### SSH port forward (when tunnels fail)
+If Cloudflare and ngrok both fail, use SSH port forwarding + local dev server:
+```bash
+# Terminal 1: SSH tunnel
+ssh -N -L 8765:localhost:8765 -p <PORT> root@<IP>
+
+# Terminal 2: Local frontend
+cd v3 && npm run dev
+
+# Open: http://localhost:5173/race?ws=ws://localhost:8765
+```
+
 ## Quick Start (Fresh Instance)
 
 1. Rent a GPU on Vast.ai (RTX 3090+, Docker image: `rkshah09/shadow-driver-v3:latest`)
@@ -205,8 +227,8 @@ ssh -p <PORT> root@<IP> 'tail -30 /tmp/race.log'
 **Fix:** Generate new Docker Hub access token, update repository secret
 
 ### Issue: Cloudflare tunnel unreliable
-**Cause:** Quick tunnels (`cloudflared tunnel --url ...`) die within minutes, DNS expires, sometimes corrupt WebSocket upgrade headers (`invalid Connection header: keep-alive`)
-**Fix:** Use SSH port forwarding for dev (`ssh -N -L 8765:localhost:8765 -p <PORT> root@<IP>`), or use ngrok for production (more stable, but requires auth token)
+**Cause:** Quick tunnels (`cloudflared tunnel --url ...`) die within minutes, DNS expires, sometimes corrupt WebSocket upgrade headers (`invalid Connection header: keep-alive`). QUIC connections timeout on some Vast.ai datacenters.
+**Fix:** Use `--protocol http2` flag with cloudflared to avoid QUIC issues. Use SSH port forwarding for dev (`ssh -N -L 8765:localhost:8765 -p <PORT> root@<IP>` + `cd v3 && npm run dev` + open `http://localhost:5173/race?ws=ws://localhost:8765`), or use ngrok for production (more stable, but requires valid auth token).
 
 ### Issue: Mock WebSocket server blocking SSH tunnel
 **Cause:** A test mock server (`node test/mock_ws_server.mjs`) running on port 8765 intercepts connections meant for the SSH tunnel
