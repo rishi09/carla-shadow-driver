@@ -1388,7 +1388,46 @@ async def main():
     port = 8765
     print(f"Starting Shadow Driver v3 Race Server on port {port}...")
 
-    async with websockets.serve(server.handle_client, "0.0.0.0", port):
+    # HTTP health check handler for non-WebSocket requests (e.g. GET /health)
+    async def process_request(path, request_headers):
+        if path == "/health":
+            import subprocess
+            health = {
+                "status": "ok",
+                "clients": len(server.shutdown_manager.connected_clients),
+                "race_running": server.running,
+            }
+            # CARLA status
+            try:
+                carla_running = bool(subprocess.run(
+                    ["pgrep", "-f", "CarlaUE4"], capture_output=True
+                ).returncode == 0)
+                health["carla"] = "running" if carla_running else "stopped"
+            except Exception:
+                health["carla"] = "unknown"
+            # GPU info (temperature + VRAM)
+            try:
+                result = subprocess.run(
+                    ["nvidia-smi", "--query-gpu=temperature.gpu,memory.used,memory.total",
+                     "--format=csv,noheader,nounits"],
+                    capture_output=True, text=True, timeout=5
+                )
+                if result.returncode == 0:
+                    parts = result.stdout.strip().split(", ")
+                    if len(parts) == 3:
+                        health["gpu_temp_c"] = int(parts[0])
+                        health["vram_used_mb"] = int(parts[1])
+                        health["vram_total_mb"] = int(parts[2])
+            except Exception:
+                pass
+            body = json.dumps(health).encode()
+            return (200, [("Content-Type", "application/json")], body)
+        return None  # Continue with WebSocket handshake
+
+    async with websockets.serve(
+        server.handle_client, "0.0.0.0", port,
+        process_request=process_request,
+    ):
         print(f"Server ready. Waiting for connections on ws://0.0.0.0:{port}")
 
         # Start the auto-shutdown timer immediately (no clients connected yet)

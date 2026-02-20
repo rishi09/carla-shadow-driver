@@ -140,7 +140,7 @@ Learnings from Forza Horizon 5, Mario Kart, Trackmania, Slow Roads, agar.io.
 - [ ] **Instance cost tracking**: Log GPU cost per session, alert if spending > $X/day
 - [x] **Auto-shutdown**: `AutoShutdownManager` in race_server.py — 10-minute idle timer, logs countdown every minute, self-destroys via Vast.ai API. VASTAI_API_KEY passed from start.ts to container env.
 - [x] **Deploy script improvements**: deploy.sh should also start CARLA if not running
-- [ ] **Health monitoring**: Endpoint that returns CARLA status, GPU temp, VRAM usage, active connections
+- [x] **Health monitoring**: Endpoint that returns CARLA status, GPU temp, VRAM usage, active connections
 
 ---
 
