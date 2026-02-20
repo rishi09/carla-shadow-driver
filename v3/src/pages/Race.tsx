@@ -37,9 +37,15 @@ import { ClipPreview } from '../components/ClipPreview.tsx';
 import { RearMirror } from '../components/RearMirror.tsx';
 import { RecordingControls } from '../components/RecordingControls.tsx';
 import { SplitTimeDelta } from '../components/SplitTimeDelta.tsx';
+import { VoiceBoostOverlay } from '../components/VoiceBoostOverlay.tsx';
 import { useGhostRecorder } from '../hooks/useGhostRecorder.ts';
+import type { GhostFrame } from '../hooks/useGhostRecorder.ts';
 import { useReplayRecorder } from '../hooks/useReplayRecorder.ts';
 import { useScreenRecorder } from '../hooks/useScreenRecorder.ts';
+import { useVoiceBoost } from '../hooks/useVoiceBoost.ts';
+import { useGifExport } from '../hooks/useGifExport.ts';
+import { decodeGhostFromUrl, interpolateGhostPosition } from '../utils/ghostUrl.ts';
+import type { ChallengeGhostData } from '../components/Minimap.tsx';
 import type { KeyState } from '../types/index.ts';
 import { useEffect, useRef } from 'react';
 
@@ -63,9 +69,38 @@ export function Race() {
     timeOfDay: params.get('timeOfDay') || undefined,
   }), []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Challenge ghost: decode ghost data from URL parameter
+  const ghostParam = useMemo(() => params.get('ghost') || null, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Dare challenge: parse ?dare=X.XXX param (time to beat in seconds)
+  const dareTime = useMemo(() => {
+    const dareParam = params.get('dare');
+    if (!dareParam) return null;
+    const parsed = parseFloat(dareParam);
+    return isNaN(parsed) || parsed <= 0 ? null : parsed;
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const [challengeGhostFrames, setChallengeGhostFrames] = useState<GhostFrame[] | null>(null);
+  const challengeGhostDecodedRef = useRef(false);
+
+  useEffect(() => {
+    if (!ghostParam || challengeGhostDecodedRef.current) return;
+    challengeGhostDecodedRef.current = true;
+    decodeGhostFromUrl(ghostParam).then((frames) => {
+      if (frames && frames.length > 0) {
+        setChallengeGhostFrames(frames);
+      }
+    });
+  }, [ghostParam]);
+
   const [view, setView] = useState<RaceView>(isDemo || directWsUrl || isQuickstart ? 'pre_race' : 'setup');
   const [showRespawning, setShowRespawning] = useState(false);
   const [raceWeather, setRaceWeather] = useState('clear');
+
+  // Challenge ghost: track race start time for interpolation
+  const challengeGhostStartRef = useRef<number>(0);
+  const [showChallengeGhostBanner, setShowChallengeGhostBanner] = useState(!!ghostParam);
+
   const keysRef = useRef<KeyState>({ w: false, a: false, s: false, d: false, space: false });
   const keyIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const respawnTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -89,6 +124,7 @@ export function Race() {
   const gamepad = useGamepad();
   const streak = useStreak();
   const adaptiveDifficulty = useAdaptiveDifficulty();
+  const voiceBoost = useVoiceBoost();
   const steeringPrediction = useSteeringPrediction(keysRef, view === 'racing', gpu.raceState?.player?.speed_kmh ?? 0);
   const ghostRecorder = useGhostRecorder();
   const frameExtrapolation = useFrameExtrapolation(
@@ -144,6 +180,9 @@ export function Race() {
   // --- Screen recorder (manual start/stop, full race recording) ---
   const screenRecorder = useScreenRecorder(replayCanvasRef, gpu.raceState?.race_status);
 
+  // --- GIF export (ring buffer capture + Web Worker encoding) ---
+  const gifExport = useGifExport(replayCanvasRef, view === 'racing');
+
   // --- Screen shake state ---
   const [shakeX, setShakeX] = useState(0);
   const [shakeY, setShakeY] = useState(0);
@@ -170,6 +209,12 @@ export function Race() {
   // --- Near-miss detection: "CLOSE CALL!" popup when cars pass within 3m at relative speed > 30 km/h ---
   const [nearMiss, setNearMiss] = useState(false);
   const nearMissCooldownRef = useRef(false);
+
+  // --- Drift boost: "DRIFT BOOST!" popup + orange glow + speed line intensification ---
+  const [driftBoostActive, setDriftBoostActive] = useState(false);
+  const [driftBoostGlow, setDriftBoostGlow] = useState(false);
+  const [driftBoostSpeedLines, setDriftBoostSpeedLines] = useState(false);
+  const lastDriftBoostEventRef = useRef<unknown>(null);
 
   // --- Split time delta tracking ---
   // Stores lap_time at each checkpoint crossing during the current lap
@@ -228,6 +273,7 @@ export function Race() {
           ghostRecorder.recordFrame(player.x, player.y, player.yaw ?? 0, player.speed_kmh);
         }
 
+
         // Update background music intensity based on speed and gap
         const speedFactor = player.speed_kmh / 150;
         const gapCloseFactor = (player.gap_seconds != null && Math.abs(player.gap_seconds) < 3) ? 0.3 : 0;
@@ -265,6 +311,8 @@ export function Race() {
     if (status === 'racing' && prevRaceStatusRef.current === 'countdown') {
       // Start ghost recorder when race begins
       ghostRecorder.start();
+      // Start challenge ghost timer for interpolation
+      challengeGhostStartRef.current = performance.now();
       // First-time players get the full controls overlay; returning players get the brief hint
       if (!hasPlayedBeforeRef.current()) {
         setShowFirstTimeOverlay(true);
@@ -689,6 +737,46 @@ export function Race() {
     }
   }, [view, gpu.raceState?.player?.x, gpu.raceState?.player?.y, gpu.raceState?.ai?.x, gpu.raceState?.ai?.y, gpu.raceState?.player?.speed_kmh, gpu.raceState?.ai?.speed_kmh]);
 
+  // --- Drift boost: detect drift end with score > 200, trigger visual/audio effects ---
+  useEffect(() => {
+    if (view !== 'racing') return;
+    const driftEnd = gpu.latestDriftEnd;
+    if (!driftEnd) return;
+    // Avoid re-triggering for the same event
+    if (lastDriftBoostEventRef.current === driftEnd) return;
+    lastDriftBoostEventRef.current = driftEnd;
+
+    if (driftEnd.score > 200) {
+      // Show "DRIFT BOOST!" popup (1.5s total: scale-in + hold + fade)
+      setDriftBoostActive(true);
+      setTimeout(() => setDriftBoostActive(false), 1500);
+
+      // Orange edge glow (1.5s)
+      setDriftBoostGlow(true);
+      setTimeout(() => setDriftBoostGlow(false), 1500);
+
+      // Speed line intensification (1.5s)
+      setDriftBoostSpeedLines(true);
+      setTimeout(() => setDriftBoostSpeedLines(false), 1500);
+
+      // Boost sound effect
+      engineSound.playDriftBoost();
+    }
+  }, [view, gpu.latestDriftEnd, engineSound.playDriftBoost]);
+
+  // --- Voice boost: screen shake at max boost ---
+  const voiceBoostMaxRef = useRef(false);
+  useEffect(() => {
+    if (view !== 'racing') return;
+    if (voiceBoost.boostLevel > 0.8 && !voiceBoostMaxRef.current) {
+      voiceBoostMaxRef.current = true;
+      triggerScreenShake(4, 200);
+    }
+    if (voiceBoost.boostLevel < 0.5) {
+      voiceBoostMaxRef.current = false;
+    }
+  }, [view, voiceBoost.boostLevel, triggerScreenShake]);
+
   // --- Background music + crowd ambiance + AI engine sound lifecycle ---
   useEffect(() => {
     const status = gpu.raceState?.race_status;
@@ -805,8 +893,22 @@ export function Race() {
         return;
       }
       if (key === 'g') {
-        // Toggle screen recording
-        screenRecorder.toggleRecording();
+        // Export last 5 seconds as GIF
+        if (!gifExport.isEncoding) {
+          gifExport.exportGif().then(blob => {
+            if (blob) {
+              // Auto-download the GIF
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `shadow-driver-${Date.now()}.gif`;
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+              setTimeout(() => URL.revokeObjectURL(url), 10000);
+            }
+          });
+        }
         return;
       }
       if (key === ' ') {
@@ -913,7 +1015,7 @@ export function Race() {
       keysRef.current = { w: false, a: false, s: false, d: false, space: false };
       countdownRevRef.current = false;
     };
-  }, [view, gpu.sendControls, gpu.sendRespawn, gpu.sendRestartRace, gpu.sendCameraMode, gpu.sendPause, gpu.raceState?.race_status, photoModeActive, gamepad.connected, gamepad.steering, gamepad.throttle, gamepad.brake, gamepad.handbrake]);
+  }, [view, gpu.sendControls, gpu.sendRespawn, gpu.sendRestartRace, gpu.sendCameraMode, gpu.sendPause, gpu.raceState?.race_status, photoModeActive, gamepad.connected, gamepad.steering, gamepad.throttle, gamepad.brake, gamepad.handbrake, gifExport.isEncoding, gifExport.exportGif]);
 
   // --- Dismiss first-time overlay (stable ref to avoid re-render thrashing) ---
   const dismissFirstTimeOverlay = useCallback(() => {
@@ -1308,6 +1410,7 @@ export function Race() {
           quickstart={isQuickstart}
           isConnected={gpu.isConnected}
           urlSettings={urlSettings}
+          dareTime={dareTime}
         />
       )}
 
@@ -1362,7 +1465,7 @@ export function Race() {
           </div>
 
           {/* Speed lines overlay (anime-style radial lines at high speed) */}
-          <SpeedLines speedKmh={gpu.raceState?.player.speed_kmh ?? 0} intensityMultiplier={isFirstPersonCam ? 1.5 : 1.0} />
+          <SpeedLines speedKmh={gpu.raceState?.player.speed_kmh ?? 0} intensityMultiplier={(isFirstPersonCam ? 1.5 : 1.0) * (driftBoostSpeedLines ? 2.0 : 1.0) * (voiceBoost.isActive ? 1.0 + voiceBoost.boostLevel * 1.5 : 1.0)} />
 
           {/* Slipstream / drafting visual: converging blue-white streaks when behind AI */}
           <SlipstreamEffect
@@ -1378,6 +1481,15 @@ export function Race() {
             speedKmh={gpu.raceState?.player.speed_kmh ?? 0}
             collisions={gpu.raceState?.collisions}
             gear={gpu.raceState?.player.gear}
+          />
+
+          {/* Voice-Powered Turbo Boost overlay (screen glow + TURBO text + volume bar + mic button) */}
+          <VoiceBoostOverlay
+            boostLevel={voiceBoost.boostLevel}
+            isActive={voiceBoost.isActive}
+            isListening={voiceBoost.isListening}
+            rawVolume={voiceBoost.rawVolume}
+            onToggle={voiceBoost.toggleVoiceBoost}
           />
 
           {/* Particle effects overlay (sparks, tire smoke, rain) */}
@@ -1415,6 +1527,17 @@ export function Race() {
               }}
             />
           )}
+
+          {/* Drift boost orange edge glow (1.5s fade-out) */}
+          <div
+            className="absolute inset-0 pointer-events-none z-20"
+            style={{
+              boxShadow: driftBoostGlow
+                ? 'inset 0 0 80px 20px rgba(255,136,0,0.3), inset 0 0 160px 40px rgba(255,200,0,0.1)'
+                : 'inset 0 0 80px 20px rgba(255,136,0,0)',
+              transition: driftBoostGlow ? 'box-shadow 0.1s ease-in' : 'box-shadow 1.2s ease-out',
+            }}
+          />
 
           {/* Comeback mechanic: slipstream boost edge glow when >3s behind */}
           <div
@@ -1633,6 +1756,7 @@ export function Race() {
             drift={gpu.raceState?.drift}
             totalDriftScore={gpu.raceState?.total_drift_score}
             driftEndEvent={gpu.latestDriftEnd}
+            showDriftBoost={driftBoostActive}
           />
 
           {/* AI race commentary */}
@@ -1748,6 +1872,8 @@ export function Race() {
           {/* Controls hint: appears briefly when race starts after countdown */}
           <ControlsHint visible={showControlsHint} />
 
+          {showChallengeGhostBanner && challengeGhostFrames && (<div className="absolute top-20 left-1/2 -translate-x-1/2 z-30 pointer-events-none" style={{ animation: 'challengeBannerFade 5s ease-out forwards' }} onAnimationEnd={() => setShowChallengeGhostBanner(false)}><div className="bg-cyan-500/20 backdrop-blur-sm border border-cyan-400/40 rounded-lg px-5 py-2.5 text-center"><div className="text-cyan-300 text-sm font-bold tracking-wide">Racing against a friend&apos;s ghost!</div><div className="text-cyan-400/60 text-xs font-mono mt-0.5">{challengeGhostFrames.length} frames | {(challengeGhostFrames[challengeGhostFrames.length - 1]?.t ?? 0).toFixed(0)}s replay</div></div><style>{`@keyframes challengeBannerFade { 0% { opacity: 0; transform: translateY(-10px); } 10% { opacity: 1; transform: translateY(0); } 70% { opacity: 1; } 100% { opacity: 0; } }`}</style></div>)}
+
           {/* Save clip button (camera icon) */}
           {replayRecorder.isRecording && (
             <button
@@ -1804,6 +1930,92 @@ export function Race() {
             onDismiss={screenRecorder.dismissRecording}
           />
 
+          {/* GIF export button (G key) */}
+          <button
+            onClick={() => {
+              if (!gifExport.isEncoding) {
+                gifExport.exportGif().then(blob => {
+                  if (blob) {
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `shadow-driver-${Date.now()}.gif`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    setTimeout(() => URL.revokeObjectURL(url), 10000);
+                  }
+                });
+              }
+            }}
+            disabled={gifExport.isEncoding || gifExport.bufferFrameCount === 0}
+            className={`absolute bottom-20 left-16 z-10 pointer-events-auto bg-black/60 backdrop-blur-sm rounded-lg px-3 py-2 text-sm border transition-colors ${
+              gifExport.isEncoding
+                ? 'text-amber-400 border-amber-500/40 cursor-wait'
+                : gifExport.bufferFrameCount === 0
+                  ? 'text-white/20 border-white/5 cursor-not-allowed'
+                  : 'text-white/60 hover:text-white border-white/10 hover:border-white/30'
+            }`}
+            title={gifExport.isEncoding ? `Encoding GIF... ${gifExport.encodingProgress}%` : 'Save GIF of last 5 seconds (G)'}
+          >
+            {gifExport.isEncoding ? (
+              <span className="font-mono text-xs font-bold animate-pulse">GIF {gifExport.encodingProgress}%</span>
+            ) : (
+              <span className="font-mono text-xs font-bold">GIF</span>
+            )}
+          </button>
+
+          {/* GIF export preview card */}
+          {gifExport.lastGifUrl && !gifExport.isEncoding && (
+            <div
+              className="absolute bottom-20 left-32 z-40 pointer-events-auto"
+              style={{ animation: 'gifPreviewSlideIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards' }}
+            >
+              <style>{`
+                @keyframes gifPreviewSlideIn {
+                  from { transform: translateY(10px); opacity: 0; }
+                  to { transform: translateY(0); opacity: 1; }
+                }
+              `}</style>
+              <div className="bg-black/85 backdrop-blur-md rounded-xl border border-white/15 overflow-hidden shadow-2xl" style={{ width: '200px' }}>
+                <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/10">
+                  <span className="text-green-400 text-[10px] font-bold font-mono uppercase tracking-wider">
+                    GIF Ready
+                  </span>
+                  <button
+                    onClick={gifExport.dismissGif}
+                    className="text-white/40 hover:text-white/80 transition-colors"
+                  >
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="18" y1="6" x2="6" y2="18" />
+                      <line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                  </button>
+                </div>
+                <div className="relative w-full" style={{ aspectRatio: '16/9' }}>
+                  <img
+                    src={gifExport.lastGifUrl}
+                    alt="GIF preview"
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+                <div className="flex gap-1.5 p-1.5">
+                  <button
+                    onClick={gifExport.downloadGif}
+                    className="flex-1 flex items-center justify-center gap-1 bg-white/10 hover:bg-white/20 rounded-lg px-2 py-1 text-white text-[10px] font-mono transition-colors border border-white/10"
+                  >
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <polyline points="7 10 12 15 17 10" />
+                      <line x1="12" y1="15" x2="12" y2="3" />
+                    </svg>
+                    Save
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Photo Mode overlay */}
           {photoModeActive && (
             <PhotoMode
@@ -1833,6 +2045,7 @@ export function Race() {
             isDailyChallenge={isDailyChallenge}
             dailyChallengePosition={dailyChallengePosition}
             streakResult={streakResult}
+            ghostFrames={ghostRecorder.getGhostData().frames}
           />
           {/* Photo Finish overlay on results screen (golden glow + text, auto-dismisses after 3s) */}
           {photoFinish && (

@@ -199,7 +199,7 @@ export function RaceHUD({ raceState, latencyMs, gamepadConnected = false, classN
               </span>
             </div>
           )}
-          <div className="text-white/20 text-xs font-mono mt-1">WASD + Space | R=Respawn | C=Camera</div>
+          <div className="text-white/20 text-xs font-mono mt-1">WASD + Space | R=Respawn | C=Camera | H=GIF</div>
           {gamepadConnected && (
             <div className="flex items-center gap-1.5 mt-1">
               <GamepadIcon />
