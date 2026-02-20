@@ -3,6 +3,7 @@ import { useGPUConnection } from '../hooks/useGPUConnection.ts';
 import { getLastWsUrl } from '../hooks/useGPUConnection.ts';
 import { useEngineSound } from '../hooks/useEngineSound.ts';
 import { useRaceCommentary } from '../hooks/useRaceCommentary.ts';
+import { useCommentary } from '../hooks/useCommentary.ts';
 import { useAIEngineSound } from '../hooks/useAIEngineSound.ts';
 import { useBackgroundMusic } from '../hooks/useBackgroundMusic.ts';
 import { useSteeringPrediction } from '../hooks/useSteeringPrediction.ts';
@@ -25,7 +26,10 @@ import { SlipstreamEffect } from '../components/SlipstreamEffect.tsx';
 import { ParticleOverlay } from '../components/ParticleOverlay.tsx';
 import { DriftScore } from '../components/DriftScore.tsx';
 import { CommentaryOverlay } from '../components/CommentaryOverlay.tsx';
+import { CommentarySubtitle } from '../components/CommentarySubtitle.tsx';
 import { AIChatBubble } from '../components/AIChatBubble.tsx';
+import { AIChat } from '../components/AIChat.tsx';
+import { useAIPersonality } from '../hooks/useAIPersonality.ts';
 import { GPUConnectionModal } from '../components/GPUConnectionModal.tsx';
 import { RaceResults } from '../components/RaceResults.tsx';
 import { RaceSetup } from '../components/RaceSetup.tsx';
@@ -43,6 +47,7 @@ import { VoiceBoostOverlay } from '../components/VoiceBoostOverlay.tsx';
 import { useGhostRecorder } from '../hooks/useGhostRecorder.ts';
 import type { GhostFrame } from '../hooks/useGhostRecorder.ts';
 import { useHighlightDetector } from '../hooks/useHighlightDetector.ts';
+import type { Highlight } from '../hooks/useHighlightDetector.ts';
 import { useReplayRecorder } from '../hooks/useReplayRecorder.ts';
 import { useScreenRecorder } from '../hooks/useScreenRecorder.ts';
 import { useVoiceBoost } from '../hooks/useVoiceBoost.ts';
@@ -129,9 +134,13 @@ export function Race() {
   const streak = useStreak();
   const adaptiveDifficulty = useAdaptiveDifficulty();
   const voiceBoost = useVoiceBoost();
+  const cargoMode = useCargoMode();
+  const aiPersonality = useAIPersonality();
   const commentary = useRaceCommentary();
+  const subtitleCommentary = useCommentary();
   const steeringPrediction = useSteeringPrediction(keysRef, view === 'racing', gpu.raceState?.player?.speed_kmh ?? 0);
   const ghostRecorder = useGhostRecorder();
+  const highlightDetector = useHighlightDetector();
   const frameExtrapolation = useFrameExtrapolation(
     gpu.raceState?.player?.speed_kmh ?? 0,
     gpu.raceState?.player?.steer ?? 0,
@@ -157,6 +166,9 @@ export function Race() {
 
   // Streak result for the most recent finished race
   const [streakResult, setStreakResult] = useState<{ newStreak: number; isNewRecord: boolean } | null>(null);
+
+  // Highlight reel for the most recent finished race
+  const [raceHighlights, setRaceHighlights] = useState<Highlight[]>([]);
 
   // Track previous race_status for countdown detection
   const prevRaceStatusRef = useRef<string | null>(null);
@@ -202,6 +214,11 @@ export function Race() {
   const [lastLapOvertake, setLastLapOvertake] = useState(false);
   const [niceSave, setNiceSave] = useState(false);
   const speedHistoryRef = useRef<number[]>([]);
+
+  // --- Commentary cooldown refs ---
+  const highSpeedCommentaryCooldownRef = useRef(0);
+  const bigLeadCommentaryCooldownRef = useRef(0);
+  const checkpointCommentaryCooldownRef = useRef(0);
 
   // --- Photo Finish detection state ---
   const [photoFinish, setPhotoFinish] = useState(false);
@@ -281,6 +298,10 @@ export function Race() {
           ghostRecorder.recordFrame(player.x, player.y, player.yaw ?? 0, player.speed_kmh);
         }
 
+        // Feed telemetry to highlight detector
+        if (gpu.raceState) {
+          highlightDetector.update(gpu.raceState);
+        }
 
         // Update background music intensity based on speed and gap
         const speedFactor = player.speed_kmh / 150;
@@ -306,13 +327,54 @@ export function Race() {
     rafId = requestAnimationFrame(tick);
 
     return () => { cancelAnimationFrame(rafId); };
-  }, [view, gpu.raceState, engineSound.update, bgMusic.updateIntensity, aiEngineSound.update, ghostRecorder.recordFrame]);
+  }, [view, gpu.raceState, engineSound.update, bgMusic.updateIntensity, aiEngineSound.update, ghostRecorder.recordFrame, highlightDetector.update]);
+
+  // --- Cargo mode: update integrity each frame ---
+  useEffect(() => {
+    if (view !== 'racing' || !cargoMode.isCargoMode) return;
+    cargoMode.update(gpu.raceState ?? null);
+  }, [view, cargoMode.isCargoMode, cargoMode.update, gpu.raceState]);
 
   // --- Race commentary updates ---
   useEffect(() => {
     if (view !== 'racing') return;
     commentary.update(gpu.raceState ?? null);
   }, [view, gpu.raceState, commentary.update]);
+
+  // --- Subtitle commentary: high speed, close gap, big lead, checkpoint triggers ---
+  useEffect(() => {
+    if (view !== 'racing') return;
+    const player = gpu.raceState?.player;
+    if (!player) return;
+    const now = performance.now();
+
+    // High speed commentary (>200 km/h, 10s cooldown)
+    if (player.speed_kmh > 200 && now - highSpeedCommentaryCooldownRef.current > 10000) {
+      highSpeedCommentaryCooldownRef.current = now;
+      subtitleCommentary.triggerCommentary('high_speed');
+    }
+
+    // Close gap commentary (|gap| < 1.0s)
+    const gap = player.gap_seconds;
+    if (gap != null && Math.abs(gap) < 1.0 && Math.abs(gap) > 0) {
+      subtitleCommentary.triggerCommentary('close_gap');
+    }
+
+    // Big lead commentary (gap > 5s in player's favor, 15s cooldown)
+    if (gap != null && gap < -5.0 && now - bigLeadCommentaryCooldownRef.current > 15000) {
+      bigLeadCommentaryCooldownRef.current = now;
+      subtitleCommentary.triggerCommentary('big_lead');
+    }
+
+    // Checkpoint commentary (on checkpoint advance, 12s cooldown)
+    const cp = player.checkpoint ?? 0;
+    if (cp > 0 && cp !== prevCheckpointRef.current && prevCheckpointRef.current > 0) {
+      if (now - checkpointCommentaryCooldownRef.current > 12000) {
+        checkpointCommentaryCooldownRef.current = now;
+        subtitleCommentary.triggerCommentary('checkpoint');
+      }
+    }
+  }, [view, gpu.raceState?.player?.speed_kmh, gpu.raceState?.player?.gap_seconds, gpu.raceState?.player?.checkpoint, subtitleCommentary.triggerCommentary]);
 
   // --- Countdown beeps + GO screen shake ---
   useEffect(() => {
@@ -325,6 +387,12 @@ export function Race() {
     if (status === 'racing' && prevRaceStatusRef.current === 'countdown') {
       // Start ghost recorder when race begins
       ghostRecorder.start();
+      // Start highlight detector when race begins
+      highlightDetector.start();
+      // Race start commentary subtitle
+      subtitleCommentary.triggerCommentary('race_start');
+      // AI personality: race start trash talk
+      aiPersonality.triggerTrashTalk('race_start');
       // Start challenge ghost timer for interpolation
       challengeGhostStartRef.current = performance.now();
       // Auto-dismiss the challenge ghost banner after 5 seconds
@@ -348,7 +416,7 @@ export function Race() {
     }
 
     prevRaceStatusRef.current = status;
-  }, [gpu.raceState?.race_status, gpu.raceState?.countdown, engineSound.playCountdownBeeps, ghostRecorder.start]);
+  }, [gpu.raceState?.race_status, gpu.raceState?.countdown, engineSound.playCountdownBeeps, ghostRecorder.start, highlightDetector.start]);
 
   // --- Screen shake helper ---
   // dirX/dirY: optional directional bias for the initial impulse (normalized direction vector).
@@ -440,6 +508,18 @@ export function Race() {
       setTimeout(() => setCrashDesaturate(false), 250);
     }
 
+    // Collision commentary (only for significant impacts)
+    if (maxIntensity > 500) {
+      subtitleCommentary.triggerCommentary('collision');
+    }
+
+    // AI trash talk on collision: big hits trigger 'player_crash', lighter hits trigger 'collision'
+    if (maxIntensity > 2000) {
+      aiPersonality.triggerTrashTalk('player_crash');
+    } else if (maxIntensity > 300) {
+      aiPersonality.triggerTrashTalk('collision');
+    }
+
     return () => {
       if (shakeRafRef.current !== null) {
         cancelAnimationFrame(shakeRafRef.current);
@@ -524,10 +604,14 @@ export function Race() {
         engineSound.playPassingWhoosh();
         crowd.cheer();
         bgMusic.triggerMusicEvent('overtake');
+        aiPersonality.triggerTrashTalk('player_overtakes');
+        subtitleCommentary.triggerCommentary('overtake_player');
       }
       if (prevGapSignRef.current < 0 && currentSign > 0) {
         // AI just overtook the player
         engineSound.playPassingWhoosh();
+        aiPersonality.triggerTrashTalk('ai_overtakes');
+        subtitleCommentary.triggerCommentary('overtake_ai');
       }
       prevGapSignRef.current = currentSign;
 
@@ -537,6 +621,7 @@ export function Race() {
           closeGapTriggeredRef.current = true;
           engineSound.triggerEvent('close_gap');
           bgMusic.triggerMusicEvent('close_gap_start');
+          aiPersonality.triggerTrashTalk('close_gap');
         }
         // Crowd anticipation scales with proximity (0.5s gap = max tension)
         crowd.setAnticipation(1 - Math.abs(gap));
@@ -551,12 +636,19 @@ export function Race() {
 
       // Comeback mechanic: show slipstream boost visual when player is >3s behind
       setSlipstreamBoost(gap > 3.0);
+
+      // AI big lead trash talk: trigger when AI is >5s ahead
+      if (gap > 5.0) {
+        aiPersonality.triggerTrashTalk('big_lead');
+      }
     }
 
     // Final lap detection
     if (player.total_laps > 1 && player.lap === player.total_laps && prevLapRef.current !== player.total_laps) {
       engineSound.triggerEvent('final_lap');
       bgMusic.triggerMusicEvent('final_lap');
+      subtitleCommentary.triggerCommentary('final_lap');
+      aiPersonality.triggerTrashTalk('final_lap');
     }
     prevLapRef.current = player.lap;
 
@@ -697,6 +789,7 @@ export function Race() {
           setNiceSave(true);
           speedHistoryRef.current = [speed]; // Reset to prevent re-trigger
           setTimeout(() => setNiceSave(false), 2000);
+          subtitleCommentary.triggerCommentary('nice_save');
         }
       }
     }
@@ -720,6 +813,7 @@ export function Race() {
     if (gap != null && Math.abs(gap) < 1.0 && (isFinishing || (isFinalLap && isNearEnd))) {
       if (!photoFinishTension) {
         setPhotoFinishTension(true);
+        subtitleCommentary.triggerCommentary('photo_finish');
       }
     } else {
       if (photoFinishTension) {
@@ -779,8 +873,12 @@ export function Race() {
 
       // Boost sound effect
       engineSound.playDriftBoost();
+
+      // AI trash talk reacting to player's drift
+      aiPersonality.triggerTrashTalk('drift');
+      subtitleCommentary.triggerCommentary('drift');
     }
-  }, [view, gpu.latestDriftEnd, engineSound.playDriftBoost]);
+  }, [view, gpu.latestDriftEnd, engineSound.playDriftBoost, aiPersonality.triggerTrashTalk]);
 
   // --- Voice boost: screen shake at max boost ---
   const voiceBoostMaxRef = useRef(false);
@@ -1086,6 +1184,10 @@ export function Race() {
       // Stop ghost recording
       ghostRecorder.stop();
 
+      // Finalize highlight detection and store highlights for results screen
+      highlightDetector.onRaceFinished(gpu.raceFinished);
+      setRaceHighlights(highlightDetector.getHighlights());
+
       // --- Photo Finish detection: gap < 1.0s between player and AI ---
       const pTime = gpu.raceFinished.player_time;
       const aTime = gpu.raceFinished.ai_time;
@@ -1197,6 +1299,13 @@ export function Race() {
       const playerWon = gpu.raceFinished.winner === 'player';
       adaptiveDifficulty.recordResult(playerWon);
 
+      // AI personality: win/loss trash talk + grudge recording
+      aiPersonality.triggerTrashTalk(playerWon ? 'lose' : 'win');
+      aiPersonality.recordRaceResult(playerWon);
+
+      // Win/loss commentary subtitle
+      subtitleCommentary.triggerCommentary(playerWon ? 'win' : 'loss');
+
       // Mark player as having played before (for first-time overlay)
       try { localStorage.setItem('shadow_driver_has_played', 'true'); } catch { /* ignore */ }
 
@@ -1223,6 +1332,11 @@ export function Race() {
         const settings = lastRaceSettingsRef.current;
         const pbResultData = personalBests.getResult(config.track, config.laps, gpu.raceFinished.player_time);
         setPbResult(pbResultData);
+
+        // PB commentary
+        if (pbResultData && pbResultData.isNewBest) {
+          subtitleCommentary.triggerCommentary('pb');
+        }
 
         // Save final lap's checkpoint splits if they exist
         if (checkpointTimesRef.current.length > 0) {
@@ -1337,6 +1451,10 @@ export function Race() {
     splitLapRef.current = 0;
     // Reset ghost recorder for the new race
     ghostRecorder.reset();
+    // Initialize AI personality for trash talk
+    aiPersonality.initPersonality(model);
+    // Reset cargo integrity for the new race
+    cargoMode.reset();
     if (isDemo || directWsUrl) {
       pendingDemoRaceRef.current = { track, laps, weather, model, player_car: playerCar, time_of_day: timeOfDay };
       const wsUrl = directWsUrl || DEMO_WS_URL;
@@ -1434,6 +1552,8 @@ export function Race() {
           quickstart={isQuickstart}
           isConnected={gpu.isConnected}
           urlSettings={urlSettings}
+          isCargoMode={cargoMode.isCargoMode}
+          onToggleCargoMode={cargoMode.setCargoMode}
           dareTime={dareTime}
         />
       )}
@@ -1775,6 +1895,16 @@ export function Race() {
           {/* HUD overlay */}
           <RaceHUD raceState={gpu.raceState} latencyMs={gpu.latencyMs} gamepadConnected={gamepad.connected} localKeys={keysRef} />
 
+          {/* Cargo integrity meter (Fragile Cargo mode) */}
+          {cargoMode.isCargoMode && (gpu.raceState?.race_status === 'racing' || gpu.raceState?.race_status === 'finishing') && (
+            <CargoMeter
+              integrity={cargoMode.integrity}
+              isDamaged={cargoMode.isDamaged}
+              lastDamageType={cargoMode.lastDamageType}
+              raceFinished={gpu.raceState?.race_status === 'finishing'}
+            />
+          )}
+
           {/* Challenge ghost indicator banner */}
           {showChallengeGhostBanner && challengeGhostFrames && (
             <div className="absolute top-16 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
@@ -1802,7 +1932,16 @@ export function Race() {
           {/* AI race commentary */}
           <CommentaryOverlay messages={gpu.commentary} spokenText={commentary.isEnabled ? commentary.currentText : null} />
 
-          {/* AI opponent trash talk bubble */}
+          {/* Static AI commentary subtitles (event-triggered, pre-generated lines) */}
+          <CommentarySubtitle line={subtitleCommentary.currentLine} />
+
+          {/* AI opponent trash talk bubble (personality-aware) */}
+          <AIChat
+            personality={aiPersonality.personality}
+            message={aiPersonality.currentMessage}
+            isGrudgeMode={aiPersonality.isGrudgeMode}
+          />
+          {/* Fallback: server-sent AI chat (if server sends ai_chat messages) */}
           <AIChatBubble message={gpu.aiChat} />
 
           {/* Exit button */}
@@ -2150,6 +2289,9 @@ export function Race() {
             streakResult={streakResult}
             ghostFrames={ghostRecorder.getGhostData().frames}
             dareTime={dareTime}
+            cargoIntegrity={cargoMode.isCargoMode ? cargoMode.integrity : undefined}
+            cargoScore={cargoMode.isCargoMode && gpu.raceFinished.player_time != null ? cargoMode.computeScore(gpu.raceFinished.player_time) : undefined}
+            highlights={raceHighlights}
           />
           {/* Photo Finish overlay on results screen (golden glow + text, auto-dismisses after 3s) */}
           {photoFinish && (

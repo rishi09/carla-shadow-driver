@@ -113,9 +113,13 @@ interface RaceSetupProps {
   };
   /** Dare challenge time in seconds (from ?dare=X.XXX query param) */
   dareTime?: number | null;
+  /** Whether fragile cargo mode is enabled */
+  isCargoMode?: boolean;
+  /** Toggle cargo mode on/off */
+  onToggleCargoMode?: (on: boolean) => void;
 }
 
-export function RaceSetup({ onStartRace, onBack, onStartDailyChallenge, quickstart, isConnected, urlSettings, dareTime }: RaceSetupProps) {
+export function RaceSetup({ onStartRace, onBack, onStartDailyChallenge, quickstart, isConnected, urlSettings, dareTime, isCargoMode, onToggleCargoMode }: RaceSetupProps) {
   const [selectedTrack, setSelectedTrack] = useState(urlSettings?.track || DEFAULT_TRACK);
   const [selectedWeather, setSelectedWeather] = useState(urlSettings?.weather || DEFAULT_WEATHER);
   const [selectedLaps, setSelectedLaps] = useState(urlSettings?.laps || DEFAULT_LAPS);
@@ -417,6 +421,53 @@ export function RaceSetup({ onStartRace, onBack, onStartDailyChallenge, quicksta
             ))}
           </div>
         </div>
+
+        {/* Game Mode: Fragile Cargo */}
+        {onToggleCargoMode && (
+          <div className="mb-6">
+            <label className="block text-white/60 text-sm font-medium mb-2">Game Mode</label>
+            <button
+              onClick={() => onToggleCargoMode(!isCargoMode)}
+              className={`w-full flex items-center gap-3 py-3 px-4 rounded-lg border text-left transition-all ${
+                isCargoMode
+                  ? 'bg-amber-500/10 border-amber-500/40'
+                  : 'bg-black/60 border-white/10 hover:border-white/20'
+              }`}
+            >
+              {/* Crate icon */}
+              <div className="shrink-0">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={isCargoMode ? '#FFC107' : 'rgba(255,255,255,0.4)'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+                  <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+                  <line x1="12" y1="22.08" x2="12" y2="12" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <span className={`text-sm font-medium ${isCargoMode ? 'text-amber-400' : 'text-white'}`}>
+                    Fragile Cargo
+                  </span>
+                  {isCargoMode && (
+                    <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded border border-amber-500/40 bg-amber-500/20 text-amber-400">
+                      ON
+                    </span>
+                  )}
+                </div>
+                <p className="text-white/40 text-xs mt-0.5">
+                  Deliver fragile cargo. Collisions and hard braking reduce your cargo integrity. Score combines speed AND handling.
+                </p>
+              </div>
+              {/* Toggle indicator */}
+              <div className={`w-10 h-5 rounded-full relative transition-colors ${isCargoMode ? 'bg-amber-500/40' : 'bg-white/10'}`}>
+                <div
+                  className={`absolute top-0.5 w-4 h-4 rounded-full transition-all ${
+                    isCargoMode ? 'left-[22px] bg-amber-400' : 'left-0.5 bg-white/40'
+                  }`}
+                />
+              </div>
+            </button>
+          </div>
+        )}
 
         {/* Advanced Settings - collapsible */}
         <div className="mb-6">

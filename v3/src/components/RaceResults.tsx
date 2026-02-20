@@ -5,6 +5,8 @@ import type { GhostFrame } from '../hooks/useGhostRecorder.ts';
 import { encodeGhostForUrl } from '../utils/ghostUrl.ts';
 import { RacingLineViz } from './RacingLineViz.tsx';
 import { RaceResultCard } from './RaceResultCard.tsx';
+import { HighlightReel } from './HighlightReel.tsx';
+import type { Highlight } from '../hooks/useHighlightDetector.ts';
 
 interface RaceResultsProps {
   result: RaceFinished;
@@ -33,6 +35,12 @@ interface RaceResultsProps {
   ghostFrames?: GhostFrame[];
   /** Dare challenge: time to beat (from ?dare=X query param), null if not a dare */
   dareTime?: number | null;
+  /** Cargo mode: final integrity percentage (0-100), undefined if not in cargo mode */
+  cargoIntegrity?: number;
+  /** Cargo mode: combined score (lower is better), undefined if not in cargo mode */
+  cargoScore?: number;
+  /** Detected highlights from the race */
+  highlights?: Highlight[];
 }
 
 const MEDAL_ICONS: Record<string, string> = {
@@ -91,7 +99,7 @@ function formatGap(seconds: number): string {
   return abs.toFixed(1);
 }
 
-export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onInstantReplay, personalBestResult, isDailyChallenge, dailyChallengePosition, streakResult, ghostFrames, dareTime }: RaceResultsProps) {
+export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onInstantReplay, personalBestResult, isDailyChallenge, dailyChallengePosition, streakResult, ghostFrames, dareTime, cargoIntegrity, cargoScore, highlights }: RaceResultsProps) {
   const playerWon = result.winner === 'player';
 
   // Staggered reveal animation state
@@ -637,6 +645,38 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
                 <div className="text-white/30">pts</div>
               </div>
             )}
+
+            {/* Cargo Integrity (Fragile Cargo mode) */}
+            {cargoIntegrity != null && (
+              <div className="contents" style={revealStyle(7)}>
+                <div className="text-white/50 flex items-center gap-1">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-amber-400/60">
+                    <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+                    <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+                    <line x1="12" y1="22.08" x2="12" y2="12" />
+                  </svg>
+                  Cargo
+                </div>
+                <div className={`font-bold ${
+                  cargoIntegrity > 60 ? 'text-green-400' :
+                  cargoIntegrity > 30 ? 'text-amber-400' :
+                  cargoIntegrity > 0 ? 'text-orange-400' :
+                  'text-red-400'
+                }`}>
+                  {Math.round(cargoIntegrity)}%
+                </div>
+                <div className="text-white/30">integrity</div>
+              </div>
+            )}
+            {cargoScore != null && (
+              <div className="contents" style={revealStyle(7)}>
+                <div className="text-white/50">Cargo Score</div>
+                <div className="text-amber-400 font-bold">
+                  {cargoScore.toLocaleString()}
+                </div>
+                <div className="text-white/30">pts</div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -700,6 +740,13 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
             raceSettings={raceSettings}
           />
         </div>
+
+        {/* Race highlights reel */}
+        {highlights && highlights.length > 0 && (
+          <div className="mb-6" style={revealStyle(11)}>
+            <HighlightReel highlights={highlights} />
+          </div>
+        )}
 
         {/* Action buttons */}
         <div className="flex gap-3" style={revealStyle(12)}>
