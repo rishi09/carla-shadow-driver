@@ -17,6 +17,7 @@ import websockets
 
 from aiortc import RTCPeerConnection, RTCSessionDescription, RTCRtpSender
 from webrtc_track import CarlaVideoTrack, force_codec
+from nvenc_encoder import NVENCEncoder
 
 from carla_manager import RaceManager
 from model_manager import ModelManager
@@ -277,6 +278,11 @@ class RaceServer:
         # Activity ping task: sends periodic pings while clients are connected
         self._activity_ping_task: Optional[asyncio.Task] = None
 
+        # --- NVENC H.264 encoder state ---
+        self._nvenc_encoder: Optional[NVENCEncoder] = None
+        self._h264_enabled: bool = False  # True if client negotiated h264
+        self._client_supports_h264: bool = False
+
     def _ping_activity(self):
         """Fire-and-forget HTTP POST to the activity ping endpoint.
         Records this instance as actively racing so the landing page
@@ -502,6 +508,11 @@ class RaceServer:
                         self.weather_event_manager.set_ambient_override(sun_alt, clouds, precip)
                     print(f"[ambient] Weather override: sun={sun_alt}, clouds={clouds}, precip={precip}")
 
+                elif msg_type == 'codec_negotiate':
+                    # Client sends supported codecs; if h264, enable NVENC path
+                    client_codecs = data.get('codecs', [])
+                    await self._handle_codec_negotiate(websocket, client_codecs)
+
         except websockets.exceptions.ConnectionClosed:
             print("Client disconnected")
         finally:
@@ -556,6 +567,59 @@ class RaceServer:
             "sdpType": self.pc.localDescription.type,
         }))
         print("WebRTC answer sent — video track active")
+
+    async def _handle_codec_negotiate(self, websocket, client_codecs: list):
+        """Handle codec negotiation: if client supports h264, send codec config."""
+        self._client_supports_h264 = 'h264' in client_codecs
+
+        if self._client_supports_h264 and self._nvenc_encoder and self._nvenc_encoder.is_running:
+            config = self._nvenc_encoder.codec_config
+            if config:
+                # Send codec config as 0x12 prefix + JSON
+                config_msg = json.dumps({
+                    'type': 'codec_config',
+                    'codec': config['codec'],
+                    'width': config['width'],
+                    'height': config['height'],
+                }).encode('utf-8')
+                await websocket.send(b'\x12' + config_msg)
+                self._h264_enabled = True
+                print(f"[NVENC] H.264 enabled for client (codec={config['codec']})")
+            else:
+                print("[NVENC] Client supports h264 but codec config not yet available")
+                self._h264_enabled = False
+        else:
+            self._h264_enabled = False
+            if not self._client_supports_h264:
+                print("[NVENC] Client does not support h264, using JPEG fallback")
+            elif not self._nvenc_encoder or not self._nvenc_encoder.is_running:
+                print("[NVENC] Encoder not running, using JPEG fallback")
+
+    def _start_nvenc_encoder(self):
+        """Try to start the NVENC encoder. Falls back silently to JPEG on failure."""
+        if self._nvenc_encoder and self._nvenc_encoder.is_running:
+            return
+
+        width = self.config.get('streaming', {}).get('width', 1280)
+        height = self.config.get('streaming', {}).get('height', 720)
+        encoder = NVENCEncoder(width=width, height=height, fps=30, bitrate='8M')
+
+        if encoder.start():
+            self._nvenc_encoder = encoder
+            print("[NVENC] NVENC encoder started (H.264 hardware encoding active)")
+
+            # Feed a blank frame to prime the encoder and extract codec config
+            blank = b'\x00' * (width * height * 4)
+            encoder.encode_frame(blank)
+            # Wait briefly for codec config
+            config = encoder.wait_for_codec_config(timeout=2.0)
+            if config:
+                print(f"[NVENC] Codec config ready: {config['codec']}")
+            else:
+                print("[NVENC] Warning: codec config not extracted from first frame")
+        else:
+            self._nvenc_encoder = None
+            print("[NVENC] NVENC unavailable, using JPEG encoding")
 
     async def _switch_model(self, model_name: str):
         """Switch the AI driving model."""
@@ -624,6 +688,13 @@ class RaceServer:
         # Reset encoder frame hash for delta detection
         self.encoder.reset_frame_hash()
         self.rear_encoder.reset_frame_hash()
+
+        # Stop NVENC encoder if running
+        if self._nvenc_encoder:
+            self._nvenc_encoder.stop()
+            self._nvenc_encoder = None
+        self._h264_enabled = False
+        self._client_supports_h264 = False
 
         # Stop training recorder if active
         if self.training_recorder.recording:
@@ -902,6 +973,9 @@ class RaceServer:
         self.highlight_buffer.reset()
         self._prev_gap_seconds = None
         self._highlight_collision_count = 0
+
+        # Try to start NVENC encoder for H.264 video (falls back to JPEG)
+        self._start_nvenc_encoder()
 
         # Run the frame loop (30fps) and telemetry loop (30Hz) concurrently
         self._race_task = asyncio.create_task(self._race_loop())
@@ -1409,9 +1483,12 @@ class RaceServer:
         """Encode and send chase camera frame as binary WebSocket message.
         Also sends rear-view mirror frames at half rate (15fps).
 
-        Binary frame format: 1-byte type prefix + JPEG data
-          0x00 = main camera frame
-          0x01 = rear-view mirror frame
+        Binary frame format: 1-byte type prefix + data
+          0x00 = main camera JPEG frame
+          0x01 = rear-view mirror JPEG frame
+          0x10 = H.264 keyframe (SPS+PPS+IDR)
+          0x11 = H.264 delta frame (non-IDR slice)
+          0x12 = codec config JSON
 
         Optimizations:
           - Skipped when WebRTC is active and connected (video flows via RTP track)
@@ -1420,6 +1497,7 @@ class RaceServer:
             a lightweight 'no_change' JSON message instead of re-encoding JPEG
           - JPEG encoding runs in thread pool to avoid blocking asyncio event loop
           - Periodically sends perf_stats to client for debug overlay
+          - When NVENC H.264 is enabled: uses GPU hardware encoding (1-2ms vs 5-10ms JPEG)
         """
         if not self.ws_client:
             return
@@ -1433,6 +1511,62 @@ class RaceServer:
         if self._should_skip_frame():
             self._frame_skip_count += 1
             return
+
+        # --- H.264 NVENC path ---
+        if self._h264_enabled and self._nvenc_encoder and self._nvenc_encoder.is_running:
+            raw_frame = self.carla.get_chase_frame_raw()
+            if raw_frame is None:
+                return
+
+            # Feed raw BGRA to NVENC (this returns immediately, encoding is pipelined)
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, self._nvenc_encoder.encode_frame, raw_frame)
+
+            # Drain all available encoded frames
+            while True:
+                result = self._nvenc_encoder.get_encoded_frame()
+                if result is None:
+                    break
+
+                is_keyframe, h264_data = result
+                prefix = b'\x10' if is_keyframe else b'\x11'
+
+                try:
+                    await self.ws_client.send(prefix + h264_data)
+                    self.frame_count += 1
+                except Exception:
+                    pass
+
+            # Update frame skip tracking with current position
+            if self.carla.player_car:
+                try:
+                    telem = self.carla.get_telemetry(self.carla.player_car)
+                    self._last_sent_x = telem['x']
+                    self._last_sent_y = telem['y']
+                    self._last_sent_yaw = telem.get('yaw', 0.0)
+                    self._last_sent_time = time.time()
+                except Exception:
+                    pass
+
+            # Perf logging
+            if self.frame_count % 90 == 0:
+                stats = self._nvenc_encoder.get_stats()
+                print(f"[perf] frame #{self.frame_count}: "
+                      f"nvenc_encoded={stats['frames_encoded']}, "
+                      f"queue={stats['queue_size']}, "
+                      f"errors={stats['errors']}, "
+                      f"fps={self.fps:.1f}")
+                self._frame_skip_count = 0
+                self._delta_skip_count = 0
+
+            # Rear-view mirror (still JPEG, lower priority)
+            self._rear_frame_counter += 1
+            if self._rear_frame_counter % 2 == 0:
+                await self._send_rear_frame()
+
+            return
+
+        # --- JPEG fallback path (original) ---
 
         frame = self.carla.get_chase_frame()
         if frame is None:

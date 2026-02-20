@@ -17,22 +17,31 @@ class CameraBuffer:
 
     def __init__(self):
         self.frame: Optional[np.ndarray] = None
+        self.raw_frame: Optional[bytes] = None
         self.lock = threading.Lock()
         self.frame_count = 0
 
     def update(self, carla_image):
-        """Process CARLA image and store as RGB numpy array."""
+        """Process CARLA image and store as RGB numpy array + raw BGRA bytes."""
+        # Store raw BGRA bytes for NVENC encoding (zero-copy from CARLA)
+        raw = bytes(carla_image.raw_data)
         array = np.frombuffer(carla_image.raw_data, dtype=np.uint8)
         array = array.reshape((carla_image.height, carla_image.width, 4))
         rgb = array[:, :, :3][:, :, ::-1].copy()
         with self.lock:
             self.frame = rgb
+            self.raw_frame = raw
             self.frame_count += 1
 
     def get(self) -> Optional[np.ndarray]:
         """Get latest frame (thread-safe copy)."""
         with self.lock:
             return self.frame.copy() if self.frame is not None else None
+
+    def get_raw(self) -> Optional[bytes]:
+        """Get latest raw BGRA frame bytes (immutable, no copy needed)."""
+        with self.lock:
+            return self.raw_frame
 
 
 class RaceManager:
@@ -1502,6 +1511,10 @@ class RaceManager:
     def get_chase_frame(self) -> Optional[np.ndarray]:
         """Get latest chase camera frame."""
         return self.chase_buffer.get()
+
+    def get_chase_frame_raw(self) -> Optional[bytes]:
+        """Get latest chase camera frame as raw BGRA bytes (for NVENC encoding)."""
+        return self.chase_buffer.get_raw()
 
     def get_ai_frame(self) -> Optional[np.ndarray]:
         """Get latest AI camera frame (for model inference)."""

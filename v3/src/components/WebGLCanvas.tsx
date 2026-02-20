@@ -1,7 +1,12 @@
 import { useRef, useEffect, useCallback, useState, type RefObject } from 'react';
+import type { CodecConfig } from '../types/index.ts';
 
 interface WebGLCanvasProps {
   onBinaryFrame: (handler: ((data: Blob) => void) | null) => void;
+  /** H.264 frame handler registration (for WebCodecs decoding) */
+  onH264Frame?: (handler: ((isKeyframe: boolean, data: ArrayBuffer) => void) | null) => void;
+  /** Codec config handler registration (for WebCodecs decoder configuration) */
+  onCodecConfig?: (handler: ((config: CodecConfig) => void) | null) => void;
   className?: string;
   speedKmh?: number;
   /** Current steering value: -1 (full left) to 1 (full right) */
@@ -217,7 +222,7 @@ function createProgram(gl: WebGL2RenderingContext): WebGLProgram | null {
 
 // ---------- Component ----------
 
-export function WebGLCanvas({ onBinaryFrame, className = '', speedKmh = 0, steer = 0, externalCanvasRef }: WebGLCanvasProps) {
+export function WebGLCanvas({ onBinaryFrame, onH264Frame, onCodecConfig, className = '', speedKmh = 0, steer = 0, externalCanvasRef }: WebGLCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   // Sync external canvas ref with internal ref
@@ -244,7 +249,8 @@ export function WebGLCanvas({ onBinaryFrame, className = '', speedKmh = 0, steer
     blend: WebGLUniformLocation | null;
     motionVector: WebGLUniformLocation | null;
   }>({ time: null, intensity: null, chromatic: null, radialBlur: null, blend: null, motionVector: null });
-  const pendingFrameRef = useRef<ImageBitmap | null>(null);
+  // pendingFrameRef accepts both ImageBitmap (JPEG path) and VideoFrame (H.264 path)
+  const pendingFrameRef = useRef<ImageBitmap | VideoFrame | null>(null);
   const rafIdRef = useRef<number>(0);
   const frameCountRef = useRef<number>(0);
   const fpsIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -257,6 +263,11 @@ export function WebGLCanvas({ onBinaryFrame, className = '', speedKmh = 0, steer
   const prevTexInitRef = useRef(false);
   const blendFrameRef = useRef(false);
   const hasUploadedAnyFrameRef = useRef(false);
+
+  // WebCodecs H.264 decoder state
+  const decoderRef = useRef<VideoDecoder | null>(null);
+  const h264TimestampRef = useRef<number>(0);
+  const usingH264Ref = useRef(false);
 
   // Keep speed/steer refs in sync without triggering effect re-runs
   speedRef.current = speedKmh;
@@ -349,10 +360,24 @@ export function WebGLCanvas({ onBinaryFrame, className = '', speedKmh = 0, steer
     frameCountRef.current = 0;
     fpsIntervalRef.current = setInterval(() => {
       if (frameCountRef.current > 0) {
-        console.log(`[WebGLCanvas] FPS: ${frameCountRef.current}`);
+        console.log(`[WebGLCanvas] FPS: ${frameCountRef.current}${usingH264Ref.current ? ' (H.264)' : ' (JPEG)'}`);
       }
       frameCountRef.current = 0;
     }, 1000);
+
+    // Helper to close a pending frame (works for both ImageBitmap and VideoFrame)
+    const closePending = (frame: ImageBitmap | VideoFrame | null) => {
+      if (!frame) return;
+      if ('close' in frame) frame.close();
+    };
+
+    // Helper to get frame dimensions (works for both ImageBitmap and VideoFrame)
+    const getFrameSize = (frame: ImageBitmap | VideoFrame): { width: number; height: number } => {
+      if (frame instanceof VideoFrame) {
+        return { width: frame.displayWidth, height: frame.displayHeight };
+      }
+      return { width: frame.width, height: frame.height };
+    };
 
     // Render loop
     const renderLoop = () => {
@@ -363,18 +388,18 @@ export function WebGLCanvas({ onBinaryFrame, className = '', speedKmh = 0, steer
       if (pending) {
         pendingFrameRef.current = null;
 
+        const { width, height } = getFrameSize(pending);
+
         // Resize canvas to match frame if needed
         const canvas2 = canvasRef.current;
-        if (canvas2 && (canvas2.width !== pending.width || canvas2.height !== pending.height)) {
-          canvas2.width = pending.width;
-          canvas2.height = pending.height;
-          gl.viewport(0, 0, pending.width, pending.height);
+        if (canvas2 && (canvas2.width !== width || canvas2.height !== height)) {
+          canvas2.width = width;
+          canvas2.height = height;
+          gl.viewport(0, 0, width, height);
         }
 
         // Copy current texture -> previous texture before uploading new frame
         if (textureInitializedRef.current && hasUploadedAnyFrameRef.current) {
-          // Use a framebuffer to read the current texture and copy to prev
-          // Simpler approach: re-upload via copyTexImage2D using an FBO
           const fbo = gl.createFramebuffer();
           gl.bindFramebuffer(gl.READ_FRAMEBUFFER, fbo);
           gl.framebufferTexture2D(gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, textureRef.current, 0);
@@ -382,10 +407,10 @@ export function WebGLCanvas({ onBinaryFrame, className = '', speedKmh = 0, steer
           gl.activeTexture(gl.TEXTURE1);
           gl.bindTexture(gl.TEXTURE_2D, prevTextureRef.current);
           if (!prevTexInitRef.current) {
-            gl.copyTexImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 0, 0, pending.width, pending.height, 0);
+            gl.copyTexImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 0, 0, width, height, 0);
             prevTexInitRef.current = true;
           } else {
-            gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 0, 0, pending.width, pending.height);
+            gl.copyTexSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 0, 0, width, height);
           }
 
           gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
@@ -393,32 +418,31 @@ export function WebGLCanvas({ onBinaryFrame, className = '', speedKmh = 0, steer
         }
 
         // Upload new frame to current texture
+        // WebGL2 texImage2D accepts both ImageBitmap and VideoFrame as TexImageSource
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, textureRef.current);
         if (!textureInitializedRef.current) {
-          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, pending);
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, pending as TexImageSource);
           textureInitializedRef.current = true;
 
           // Initialize prev texture with same frame (no blend on first frame)
           gl.activeTexture(gl.TEXTURE1);
           gl.bindTexture(gl.TEXTURE_2D, prevTextureRef.current);
-          // Can't re-use pending (already consumed), so use copyTexImage2D via FBO
           const fbo = gl.createFramebuffer();
           gl.bindFramebuffer(gl.READ_FRAMEBUFFER, fbo);
           gl.framebufferTexture2D(gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, textureRef.current, 0);
-          gl.copyTexImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 0, 0, pending.width, pending.height, 0);
+          gl.copyTexImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 0, 0, width, height, 0);
           prevTexInitRef.current = true;
           gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
           gl.deleteFramebuffer(fbo);
         } else {
-          // texSubImage2D is faster if dimensions match; fall back to texImage2D on size change
           try {
-            gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, pending);
+            gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, pending as TexImageSource);
           } catch {
-            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, pending);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, pending as TexImageSource);
           }
         }
-        pending.close();
+        closePending(pending);
         hasUploadedAnyFrameRef.current = true;
 
         // Set blend flag: next render tick will show 50/50 crossfade
@@ -448,16 +472,12 @@ export function WebGLCanvas({ onBinaryFrame, className = '', speedKmh = 0, steer
         // Motion vector: velocity-based pixel shift for motion-compensated interpolation
         if (blendFrameRef.current) {
           gl.uniform1f(uniformsRef.current.blend, 0.5);
-          // Compute motion vector from telemetry:
-          //   X = lateral shift from steering (negative steer = scene shifts right = positive X)
-          //   Y = forward motion = slight downward shift in screen space
           const motionX = -steerRef.current * 0.005 * (speed / 100);
           const motionY = speed * 0.00003;
           gl.uniform2f(uniformsRef.current.motionVector, motionX, motionY);
           blendFrameRef.current = false;
         } else {
           gl.uniform1f(uniformsRef.current.blend, 1.0);
-          // No blending = no motion shift needed
           gl.uniform2f(uniformsRef.current.motionVector, 0.0, 0.0);
         }
 
@@ -470,20 +490,20 @@ export function WebGLCanvas({ onBinaryFrame, className = '', speedKmh = 0, steer
     };
     rafIdRef.current = requestAnimationFrame(renderLoop);
 
-    // Frame handler
-    let decoding = false;
+    // --- JPEG fallback frame handler ---
+    let jpegDecoding = false;
 
-    const handler = (blob: Blob) => {
-      if (decoding) return;
-      decoding = true;
+    const jpegHandler = (blob: Blob) => {
+      // Skip JPEG decode when H.264 path is active
+      if (usingH264Ref.current) return;
+      if (jpegDecoding) return;
+      jpegDecoding = true;
 
       createImageBitmap(blob)
         .then((bitmap) => {
-          // Close previous pending if exists (drop frame)
-          const prev = pendingFrameRef.current;
-          if (prev) prev.close();
+          closePending(pendingFrameRef.current);
           pendingFrameRef.current = bitmap;
-          decoding = false;
+          jpegDecoding = false;
 
           if (!firstFrameReceivedRef.current) {
             firstFrameReceivedRef.current = true;
@@ -491,19 +511,103 @@ export function WebGLCanvas({ onBinaryFrame, className = '', speedKmh = 0, steer
           }
         })
         .catch(() => {
-          decoding = false;
+          jpegDecoding = false;
         });
     };
 
-    onBinaryFrame(handler);
+    onBinaryFrame(jpegHandler);
+
+    // --- WebCodecs H.264 decode handler ---
+    const codecConfigHandler = (config: CodecConfig) => {
+      // Close existing decoder if any
+      if (decoderRef.current && decoderRef.current.state !== 'closed') {
+        try { decoderRef.current.close(); } catch { /* ignore */ }
+      }
+
+      try {
+        const decoder = new VideoDecoder({
+          output: (frame: VideoFrame) => {
+            // Close previous pending frame
+            closePending(pendingFrameRef.current);
+            pendingFrameRef.current = frame;
+
+            if (!firstFrameReceivedRef.current) {
+              firstFrameReceivedRef.current = true;
+              setHasFirstFrame(true);
+            }
+          },
+          error: (err: DOMException) => {
+            console.error('[WebGLCanvas] VideoDecoder error:', err.message);
+            // Fall back to JPEG
+            usingH264Ref.current = false;
+            if (decoderRef.current && decoderRef.current.state !== 'closed') {
+              try { decoderRef.current.close(); } catch { /* ignore */ }
+            }
+            decoderRef.current = null;
+          },
+        });
+
+        decoder.configure({
+          codec: config.codec,
+          optimizeForLatency: true,
+        });
+
+        decoderRef.current = decoder;
+        usingH264Ref.current = true;
+        h264TimestampRef.current = 0;
+        console.log(`[WebGLCanvas] VideoDecoder configured: ${config.codec} (H.264 hardware decode active)`);
+      } catch (err) {
+        console.warn('[WebGLCanvas] Failed to create VideoDecoder, using JPEG fallback:', err);
+        usingH264Ref.current = false;
+      }
+    };
+
+    const h264Handler = (isKeyframe: boolean, data: ArrayBuffer) => {
+      const decoder = decoderRef.current;
+      if (!decoder || decoder.state === 'closed') {
+        // No decoder configured yet, skip
+        return;
+      }
+
+      // Skip delta frames until we've seen a keyframe
+      if (!isKeyframe && h264TimestampRef.current === 0) {
+        return;
+      }
+
+      try {
+        const chunk = new EncodedVideoChunk({
+          type: isKeyframe ? 'key' : 'delta',
+          timestamp: h264TimestampRef.current,
+          data: data,
+        });
+        h264TimestampRef.current += 33333; // ~30fps in microseconds
+        decoder.decode(chunk);
+      } catch (err) {
+        console.warn('[WebGLCanvas] H.264 decode error:', err);
+      }
+    };
+
+    if (onH264Frame) onH264Frame(h264Handler);
+    if (onCodecConfig) onCodecConfig(codecConfigHandler);
 
     return () => {
       onBinaryFrame(null);
+      if (onH264Frame) onH264Frame(null);
+      if (onCodecConfig) onCodecConfig(null);
       cancelAnimationFrame(rafIdRef.current);
       if (fpsIntervalRef.current) {
         clearInterval(fpsIntervalRef.current);
         fpsIntervalRef.current = null;
       }
+      // Close VideoDecoder
+      if (decoderRef.current && decoderRef.current.state !== 'closed') {
+        try { decoderRef.current.close(); } catch { /* ignore */ }
+      }
+      decoderRef.current = null;
+      usingH264Ref.current = false;
+      // Close any pending VideoFrame
+      closePending(pendingFrameRef.current);
+      pendingFrameRef.current = null;
       // Clean up GL resources
       const gl = glRef.current;
       if (gl) {
@@ -520,7 +624,7 @@ export function WebGLCanvas({ onBinaryFrame, className = '', speedKmh = 0, steer
       blendFrameRef.current = false;
       hasUploadedAnyFrameRef.current = false;
     };
-  }, [onBinaryFrame, initGL]);
+  }, [onBinaryFrame, onH264Frame, onCodecConfig, initGL]);
 
   return (
     <div className={`relative ${className}`}>

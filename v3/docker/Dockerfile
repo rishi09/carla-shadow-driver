@@ -21,6 +21,13 @@ ENV PATH="/opt/conda/bin:$PATH"
 # avoiding the Ubuntu 18.04 FFmpeg 3.4 incompatibility with modern PyAV
 RUN conda install -y -c conda-forge av && conda clean -a -y
 
+# Install FFmpeg with NVENC support (BtbN static build, ~80MB)
+# This provides h264_nvenc hardware encoding on NVIDIA GPUs
+RUN curl -sL https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz \
+    | tar xJ -C /tmp && \
+    cp /tmp/ffmpeg-master-latest-linux64-gpl/bin/ffmpeg /usr/local/bin/ffmpeg && \
+    rm -rf /tmp/ffmpeg-master-latest-linux64-gpl
+
 # Install cloudflared (fallback tunnel)
 RUN curl -sL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 \
     -o /usr/local/bin/cloudflared && chmod +x /usr/local/bin/cloudflared

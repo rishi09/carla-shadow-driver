@@ -1251,6 +1251,8 @@ export function Race() {
           ) : useWebGL2 ? (
             <WebGLCanvas
               onBinaryFrame={gpu.onBinaryFrame}
+              onH264Frame={gpu.onH264Frame}
+              onCodecConfig={gpu.onCodecConfig}
               className="absolute inset-0 w-full h-full object-cover"
               speedKmh={gpu.raceState?.player?.speed_kmh ?? 0}
               steer={gpu.raceState?.player?.steer ?? 0}

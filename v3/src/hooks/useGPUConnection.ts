@@ -6,6 +6,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import type {
   GPUProvisioningState, WebSocketConnectionState, GPUInstanceData,
   GPUError, KeyState, GamepadControls, RaceState, RaceFinished, ServerMessage, DriftEndEvent, AIChatMessage,
+  CodecConfig,
 } from '../types/index.ts';
 
 // Constants
@@ -101,6 +102,10 @@ export interface UseGPUConnectionReturn {
   onBinaryFrame: (handler: ((data: Blob) => void) | null) => void;
   // Expose rear-view mirror frame handler registration
   onRearFrame: (handler: ((data: Blob) => void) | null) => void;
+  // H.264 frame handler registration (for WebCodecs decoding)
+  onH264Frame: (handler: ((isKeyframe: boolean, data: ArrayBuffer) => void) | null) => void;
+  // Codec config handler registration (for WebCodecs decoder configuration)
+  onCodecConfig: (handler: ((config: CodecConfig) => void) | null) => void;
   // WebRTC remote video stream (null until track arrives)
   remoteStream: MediaStream | null;
   // Timestamp (performance.now()) of the last received binary/video frame
@@ -143,6 +148,8 @@ export function useGPUConnection(): UseGPUConnectionReturn {
   const retryCountRef = useRef(0);
   const binaryFrameHandlerRef = useRef<((data: Blob) => void) | null>(null);
   const rearFrameHandlerRef = useRef<((data: Blob) => void) | null>(null);
+  const h264FrameHandlerRef = useRef<((isKeyframe: boolean, data: ArrayBuffer) => void) | null>(null);
+  const codecConfigHandlerRef = useRef<((config: CodecConfig) => void) | null>(null);
 
   // Refs to avoid stale closures
   const stopGPUInternalRef = useRef<() => Promise<void>>(() => Promise.resolve());
@@ -214,23 +221,43 @@ export function useGPUConnection(): UseGPUConnectionReturn {
       ws.onmessage = async (event) => {
         if (!isMountedRef.current) return;
 
-        // Binary = typed camera frame (1-byte prefix + JPEG data)
-        // 0x00 = main camera, 0x01 = rear-view mirror
+        // Binary = typed camera frame (1-byte prefix + data)
+        // 0x00 = main camera JPEG, 0x01 = rear-view mirror JPEG
+        // 0x10 = H.264 keyframe, 0x11 = H.264 delta, 0x12 = codec config JSON
         if (event.data instanceof Blob) {
           const blob = event.data as Blob;
           // Convert entire blob to ArrayBuffer to reliably extract type byte
-          // and slice JPEG data (Safari's Blob.slice can be unreliable)
+          // and slice data (Safari's Blob.slice can be unreliable)
           const buffer = await blob.arrayBuffer();
           const frameType = new Uint8Array(buffer)[0];
-          const jpegBlob = new Blob([buffer.slice(1)], { type: 'image/jpeg' });
 
-          if (frameType === 0x01) {
-            // Rear-view mirror frame
+          if (frameType === 0x10 || frameType === 0x11) {
+            // H.264 frame (keyframe or delta)
+            setLastFrameTime(performance.now());
+            if (h264FrameHandlerRef.current) {
+              h264FrameHandlerRef.current(frameType === 0x10, buffer.slice(1));
+            }
+          } else if (frameType === 0x12) {
+            // Codec config (JSON)
+            const jsonStr = new TextDecoder().decode(buffer.slice(1));
+            try {
+              const config: CodecConfig = JSON.parse(jsonStr);
+              console.log('[v3] Received codec config:', config.codec, config.width, 'x', config.height);
+              if (codecConfigHandlerRef.current) {
+                codecConfigHandlerRef.current(config);
+              }
+            } catch (e) {
+              console.error('[v3] Failed to parse codec config:', e);
+            }
+          } else if (frameType === 0x01) {
+            // Rear-view mirror JPEG frame
+            const jpegBlob = new Blob([buffer.slice(1)], { type: 'image/jpeg' });
             if (rearFrameHandlerRef.current) {
               rearFrameHandlerRef.current(jpegBlob);
             }
           } else {
-            // Main camera frame (0x00 or legacy untyped)
+            // Main camera JPEG frame (0x00 or legacy untyped)
+            const jpegBlob = new Blob([buffer.slice(1)], { type: 'image/jpeg' });
             setLastFrameTime(performance.now());
             if (binaryFrameHandlerRef.current) {
               binaryFrameHandlerRef.current(jpegBlob);
@@ -255,6 +282,18 @@ export function useGPUConnection(): UseGPUConnectionReturn {
             // which works reliably through any HTTP tunnel.
             // TODO: Re-enable WebRTC when using direct IP connections (not tunnels)
             console.log('[v3] Using JPEG-over-WebSocket for video (WebRTC disabled for tunnel compatibility)');
+
+            // Codec negotiation: tell server we support H.264 WebCodecs decoding
+            if (typeof VideoDecoder !== 'undefined') {
+              try {
+                ws.send(JSON.stringify({ type: 'codec_negotiate', codecs: ['h264'] }));
+                console.log('[v3] Sent codec_negotiate: h264 supported (WebCodecs available)');
+              } catch (e) {
+                console.warn('[v3] Failed to send codec_negotiate:', e);
+              }
+            } else {
+              console.log('[v3] WebCodecs VideoDecoder not available, using JPEG fallback');
+            }
           } else if (data.type === 'webrtc_answer') {
             const answer = data as { sdp: string; sdpType: RTCSdpType };
             try {
@@ -597,6 +636,14 @@ export function useGPUConnection(): UseGPUConnectionReturn {
     rearFrameHandlerRef.current = handler;
   }, []);
 
+  const onH264Frame = useCallback((handler: ((isKeyframe: boolean, data: ArrayBuffer) => void) | null) => {
+    h264FrameHandlerRef.current = handler;
+  }, []);
+
+  const onCodecConfig = useCallback((handler: ((config: CodecConfig) => void) | null) => {
+    codecConfigHandlerRef.current = handler;
+  }, []);
+
   const connectDirect = useCallback((wsUrl: string) => {
     setProvisioningState('running');
     connectWebSocket(wsUrl);
@@ -618,7 +665,7 @@ export function useGPUConnection(): UseGPUConnectionReturn {
     raceState, raceFinished, availableModels, activeModel, latencyMs, cameraMode, commentary, latestDriftEnd, aiChat,
     retryCount, maxRetries: MAX_RETRIES, lastFrameTime,
     startGPU, stopGPU, sendControls, sendStartRace, sendSwitchModel, sendRespawn, sendRestartRace, sendCameraMode, sendPause, sendResume, sendAmbientWeather,
-    connectDirect, clearError, onBinaryFrame, onRearFrame, remoteStream,
+    connectDirect, clearError, onBinaryFrame, onRearFrame, onH264Frame, onCodecConfig, remoteStream,
     isConnected: connectionState === 'connected',
     isProvisioningActive: provisioningState === 'starting' || provisioningState === 'running',
   };

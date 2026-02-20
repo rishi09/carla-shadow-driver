@@ -181,8 +181,16 @@ export interface AIChatMessage {
   text: string;
 }
 
+/** Codec configuration for H.264 WebCodecs decoding */
+export interface CodecConfig {
+  type: 'codec_config';
+  codec: string;     // e.g. 'avc1.42C01E'
+  width: number;
+  height: number;
+}
+
 /** Any JSON message from the server */
-export type ServerMessage = RaceState | RaceFinished | HandshakeAck | PerfStats | DriftEndEvent | AIChatMessage | {
+export type ServerMessage = RaceState | RaceFinished | HandshakeAck | PerfStats | DriftEndEvent | AIChatMessage | CodecConfig | {
   type: 'pong';
   timestamp: number;
 } | {
@@ -231,7 +239,8 @@ export type ClientMessageType =
   | 'latency_report'
   | 'webrtc_offer'
   | 'pause'
-  | 'resume';
+  | 'resume'
+  | 'codec_negotiate';
 
 /** WebSocket connection states */
 export type WebSocketConnectionState = 'disconnected' | 'connecting' | 'connected';
