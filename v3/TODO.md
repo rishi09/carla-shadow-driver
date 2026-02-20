@@ -154,7 +154,7 @@ Wordle's genius was that the colored emoji grid was a *non-spoiler flex* -- you 
 - [x] **:star: One-click race result card**: After a race, generate a canvas-rendered result card (PNG) showing: track name, lap time, gap to AI, a miniature racing line visualization, top speed, and difficulty. Add a "Share" button that uses the Web Share API (`navigator.share({ files: [pngFile] })`) on mobile or copies to clipboard on desktop. The card should be designed to look good as a tweet or Discord embed. Implementation: `canvas.toBlob()` -> `new File()` -> `navigator.share()`. Web Share API supports PNG files on Chrome/Edge/Safari mobile.
   - Ref: https://developer.mozilla.org/en-US/docs/Web/API/Navigator/share
 
-- [ ] **:star: Challenge URL with embedded ghost**: When you share a "Challenge a Friend" link, encode your ghost replay data in the URL (base64 compressed). The friend races against YOUR ghost, not the AI. URL format: `shadow-driver-v3.vercel.app/race?ghost=<base64>&track=town05&laps=3`. Ghost data is lightweight -- just position+yaw at 10Hz for ~60-120s = ~5-15KB compressed, fits in a URL.
+- [x] **:star: Challenge URL with embedded ghost**: When you share a "Challenge a Friend" link, encode your ghost replay data in the URL (base64 compressed). The friend races against YOUR ghost, not the AI. URL format: `shadow-driver-v3.vercel.app/race?ghost=<base64>&track=town05&laps=3`. Ghost data is lightweight -- just position+yaw at 10Hz for ~60-120s = ~5-15KB compressed, fits in a URL.
 
 - [x] **Wordle-style text results**: Generate a copy-pasteable text block for Twitter/Discord:
   ```
@@ -252,7 +252,7 @@ Client-side effects that enhance the server-rendered JPEG stream.
 - [x] **Built-in screen recorder**: `canvas.captureStream()` + `MediaRecorder` to record gameplay as WebM video. "Record" button in HUD, saves locally. On mobile, use Web Share API to share the video directly to Instagram/TikTok/Twitter.
   - Ref: https://developer.mozilla.org/en-US/docs/Web/API/HTMLCanvasElement/captureStream
 
-- [ ] **GIF export**: Record last 5 seconds as GIF (using `gif.js` library in a Web Worker for off-main-thread encoding). GIFs are the native format of social media -- they autoplay everywhere. A 5-second drift clip as a GIF is instant viral content.
+- [x] **GIF export**: Record last 5 seconds as GIF (using `gif.js` library in a Web Worker for off-main-thread encoding). GIFs are the native format of social media -- they autoplay everywhere. A 5-second drift clip as a GIF is instant viral content.
 
 ### Other Browser APIs
 - [x] **Vibration API**: `navigator.vibrate()` on mobile for haptic feedback on collisions, tire screech, and gear shifts. Subtle pattern: 50ms buzz on collision, 20ms pulse on gear shift.
@@ -809,7 +809,7 @@ See `LEARNINGS.md` section "What Makes Racing Games Fun" for full rationale behi
 
 #### Visual Juice
 - [x] **Directional screen shake**: Modify collision shake to use collision direction. Head-on impact = camera jolts back (translateY +). Side impact = camera jolts laterally. Currently shake is random jitter; make it directional using the collision normal or the relative position of AI car. In `SpeedEffects.tsx` or `Race.tsx`.
-- [ ] **Drift exit speed boost**: When a drift ends (DriftEndEvent with score > 200), apply a 5% speed boost for 1.5 seconds (server-side in `carla_manager.py`: temporarily increase throttle multiplier). Show "DRIFT BOOST!" text popup. Makes drifting feel like a rewarding SKILL, not just style (Ridge Racer lesson).
+- [x] **Drift exit speed boost**: When a drift ends (DriftEndEvent with score > 200), apply a 5% speed boost for 1.5 seconds (server-side in `carla_manager.py`: temporarily increase throttle multiplier). Show "DRIFT BOOST!" text popup. Makes drifting feel like a rewarding SKILL, not just style (Ridge Racer lesson).
 - [x] **Tiered drift celebrations**: In `DriftScore.tsx`, add text tiers based on score: <200 = "DRIFT!", 200-500 = "GREAT DRIFT!", 500-1000 = "AMAZING DRIFT!", >1000 = "INSANE DRIFT!" with escalating visual effects (larger text, brighter glow, screen flash at 1000+). Sound sting at 500+ points.
 - [x] **Near-miss visual effect**: Compare player and AI positions from telemetry. If distance < 3m and relative speed > 30 km/h, flash white streaks across screen edges for 100ms. "CLOSE CALL!" text popup. Burnout Paradise's signature mechanic -- makes close racing feel dangerous.
 - [x] **Crash desaturation**: On large collisions (intensity > 2000), briefly apply CSS `filter: grayscale(50%)` for 200ms with increased shake. Makes big crashes feel cinematic (Burnout lesson) rather than just a frustrating bump.
