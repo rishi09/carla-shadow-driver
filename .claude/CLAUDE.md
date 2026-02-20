@@ -13,7 +13,7 @@ Shadow Driver is a browser-based racing game where you race against an AI car in
 
 ---
 
-## Current Status (Feb 19, 2026)
+## Current Status (Feb 20, 2026)
 
 ### Working
 - CARLA 0.9.15 running on Vast.ai GPU (RTX 3090, root privilege fix applied)
@@ -40,6 +40,7 @@ Shadow Driver is a browser-based racing game where you race against an AI car in
 - Vercel auto-deploys frontend on push to v3
 
 ### Not Working / TODO
+- **Vercel auto-deploy broken**: Pushes to v3 branch are NOT deploying. The deployed bundle (index-C4bDUZj8.js) is stale. Need to check Vercel dashboard: Project Settings → Git → verify Production Branch is `v3` and Root Directory is `v3/`. TS build errors were blocking builds (now fixed in b10f5f2). May also need to re-link the GitHub integration.
 - **Server SIGABRT crash (mitigated)**: Cleanup now disables autopilot and sync mode before destroying actors, sensors destroyed before vehicles. Server no longer calls cleanup on client disconnect — only on new race start. Still close extra tabs to be safe.
 - **No trained model weights**: AI uses CARLA autopilot fallback. PilotNet weights available at HuggingFace (sergiopaniego/OptimizedPilotNet, 200x66 input). Alpamayo is 10B params (~20GB), probably won't fit alongside CARLA on 24GB GPU.
 - **Full provisioning flow untested**: The "Play Game" button flow (Vast.ai auto-provision + Cloudflare tunnel + callback) hasn't been tested end-to-end with the v3 Docker image.
@@ -187,10 +188,16 @@ ssh -p <PORT> root@<IP> 'tail -30 /tmp/race.log'
 **Vercel (shadow-driver-v3 project):**
 ```
 VASTAI_API_KEY              - Vast.ai API key for GPU provisioning
+NGROK_AUTHTOKEN             - ngrok auth token for low-latency tunnels (free at https://ngrok.com)
 ```
 
 **GitHub (repository secrets):**
 ```
 DOCKERHUB_USERNAME          - Docker Hub username (rkshah09)
 DOCKERHUB_TOKEN             - Docker Hub access token
+```
+
+**Vast.ai instance (set via start.ts env or manually):**
+```
+NGROK_AUTHTOKEN             - ngrok auth token (passed from Vercel env, or set manually)
 ```
