@@ -183,7 +183,7 @@ The key insight from Trackmania: you don't need real-time multiplayer to create 
 ### Social Presence (make it feel alive)
 - [ ] **Live spectator count**: Show "X people racing right now" on the landing page. Even seeing "3 people racing" makes the game feel alive. Implementation: track active WebSocket connections in Vercel KV, poll every 30s.
 
-- [ ] **Recent results feed**: Scrolling ticker on landing page showing recent race completions: "Player beat Hard AI by 0.3s on Town05 - 12 min ago". Creates social proof and competitive motivation.
+- [x] **Recent results feed**: Scrolling ticker on landing page showing recent race completions: "Player beat Hard AI by 0.3s on Town05 - 12 min ago". Creates social proof and competitive motivation.
 
 - [x] **Naming**: Let players set a display name (stored in localStorage). Used on leaderboards and challenge cards. No auth needed -- just a text input before first race.
 
@@ -798,17 +798,17 @@ See `LEARNINGS.md` section "What Makes Racing Games Fun" for full rationale behi
 - [x] **Engine load differentiation**: In `useEngineSound.ts` update function, when throttle > 0.5, boost 2nd harmonic gain by 30% and increase lowpass filter frequency by 20%. Makes acceleration SOUND effortful vs coasting.
 - [x] **Passing whoosh sound**: When gap_seconds changes sign (overtake or get overtaken), play a 200ms shaped white noise burst through bandpass at 800 Hz, volume 0.3. Triggers from `triggerEvent('overtake')` in `useEngineSound.ts`. Creates the Burnout Paradise close-racing feel.
 - [x] **Downshift blip**: On gear decrease event, play a 30ms sine burst at 250 Hz. Add to the gear change detection in `useEngineSound.ts`. Simulates the rev-match downshift sound.
-- [ ] **Client-side impact pre-trigger**: In `Race.tsx`, track speed between frames. If `Math.abs(speed_now - speed_prev) > 20`, immediately play a short 30ms click sound (high-freq noise burst) BEFORE the server collision event arrives. Creates two-stage impact: instant click + delayed thud.
+- [x] **Client-side impact pre-trigger**: In `Race.tsx`, track speed between frames. If `Math.abs(speed_now - speed_prev) > 20`, immediately play a short 30ms click sound (high-freq noise burst) BEFORE the server collision event arrives. Creates two-stage impact: instant click + delayed thud.
 
 #### Game Flow / Retention
 - [x] **Live PB split at checkpoints**: When passing a checkpoint, show "+0.3s" or "-0.2s" vs personal best for that checkpoint. Store per-checkpoint split times in `usePersonalBests.ts`. Display as a brief toast near the checkpoint arrow that fades after 1.5s. This is Trackmania's core retention mechanic.
 - [x] **Checkpoint celebration flash**: On checkpoint hit, brief green edge flash (100ms, reuse collision flash code but green, lower intensity 0.15). Play a short ascending "ding" tone (800 Hz, 50ms). Turn every checkpoint into a micro-reward.
-- [ ] **"PHOTO FINISH!" effect**: When gap < 1.0s on final checkpoint, trigger special treatment: screen-edge golden glow, dramatic audio swell (engine volume 1.5x, add chord), and "PHOTO FINISH!" text overlay. If final gap < 0.3s, show gap to 3 decimal places on results screen.
+- [x] **"PHOTO FINISH!" effect**: When gap < 1.0s on final checkpoint, trigger special treatment: screen-edge golden glow, dramatic audio swell (engine volume 1.5x, add chord), and "PHOTO FINISH!" text overlay. If final gap < 0.3s, show gap to 3 decimal places on results screen.
 - [x] **Time improvement trajectory**: On RaceResults screen, show last 5 race times as a simple sparkline/list: "1:23 -> 1:21 -> 1:19 -> 1:18". Stored in localStorage per track. Seeing the downward trend is deeply satisfying.
 - [x] **Hidden difficulty adaptation**: Track win/loss ratio in localStorage. If player wins >60% at current difficulty, subtly boost AI performance next race (+5% speed factor). If winning <30%, reduce by 5%. Separate from the explicit difficulty selector. Target: 40% win rate.
 
 #### Visual Juice
-- [ ] **Directional screen shake**: Modify collision shake to use collision direction. Head-on impact = camera jolts back (translateY +). Side impact = camera jolts laterally. Currently shake is random jitter; make it directional using the collision normal or the relative position of AI car. In `SpeedEffects.tsx` or `Race.tsx`.
+- [x] **Directional screen shake**: Modify collision shake to use collision direction. Head-on impact = camera jolts back (translateY +). Side impact = camera jolts laterally. Currently shake is random jitter; make it directional using the collision normal or the relative position of AI car. In `SpeedEffects.tsx` or `Race.tsx`.
 - [ ] **Drift exit speed boost**: When a drift ends (DriftEndEvent with score > 200), apply a 5% speed boost for 1.5 seconds (server-side in `carla_manager.py`: temporarily increase throttle multiplier). Show "DRIFT BOOST!" text popup. Makes drifting feel like a rewarding SKILL, not just style (Ridge Racer lesson).
 - [x] **Tiered drift celebrations**: In `DriftScore.tsx`, add text tiers based on score: <200 = "DRIFT!", 200-500 = "GREAT DRIFT!", 500-1000 = "AMAZING DRIFT!", >1000 = "INSANE DRIFT!" with escalating visual effects (larger text, brighter glow, screen flash at 1000+). Sound sting at 500+ points.
 - [x] **Near-miss visual effect**: Compare player and AI positions from telemetry. If distance < 3m and relative speed > 30 km/h, flash white streaks across screen edges for 100ms. "CLOSE CALL!" text popup. Burnout Paradise's signature mechanic -- makes close racing feel dangerous.
