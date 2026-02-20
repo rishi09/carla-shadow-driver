@@ -141,3 +141,160 @@ Learnings from Forza Horizon 5, Mario Kart, Trackmania, Slow Roads, agar.io.
 - [ ] **Auto-shutdown**: Kill GPU instance after 10min of no WebSocket connections
 - [ ] **Deploy script improvements**: deploy.sh should also start CARLA if not running
 - [ ] **Health monitoring**: Endpoint that returns CARLA status, GPU temp, VRAM usage, active connections
+
+---
+
+## Viral / Social Features
+
+Features designed to create sharing loops, competitive tension, and "I need to show someone this" moments. Ordered by estimated impact-to-effort ratio.
+
+### Shareability (the Wordle lesson)
+Wordle's genius was that the colored emoji grid was a *non-spoiler flex* -- you could show your result without revealing the answer. Every share was an implicit challenge. Shadow Driver needs its own "Wordle grid" -- a compact, visual, shareable race result.
+
+- [ ] **:star: One-click race result card**: After a race, generate a canvas-rendered result card (PNG) showing: track name, lap time, gap to AI, a miniature racing line visualization, top speed, and difficulty. Add a "Share" button that uses the Web Share API (`navigator.share({ files: [pngFile] })`) on mobile or copies to clipboard on desktop. The card should be designed to look good as a tweet or Discord embed. Implementation: `canvas.toBlob()` -> `new File()` -> `navigator.share()`. Web Share API supports PNG files on Chrome/Edge/Safari mobile.
+  - Ref: https://developer.mozilla.org/en-US/docs/Web/API/Navigator/share
+
+- [ ] **:star: Challenge URL with embedded ghost**: When you share a "Challenge a Friend" link, encode your ghost replay data in the URL (base64 compressed). The friend races against YOUR ghost, not the AI. URL format: `shadow-driver-v3.vercel.app/race?ghost=<base64>&track=town05&laps=3`. Ghost data is lightweight -- just position+yaw at 10Hz for ~60-120s = ~5-15KB compressed, fits in a URL.
+
+- [ ] **Wordle-style text results**: Generate a copy-pasteable text block for Twitter/Discord:
+  ```
+  Shadow Driver v3 - Town05
+  1:23.456 (beat AI by 2.3s)
+  Top Speed: 187 km/h | Difficulty: Hard
+  shadow-driver-v3.vercel.app/race?track=town05
+  ```
+  One "Copy" button. Plain text travels everywhere, no image hosting needed.
+
+- [ ] **Auto-clip recording**: Use `canvas.captureStream(30)` + `MediaRecorder` to continuously record the last 15 seconds of gameplay into a ring buffer. When something exciting happens (overtake, close finish, big crash), auto-save the clip. Player can then share it. Implementation: record to WebM chunks, keep last N chunks, on trigger save all chunks to a Blob. Ref: https://developer.mozilla.org/en-US/docs/Web/API/MediaRecorder
+
+- [ ] **Photo mode**: Freeze the game (pause server tick), let player rotate/zoom the CARLA camera freely, apply CARLA post-processing (depth of field, exposure), capture a high-res screenshot. Racing games like Forza Horizon 5 and Gran Turismo 7 generate massive social media engagement from photo mode alone. Implementation: send `{ type: 'photo_mode', camera: { yaw, pitch, distance, fov } }` to server, receive a single high-res JPEG back.
+
+### Async Competition (race against the world, not with)
+The key insight from Trackmania: you don't need real-time multiplayer to create intense competition. Ghost racing (you vs a recording) creates the same competitive intensity with zero networking complexity.
+
+- [ ] **:star: Daily track challenge**: One track per day, same for everyone (seeded by date). Global leaderboard for that day's track. Resets at midnight UTC. This is the single most effective retention mechanic in Trackmania -- players come back daily to compete. Implementation: server-side seed from `Date.now() / 86400000 | 0` picks map + weather + spawn point deterministically.
+
+- [ ] **Ghost replay storage**: Store ghost data (position/yaw/speed at 10Hz) in Vercel KV or Cloudflare R2. Each ghost is ~10-30KB. Store the top 100 ghosts per track. Players can race against any ghost from the leaderboard. Data format: `{ frames: [{t, x, y, yaw, speed}], metadata: { player_name, lap_time, date, track } }`.
+
+- [ ] **Leaderboard with replays**: Per-track leaderboard showing top 50 times. Each entry links to a ghost replay. Click any entry to race against that ghost. This creates a "can I beat rank #37?" motivation loop. Store in Vercel KV (free tier: 256MB, enough for ~10K ghosts).
+
+- [ ] **Seasonal tournaments**: Monthly themed events (night race series, rain championship, reverse tracks). Aggregate scores across multiple tracks. Prizes: cosmetic badges on leaderboard profile.
+
+### Social Presence (make it feel alive)
+- [ ] **Live spectator count**: Show "X people racing right now" on the landing page. Even seeing "3 people racing" makes the game feel alive. Implementation: track active WebSocket connections in Vercel KV, poll every 30s.
+
+- [ ] **Recent results feed**: Scrolling ticker on landing page showing recent race completions: "Player beat Hard AI by 0.3s on Town05 - 12 min ago". Creates social proof and competitive motivation.
+
+- [ ] **Naming**: Let players set a display name (stored in localStorage). Used on leaderboards and challenge cards. No auth needed -- just a text input before first race.
+
+### Retention Loops (one more race)
+Lessons from Vampire Survivors (simple + addictive), Retro Bowl (session-based progression), and Trackmania (incremental improvement).
+
+- [ ] **Personal best tracker**: Per-track best times stored in localStorage. Show improvement delta after each race: "1.2s faster than your PB!" or "0.3s off your best". Satisfying even without a global leaderboard.
+
+- [ ] **Medal system**: Bronze/Silver/Gold/Platinum per track based on time thresholds. Thresholds set relative to AI times on each difficulty. Visible on track select screen. Collecting all golds on all tracks becomes a meta-goal.
+
+- [ ] **Streak counter**: Track consecutive days played (localStorage). Display flame icon with streak count. Losing a streak is psychologically painful -- proven retention mechanic (Duolingo, Snapchat).
+
+- [ ] **:star: Instant restart (R key)**: During a race, pressing R immediately respawns at the start line and restarts the timer. No menu, no confirmation, no loading. This is the #1 most important quality-of-life feature from Trackmania. The friction between "I messed up" and "I'm trying again" must be ZERO. Server implementation: `reset_race()` without full cleanup -- just teleport vehicles and reset timers.
+
+- [ ] **Race Again button (post-race)**: One button, same track, same settings, instant restart. No returning to menus. Second most important retention feature after R-to-restart.
+
+---
+
+## Browser-Native Innovations
+
+Features that are only possible (or dramatically better) because this runs in a browser. These are differentiators vs native racing games.
+
+### Zero-Friction Access (the browser's killer feature)
+The #1 lesson from every viral browser game (agar.io, slither.io, Wordle, GeoGuessr, Slow Roads): the gap between "seeing a link" and "playing the game" must be as close to zero as possible. No downloads, no accounts, no logins.
+
+- [ ] **:star: Sub-3-second cold start for returning players**: Cache the React bundle aggressively (service worker). Pre-connect to the WebSocket URL. If the user has a recent `?ws=` URL in localStorage, auto-connect on page load. Target: URL click -> gameplay in <3 seconds.
+
+- [ ] **Progressive loading during GPU wait**: While the GPU instance is provisioning (~60-120s), show: interactive track preview (client-side 3D minimap), controls tutorial, leaderboard for selected track, and a "warm up" mode where the player can practice steering with a local 2D car physics sim. The wait becomes part of the experience, not dead time.
+
+- [ ] **Deep linking everything**: Every game state should be a URL. `?ws=X` for direct connect, `?track=town05&weather=rain&laps=3` for settings, `?ghost=base64` for challenge mode, `?replay=id` for watching replays. URLs are the browser's native sharing primitive.
+
+### Gamepad API (controller support)
+Racing games on keyboard feel terrible compared to analog sticks. The Gamepad API is mature (baseline since 2017) and trivial to add.
+
+- [ ] **Gamepad support**: Poll `navigator.getGamepads()` in the rAF loop. Map left stick X to steering (analog!), right trigger to throttle (analog!), left trigger to brake (analog!). Face buttons for handbrake and respawn. This instantly makes the game feel 10x better for anyone with an Xbox/PS controller connected to their computer.
+  - Implementation: ~50 lines of code. `gamepad.axes[0]` for steering, `gamepad.buttons[7].value` for RT (throttle), `gamepad.buttons[6].value` for LT (brake). Send analog values directly to server instead of binary keyboard on/off.
+  - Ref: https://developer.mozilla.org/en-US/docs/Web/API/Gamepad_API/Using_the_Gamepad_API
+
+### Client-Side AI Inference (WebGPU / ONNX Runtime Web)
+Run a small neural network IN THE BROWSER for local features that don't need the GPU server.
+
+- [ ] **Client-side PilotNet for ghost cars**: Export PilotNet (~1MB ONNX model) and run it client-side via ONNX Runtime Web with WebGPU backend. Use it to drive ghost/preview cars on the track select screen. The model takes a 200x66 image and outputs a steering angle -- small enough for real-time browser inference.
+  - Setup: `import * as ort from 'onnxruntime-web/webgpu'` -> `session = await ort.InferenceSession.create('pilotnet.onnx', { executionProviders: ['webgpu'] })`. WebGPU supported in Chrome 113+, Edge 113+, covering ~78% of browsers.
+  - Ref: https://onnxruntime.ai/docs/tutorials/web/ep-webgpu.html
+
+- [ ] **Neural network visualization overlay**: While racing, show a real-time visualization of what the AI "sees" -- a small inset showing the PilotNet input image with attention heatmap (Grad-CAM). This is the "wow factor" for HackerNews: you can literally see the AI thinking as it drives. Implementation: run Grad-CAM on the server (cheap with PyTorch hooks), send the heatmap as a low-res (50x33) image alongside the main frame.
+  - Inspiration: Radu Mariescu-Istodor's self-driving car neural network visualization (github.com/gniziemazity/Self-driving-car) -- shows the network graph and activations live as the car drives. Massively popular YouTube series with millions of views.
+
+### Web Audio API (procedural audio that reacts to gameplay)
+Already have engine sound + background music, but there's more untapped potential.
+
+- [ ] **Adaptive music intensity from race events**: Current background music scales with speed. Add event-triggered intensification: bring in drums on overtake, add distortion layer when gap < 1s, drop all music to just bass drone on final lap last checkpoint (the "clutch moment" audio design from Mario Kart). Implementation: set gain nodes per-layer based on race events, not just speed.
+
+- [ ] **Doppler effect on AI car**: When the AI car passes the player or vice versa, apply a frequency shift to the AI's engine sound. The Web Audio API's `AudioPannerNode` with `positionX/Y/Z` can do this natively -- just update the AI car's position in 3D audio space each frame.
+
+- [ ] **Crowd/ambiance layer**: Procedural crowd noise that reacts to race events -- cheering on overtake, gasp on crash, roar on finish. Use filtered white noise shaped by gain envelopes triggered by race_state events. No audio files needed.
+
+### Canvas/WebGL Post-Processing
+Client-side effects that enhance the server-rendered JPEG stream.
+
+- [ ] **WebGL shader post-processing**: Instead of drawing JPEG frames to a 2D canvas, draw them to a WebGL canvas with fragment shaders for: chromatic aberration (subtle at edges, stronger at speed), color grading (warm sunset tones, cool night tones matching CARLA weather), film grain (hides JPEG compression), and barrel distortion (subtle, simulates real lens). All GPU-composited, zero CPU cost. Libraries: `regl` (lightweight WebGL wrapper) or raw WebGL2 shaders.
+
+- [ ] **WebGPU compute shaders for advanced effects**: Use WebGPU compute shaders for effects too expensive for fragment shaders: screen-space reflections on wet roads (compute on the client from the depth buffer), temporal anti-aliasing (blend consecutive JPEG frames), and motion vector estimation for true motion blur (compute pixel deltas between consecutive frames). Requires WebGPU (Chrome 113+).
+
+### Screen Recording and Sharing
+- [ ] **Built-in screen recorder**: `canvas.captureStream()` + `MediaRecorder` to record gameplay as WebM video. "Record" button in HUD, saves locally. On mobile, use Web Share API to share the video directly to Instagram/TikTok/Twitter.
+  - Ref: https://developer.mozilla.org/en-US/docs/Web/API/HTMLCanvasElement/captureStream
+
+- [ ] **GIF export**: Record last 5 seconds as GIF (using `gif.js` library in a Web Worker for off-main-thread encoding). GIFs are the native format of social media -- they autoplay everywhere. A 5-second drift clip as a GIF is instant viral content.
+
+### Other Browser APIs
+- [ ] **Vibration API**: `navigator.vibrate()` on mobile for haptic feedback on collisions, tire screech, and gear shifts. Subtle pattern: 50ms buzz on collision, 20ms pulse on gear shift.
+
+- [ ] **Fullscreen API**: `element.requestFullscreen()` for immersive racing. Auto-prompt on race start on desktop. Hide browser chrome for maximum screen real estate.
+
+- [ ] **Wake Lock API**: `navigator.wakeLock.request('screen')` to prevent screen dimming during races on mobile/tablet. Essential for longer races.
+
+- [ ] **Web Bluetooth (stretch)**: Connect BLE steering wheels/controllers. The Web Bluetooth API is experimental with limited browser support (Chrome only, not Firefox/Safari). Use as progressive enhancement, not primary input. Ref: https://developer.mozilla.org/en-US/docs/Web/API/Web_Bluetooth_API
+
+---
+
+## AI as a Game Mechanic (not just opponent)
+
+### "Teach Your AI" Mode
+The most HackerNews-viral concept: let players train their own AI driver, then pit trained AIs against each other.
+
+- [ ] **Imitation learning from player**: Record the player's inputs (steering, throttle, brake) alongside camera frames during every race. After N laps, offer to "train your AI clone" -- fine-tune PilotNet on the player's driving data. The AI clone then races for you in async challenges. Implementation: save input-frame pairs to a replay buffer on the server, fine-tune PilotNet with a few gradient steps (takes ~30s on the GPU). Export the fine-tuned weights as a ~1MB file linked to the player's name.
+
+- [ ] **AI evolution visualization**: Show the neural network learning in real-time. Inspired by Keiwan's Evolution simulator (keiwan.itch.io/evolution) -- creatures learn to walk/run through genetic algorithms, and you watch them improve. For Shadow Driver: show a split screen where the AI drives the track, getting better each generation. Visualize the neural network graph with activation colors. This is mesmerizing to watch and deeply shareable.
+
+- [ ] **AI vs AI tournament**: Players submit their trained AI clones. The system runs automated races between them (server-side, no player input). Results posted to a leaderboard. This creates a metagame: players optimize their driving to produce the best AI, not just the fastest lap time. Similar to GT Sophy (Gran Turismo's AI that achieved superhuman racing via reinforcement learning, published in Nature 2022) but democratized -- anyone can train a driver.
+
+- [ ] **Neural network explainability HUD**: Real-time display showing: what the AI "sees" (attention heatmap on camera image), what the AI "thinks" (steering/throttle prediction bar), and confidence level (how certain the model is). Toggle with a hotkey. This makes the AI transparent and educational, not a black box.
+
+### AI-Generated Content
+- [ ] **AI race commentary**: Use an LLM (Claude API or local small model) to generate live race commentary based on telemetry events. "And the player takes the inside line through turn 3! The AI is closing the gap -- only 1.2 seconds behind now!" Displayed as subtitles or spoken via Web Speech API (`window.speechSynthesis`). This is both entertaining and highly shareable (imagine a clip with AI commentary).
+
+- [ ] **AI-suggested racing line**: Before the race starts, show a visualization of the optimal racing line (computed by the AI from its learned behavior). Player can try to follow it. Post-race, overlay the player's actual line vs the AI's suggested line for comparison.
+
+---
+
+## Top 5 Ideas by Impact/Effort Ratio
+
+These are marked with :star: above. Summary:
+
+1. **Instant restart (R key)** -- Near-zero effort (server teleport + timer reset), eliminates the #1 friction point in the retry loop. Every fast-paced racing game needs this.
+
+2. **One-click race result card** -- ~2 hours of work (canvas rendering + Web Share API). Creates a sharing primitive that works on every platform. The visual result card IS the viral vector.
+
+3. **Challenge URL with embedded ghost** -- ~4 hours (ghost serialization + URL encoding + ghost renderer). Turns every race into a social challenge. The URL IS the game invite.
+
+4. **Daily track challenge** -- ~3 hours (date-seeded track selection + simple KV leaderboard). Creates daily retention without any infrastructure cost. The leaderboard IS the competition.
+
+5. **Sub-3-second cold start** -- ~2 hours (service worker + auto-reconnect). Eliminates the "do I want to wait for this to load?" decision. The speed IS the feature.

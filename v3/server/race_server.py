@@ -8,12 +8,12 @@ import time
 import signal
 import sys
 import os
+import urllib.request
 import yaml
 import numpy as np
 from typing import Optional, Dict, Set
 
 import websockets
-import aiohttp
 
 from aiortc import RTCPeerConnection, RTCSessionDescription, RTCRtpSender
 from webrtc_track import CarlaVideoTrack, force_codec
@@ -127,23 +127,41 @@ class AutoShutdownManager:
                 "Content-Type": "application/json",
             }
 
+            loop = asyncio.get_event_loop()
+
+            def _api_stop():
+                """Synchronous API calls to stop/destroy the instance (runs in thread pool)."""
+                # First try: PUT state=stopped
+                stop_url = f"{api_base}/instances/{self.instance_id}/"
+                print(f"[auto-shutdown] Sending stop request: PUT {stop_url}")
+                try:
+                    req = urllib.request.Request(
+                        stop_url, method="PUT",
+                        data=json.dumps({"state": "stopped"}).encode(),
+                        headers=headers,
+                    )
+                    with urllib.request.urlopen(req, timeout=15) as resp:
+                        body = resp.read().decode()[:200]
+                        print(f"[auto-shutdown] Stop response: {resp.status} {body}")
+                except Exception as e:
+                    print(f"[auto-shutdown] Stop request error: {e}")
+
+                # Also try: DELETE to fully destroy
+                destroy_url = f"{api_base}/instances/{self.instance_id}/"
+                print(f"[auto-shutdown] Sending destroy request: DELETE {destroy_url}")
+                try:
+                    req = urllib.request.Request(
+                        destroy_url, method="DELETE",
+                        headers=headers,
+                    )
+                    with urllib.request.urlopen(req, timeout=15) as resp:
+                        body = resp.read().decode()[:200]
+                        print(f"[auto-shutdown] Destroy response: {resp.status} {body}")
+                except Exception as e:
+                    print(f"[auto-shutdown] Destroy request error: {e}")
+
             try:
-                async with aiohttp.ClientSession() as session:
-                    # First try: PUT state=stopped
-                    stop_url = f"{api_base}/instances/{self.instance_id}/"
-                    print(f"[auto-shutdown] Sending stop request: PUT {stop_url}")
-                    async with session.put(stop_url, headers=headers,
-                                           json={"state": "stopped"}) as resp:
-                        body = await resp.text()
-                        print(f"[auto-shutdown] Stop response: {resp.status} {body[:200]}")
-
-                    # Also try: DELETE to fully destroy
-                    destroy_url = f"{api_base}/instances/{self.instance_id}/"
-                    print(f"[auto-shutdown] Sending destroy request: DELETE {destroy_url}")
-                    async with session.delete(destroy_url, headers=headers) as resp:
-                        body = await resp.text()
-                        print(f"[auto-shutdown] Destroy response: {resp.status} {body[:200]}")
-
+                await loop.run_in_executor(None, _api_stop)
             except Exception as e:
                 print(f"[auto-shutdown] API error: {e}")
         else:
@@ -274,8 +292,9 @@ class RaceServer:
                     weather = data.get('weather', 'clear')
                     model = data.get('model', 'carla_pilotnet')
                     player_car = data.get('player_car')
+                    time_of_day = data.get('time_of_day')
                     self.current_model_name = model
-                    await self._start_race(track, laps, weather, model, player_car=player_car)
+                    await self._start_race(track, laps, weather, model, player_car=player_car, time_of_day=time_of_day)
 
                 elif msg_type == 'ping':
                     await websocket.send(json.dumps({
@@ -309,6 +328,8 @@ class RaceServer:
             # This keeps the server alive for reconnecting clients
             await self._reset_race()
             self.ws_client = None
+            # Track disconnection for auto-shutdown timer
+            self.shutdown_manager.client_disconnected(websocket)
             print("Client disconnected, waiting for reconnect...")
 
     async def _handle_webrtc_offer(self, websocket, data):
@@ -426,11 +447,11 @@ class RaceServer:
         'alpamayo': 'hard',
     }
 
-    async def _start_race(self, track: str, laps: int, weather: str = 'clear', model: str = 'carla_pilotnet', player_car: str = None):
+    async def _start_race(self, track: str, laps: int, weather: str = 'clear', model: str = 'carla_pilotnet', player_car: str = None, time_of_day: str = None):
         """Initialize and start a race."""
         difficulty = self.MODEL_DIFFICULTY_MAP.get(model, 'medium')
         self.difficulty = difficulty
-        print(f"Starting race: track={track}, laps={laps}, weather={weather}, model={model}, difficulty={difficulty}, player_car={player_car}")
+        print(f"Starting race: track={track}, laps={laps}, weather={weather}, model={model}, difficulty={difficulty}, player_car={player_car}, time_of_day={time_of_day}")
 
         # Stop any existing race loop first
         await self._reset_race()
@@ -461,6 +482,10 @@ class RaceServer:
 
         # Apply weather settings
         self.carla.set_weather(weather)
+
+        # Apply time-of-day preset (overrides sun position/atmosphere from weather)
+        if time_of_day:
+            self.carla.set_time_of_day(time_of_day)
 
         # Set up AI based on difficulty
         if difficulty == 'easy':
@@ -626,6 +651,19 @@ class RaceServer:
                         speed_kmh=player_telem['speed_kmh'],
                         steer=player_telem.get('steer', 0.0),
                     )
+
+                    # 6b. Send drift_end event as a separate message for popup display
+                    if drift_event and drift_event.get('event') == 'drift_end' and self.ws_client:
+                        try:
+                            await self.ws_client.send(json.dumps({
+                                'type': 'drift_end',
+                                'score': drift_event['score'],
+                                'combo': drift_event.get('combo', 1),
+                                'multiplier': drift_event.get('multiplier', ''),
+                                'total_score': drift_event.get('total_score', 0),
+                            }))
+                        except Exception:
+                            pass
 
                     # 7. Race commentary: contextual messages
                     commentary = self.race_state.get_commentary(drift_event=drift_event)
@@ -950,6 +988,12 @@ async def main():
 
     async with websockets.serve(server.handle_client, "0.0.0.0", port):
         print(f"Server ready. Waiting for connections on ws://0.0.0.0:{port}")
+
+        # Start the auto-shutdown timer immediately (no clients connected yet)
+        print(f"[auto-shutdown] Starting initial {IDLE_TIMEOUT_SECONDS // 60}-minute idle timer...")
+        server.shutdown_manager._idle_task = asyncio.create_task(
+            server.shutdown_manager._idle_countdown()
+        )
 
         # Keep running until interrupted
         stop = asyncio.Future()

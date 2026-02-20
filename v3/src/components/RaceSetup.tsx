@@ -1,5 +1,12 @@
 import { useState } from 'react';
 import { LeaderboardPanel } from './LeaderboardPanel.tsx';
+import { usePersonalBests } from '../hooks/usePersonalBests.ts';
+
+const MEDAL_ICONS: Record<string, string> = {
+  gold: '\uD83E\uDD47',
+  silver: '\uD83E\uDD48',
+  bronze: '\uD83E\uDD49',
+};
 
 interface TrackOption {
   id: string;
@@ -74,7 +81,10 @@ export function RaceSetup({ onStartRace, onBack }: RaceSetupProps) {
   const [selectedModel, setSelectedModel] = useState('carla_pilotnet');
   const [selectedCar, setSelectedCar] = useState('vehicle.tesla.model3');
 
+  const personalBests = usePersonalBests();
   const currentTrack = TRACKS.find(t => t.id === selectedTrack);
+  const currentBest = personalBests.getBest(selectedTrack, selectedLaps);
+  const currentMedal = currentBest ? personalBests.getMedal(selectedTrack, selectedLaps, currentBest.time) : null;
 
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -105,7 +115,15 @@ export function RaceSetup({ onStartRace, onBack }: RaceSetupProps) {
             ))}
           </select>
           {currentTrack && (
-            <p className="text-white/40 text-xs mt-1.5 pl-1">{currentTrack.description}</p>
+            <div className="flex items-center justify-between mt-1.5 pl-1">
+              <p className="text-white/40 text-xs">{currentTrack.description}</p>
+              {currentBest && (
+                <span className="text-cyan-400/80 text-xs font-mono whitespace-nowrap ml-2 flex items-center gap-1">
+                  {currentMedal && MEDAL_ICONS[currentMedal]}
+                  {formatSetupTime(currentBest.time)}
+                </span>
+              )}
+            </div>
           )}
         </div>
 
@@ -216,4 +234,10 @@ export function RaceSetup({ onStartRace, onBack }: RaceSetupProps) {
       </div>
     </div>
   );
+}
+
+function formatSetupTime(seconds: number): string {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins}:${secs.toFixed(1).padStart(4, '0')}`;
 }

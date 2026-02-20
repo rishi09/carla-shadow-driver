@@ -16,7 +16,7 @@ interface DriftOverlayProps {
   totalDriftScore?: number;
 }
 
-export function DriftOverlay({ drift, totalDriftScore }: DriftOverlayProps) {
+export function DriftOverlay({ drift, totalDriftScore: _totalDriftScore }: DriftOverlayProps) {
   const [displayScore, setDisplayScore] = useState(0);
   const [isVisible, setIsVisible] = useState(false);
   const [fadeOut, setFadeOut] = useState(false);

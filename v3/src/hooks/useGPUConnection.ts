@@ -5,7 +5,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type {
   GPUProvisioningState, WebSocketConnectionState, GPUInstanceData,
-  GPUError, KeyState, RaceState, RaceFinished, ServerMessage,
+  GPUError, KeyState, RaceState, RaceFinished, ServerMessage, DriftEndEvent,
 } from '../types/index.ts';
 
 // Constants
@@ -39,6 +39,7 @@ export interface UseGPUConnectionReturn {
   latencyMs: number | null;
   cameraMode: string;
   commentary: CommentaryMessage[];
+  latestDriftEnd: DriftEndEvent | null;
   retryCount: number;
   maxRetries: number;
   startGPU: () => Promise<void>;
@@ -56,6 +57,8 @@ export interface UseGPUConnectionReturn {
   onBinaryFrame: (handler: ((data: Blob) => void) | null) => void;
   // WebRTC remote video stream (null until track arrives)
   remoteStream: MediaStream | null;
+  // Timestamp (performance.now()) of the last received binary/video frame
+  lastFrameTime: number;
 }
 
 export function useGPUConnection(): UseGPUConnectionReturn {
@@ -75,6 +78,8 @@ export function useGPUConnection(): UseGPUConnectionReturn {
   const [retryCount, setRetryCount] = useState(0);
   const [cameraMode, setCameraMode] = useState<string>('chase');
   const [commentary, setCommentary] = useState<CommentaryMessage[]>([]);
+  const [latestDriftEnd, setLatestDriftEnd] = useState<DriftEndEvent | null>(null);
+  const [lastFrameTime, setLastFrameTime] = useState<number>(0);
   const commentaryIdRef = useRef(0);
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -159,6 +164,7 @@ export function useGPUConnection(): UseGPUConnectionReturn {
 
         // Binary = JPEG frame
         if (event.data instanceof Blob) {
+          setLastFrameTime(performance.now());
           if (binaryFrameHandlerRef.current) {
             binaryFrameHandlerRef.current(event.data);
           }
@@ -298,6 +304,8 @@ export function useGPUConnection(): UseGPUConnectionReturn {
                 setCommentary(prev => prev.filter(m => m.id !== id));
               }
             }, 4000);
+          } else if (data.type === 'drift_end') {
+            setLatestDriftEnd(data as DriftEndEvent);
           } else if (data.type === 'error') {
             setError({ message: (data as { message: string }).message, code: 'SERVER_ERROR' });
           }
@@ -524,8 +532,8 @@ export function useGPUConnection(): UseGPUConnectionReturn {
 
   return {
     provisioningState, connectionState, instanceData, error,
-    raceState, raceFinished, availableModels, activeModel, latencyMs, cameraMode, commentary,
-    retryCount, maxRetries: MAX_RETRIES,
+    raceState, raceFinished, availableModels, activeModel, latencyMs, cameraMode, commentary, latestDriftEnd,
+    retryCount, maxRetries: MAX_RETRIES, lastFrameTime,
     startGPU, stopGPU, sendControls, sendStartRace, sendSwitchModel, sendRespawn, sendCameraMode,
     connectDirect, clearError, onBinaryFrame, remoteStream,
     isConnected: connectionState === 'connected',

@@ -22,6 +22,7 @@ echo "=== Shadow Driver v3 GPU Entrypoint ==="
 echo "Date: $(date)"
 echo "Instance ID: $INST_ID"
 echo "Callback URL: $CALLBACK_URL"
+echo "VASTAI_API_KEY: ${VASTAI_API_KEY:+set (${#VASTAI_API_KEY} chars)}"
 echo "Python: $(which python3) $(python3 --version 2>&1)"
 echo "Working dir: $(pwd)"
 

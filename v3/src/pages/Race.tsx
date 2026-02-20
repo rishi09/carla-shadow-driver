@@ -3,7 +3,10 @@ import { useGPUConnection } from '../hooks/useGPUConnection.ts';
 import { useEngineSound } from '../hooks/useEngineSound.ts';
 import { useBackgroundMusic } from '../hooks/useBackgroundMusic.ts';
 import { useSteeringPrediction } from '../hooks/useSteeringPrediction.ts';
+import { useFrameExtrapolation } from '../hooks/useFrameExtrapolation.ts';
 import { useLeaderboard } from '../hooks/useLeaderboard.ts';
+import { usePersonalBests } from '../hooks/usePersonalBests.ts';
+import type { PersonalBestResult } from '../hooks/usePersonalBests.ts';
 import { VideoCanvas } from '../components/VideoCanvas.tsx';
 import { WebRTCVideo } from '../components/WebRTCVideo.tsx';
 import { RaceHUD } from '../components/RaceHUD.tsx';
@@ -44,10 +47,20 @@ export function Race() {
   const engineSound = useEngineSound();
   const bgMusic = useBackgroundMusic();
   const leaderboard = useLeaderboard();
+  const personalBests = usePersonalBests();
   const steeringPrediction = useSteeringPrediction(keysRef, view === 'racing', gpu.raceState?.player?.speed_kmh ?? 0);
+  const frameExtrapolation = useFrameExtrapolation(
+    gpu.raceState?.player?.speed_kmh ?? 0,
+    gpu.raceState?.player?.steer ?? 0,
+    gpu.lastFrameTime,
+    view === 'racing',
+  );
 
   // Track race config for leaderboard saving
   const raceConfigRef = useRef<{ track: string; laps: number; model: string; playerCar: string } | null>(null);
+
+  // Personal best result for the most recent finished race
+  const [pbResult, setPbResult] = useState<PersonalBestResult | null>(null);
 
   // Track previous race_status for countdown detection
   const prevRaceStatusRef = useRef<string | null>(null);
@@ -444,16 +457,18 @@ export function Race() {
           style={{ transform: `translate(${shakeX}px, ${shakeY}px)` }}
         >
           {/* Video feed: prefer WebRTC, fall back to JPEG canvas */}
-          {/* Speed-based FOV scale + client-side steering prediction + motion blur + countdown zoom */}
+          {/* Speed-based FOV scale + client-side steering prediction + frame extrapolation + motion blur + countdown zoom */}
           <div
             className="absolute inset-0"
             style={{
               ...countdownZoomStyle,
               transform: isCountdown
                 ? countdownZoomStyle.transform
-                : (steeringPrediction.transform !== 'none'
-                  ? `scale(${speedFovScale}) ${steeringPrediction.transform}`
-                  : `scale(${speedFovScale})`),
+                : [
+                    `scale(${speedFovScale})`,
+                    steeringPrediction.transform !== 'none' ? steeringPrediction.transform : '',
+                    frameExtrapolation.transform !== 'none' ? frameExtrapolation.transform : '',
+                  ].filter(Boolean).join(' '),
               filter: motionBlurPx > 0.05 ? `blur(${motionBlurPx.toFixed(2)}px)` : 'none',
             }}
           >

@@ -11,16 +11,19 @@ class DriftDetector:
     """Detects drifting by comparing vehicle heading vs velocity direction.
 
     A drift occurs when:
-      - The angle between heading and velocity direction exceeds a threshold
+      - The angle between heading and velocity direction exceeds 15 degrees
       - The car is moving fast enough (>30 km/h)
-      - Steering input is applied
 
     Scoring:
-      drift_score = drift_angle_deg * speed_kmh * duration_seconds * chain_multiplier
+      base_score = avg_angle * avg_speed * duration * 0.1
+      Multipliers:
+        - Chain bonus: 1.5x if next drift starts within 2 seconds of last
+        - High-speed bonus: 1.5x if avg speed > 120 km/h
+        - Reverse entry bonus: 2x if entering drift from opposite direction
     """
 
     MIN_SPEED_KMH = 30.0
-    MIN_DRIFT_ANGLE_DEG = 8.0   # Minimum angle to count as drifting
+    MIN_DRIFT_ANGLE_DEG = 15.0  # Minimum angle to count as drifting
     MAX_DRIFT_ANGLE_DEG = 90.0  # Cap angle contribution
     CHAIN_TIMEOUT = 2.0          # Seconds between drifts to keep chain alive
 
@@ -29,12 +32,20 @@ class DriftDetector:
         self.drift_start_time: float = 0.0
         self.current_drift_score: float = 0.0
         self.current_drift_angle: float = 0.0
-        self.chain_multiplier: int = 1
+        self.drift_combo: int = 0
         self.last_drift_end_time: float = 0.0
         self.total_drift_score: float = 0.0
         self.best_single_drift: float = 0.0
         self.drift_count: int = 0
-        self._pending_drift_end: Optional[Dict] = None
+
+        # Accumulators for avg_angle and avg_speed over the drift
+        self._angle_accumulator: float = 0.0
+        self._speed_accumulator: float = 0.0
+        self._sample_count: int = 0
+
+        # Track drift direction for reverse entry bonus
+        self._last_drift_direction: Optional[float] = None  # signed angle at end of last drift
+        self._entry_direction: Optional[float] = None       # signed angle at start of current drift
 
     def update(self, heading_deg: float, velocity_x: float, velocity_y: float,
                speed_kmh: float, steer: float) -> Optional[Dict]:
@@ -52,24 +63,27 @@ class DriftDetector:
         now = time.time()
 
         # Calculate the angle between heading and velocity direction
+        signed_drift_angle = 0.0
+        drift_angle = 0.0
         if speed_kmh < self.MIN_SPEED_KMH:
             drift_angle = 0.0
+            signed_drift_angle = 0.0
         else:
             vel_angle_deg = math.degrees(math.atan2(velocity_y, velocity_x))
-            # Compute smallest angle difference
+            # Compute smallest angle difference (signed)
             angle_diff = heading_deg - vel_angle_deg
             # Normalize to [-180, 180]
             while angle_diff > 180:
                 angle_diff -= 360
             while angle_diff < -180:
                 angle_diff += 360
+            signed_drift_angle = angle_diff
             drift_angle = abs(angle_diff)
 
-        # Check if currently drifting
+        # Check if currently drifting (no steering requirement -- just angle + speed)
         is_now_drifting = (
             drift_angle >= self.MIN_DRIFT_ANGLE_DEG
             and speed_kmh >= self.MIN_SPEED_KMH
-            and abs(steer) > 0.05
         )
 
         result = None
@@ -80,41 +94,89 @@ class DriftDetector:
             self.drift_start_time = now
             self.current_drift_score = 0.0
             self.current_drift_angle = drift_angle
+            self._angle_accumulator = 0.0
+            self._speed_accumulator = 0.0
+            self._sample_count = 0
+            self._entry_direction = signed_drift_angle
 
-            # Check chain: if last drift ended recently, increase multiplier
+            # Check chain: if last drift ended recently, increase combo
             if now - self.last_drift_end_time < self.CHAIN_TIMEOUT and self.last_drift_end_time > 0:
-                self.chain_multiplier = min(5, self.chain_multiplier + 1)
+                self.drift_combo += 1
             else:
-                self.chain_multiplier = 1
+                self.drift_combo = 1
 
             result = {
                 'event': 'drift_start',
-                'chain_multiplier': self.chain_multiplier,
+                'combo': self.drift_combo,
             }
 
         elif is_now_drifting and self.is_drifting:
-            # Drift continuing - accumulate score
-            dt = 1.0 / 30.0  # Frame delta
+            # Drift continuing - accumulate for averaging
             capped_angle = min(drift_angle, self.MAX_DRIFT_ANGLE_DEG)
-            # Score per frame: angle * speed * dt * multiplier, scaled down
-            frame_score = (capped_angle * speed_kmh * dt * self.chain_multiplier) / 100.0
-            self.current_drift_score += frame_score
+            self._angle_accumulator += capped_angle
+            self._speed_accumulator += speed_kmh
+            self._sample_count += 1
             self.current_drift_angle = drift_angle
+
+            # Live score preview: base_score = avg_angle * avg_speed * duration * 0.1
+            duration = now - self.drift_start_time
+            if self._sample_count > 0:
+                avg_angle = self._angle_accumulator / self._sample_count
+                avg_speed = self._speed_accumulator / self._sample_count
+                self.current_drift_score = avg_angle * avg_speed * duration * 0.1
+            else:
+                self.current_drift_score = 0.0
 
             result = {
                 'event': 'drift_update',
                 'score': round(self.current_drift_score),
                 'angle': round(drift_angle, 1),
-                'chain_multiplier': self.chain_multiplier,
-                'duration': round(now - self.drift_start_time, 1),
+                'combo': self.drift_combo,
+                'duration': round(duration, 1),
             }
 
         elif not is_now_drifting and self.is_drifting:
-            # Drift ended
+            # Drift ended - compute final score with multipliers
             self.is_drifting = False
             self.last_drift_end_time = now
             self.drift_count += 1
-            final_score = round(self.current_drift_score)
+            duration = now - self.drift_start_time
+
+            # Compute base score
+            if self._sample_count > 0:
+                avg_angle = self._angle_accumulator / self._sample_count
+                avg_speed = self._speed_accumulator / self._sample_count
+            else:
+                avg_angle = drift_angle
+                avg_speed = speed_kmh
+            base_score = avg_angle * avg_speed * duration * 0.1
+
+            # Compute multipliers
+            multiplier = 1.0
+            multiplier_labels = []
+
+            # Chain bonus: 1.5x if combo > 1 (second consecutive drift within CHAIN_TIMEOUT)
+            if self.drift_combo > 1:
+                multiplier *= 1.5
+                multiplier_labels.append(f'CHAIN x{self.drift_combo}')
+
+            # High-speed bonus: 1.5x if average speed > 120 km/h
+            if avg_speed > 120.0:
+                multiplier *= 1.5
+                multiplier_labels.append('HIGH SPEED')
+
+            # Reverse entry bonus: 2x if drift direction is opposite to last drift
+            if (self._last_drift_direction is not None
+                    and self._entry_direction is not None):
+                # Opposite direction means signs differ
+                if (self._last_drift_direction > 0) != (self._entry_direction > 0):
+                    multiplier *= 2.0
+                    multiplier_labels.append('REVERSE ENTRY')
+
+            # Store this drift's direction for next reverse entry check
+            self._last_drift_direction = self._entry_direction
+
+            final_score = round(base_score * multiplier)
             self.total_drift_score += final_score
             if final_score > self.best_single_drift:
                 self.best_single_drift = final_score
@@ -122,10 +184,14 @@ class DriftDetector:
             result = {
                 'event': 'drift_end',
                 'score': final_score,
-                'chain_multiplier': self.chain_multiplier,
+                'combo': self.drift_combo,
+                'multiplier': ' + '.join(multiplier_labels) if multiplier_labels else '',
                 'total_score': round(self.total_drift_score),
             }
             self.current_drift_score = 0.0
+            self._angle_accumulator = 0.0
+            self._speed_accumulator = 0.0
+            self._sample_count = 0
 
         return result
 
@@ -252,7 +318,7 @@ class RaceCommentary:
         # --- Drift commentary ---
         if drift_event and drift_event.get('event') == 'drift_end':
             score = drift_event.get('score', 0)
-            chain = drift_event.get('chain_multiplier', 1)
+            chain = drift_event.get('combo', 1)
             if score > 500:
                 self._queue(f"INCREDIBLE drift! {score} points!", 'drift', 5)
             elif score > 200:
@@ -677,7 +743,7 @@ class RaceState:
                 "active": True,
                 "score": round(self.drift_detector.current_drift_score),
                 "angle": round(self.drift_detector.current_drift_angle, 1),
-                "chain": self.drift_detector.chain_multiplier,
+                "chain": self.drift_detector.drift_combo,
             }
         result["total_drift_score"] = round(self.drift_detector.total_drift_score)
 

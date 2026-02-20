@@ -122,6 +122,16 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
           0% { background-color: rgba(76, 175, 80, 0.3); }
           100% { background-color: transparent; }
         }
+        @keyframes pb-glow {
+          0% { text-shadow: 0 0 10px rgba(255, 215, 0, 0.4); }
+          50% { text-shadow: 0 0 30px rgba(255, 215, 0, 0.8), 0 0 60px rgba(255, 215, 0, 0.3); }
+          100% { text-shadow: 0 0 10px rgba(255, 215, 0, 0.4); }
+        }
+        @keyframes pb-slide-in {
+          0% { transform: translateY(-20px) scale(0.8); opacity: 0; }
+          60% { transform: translateY(4px) scale(1.05); }
+          100% { transform: translateY(0) scale(1.0); opacity: 1; }
+        }
       `}</style>
 
       <div className="bg-dark-300 rounded-xl border border-white/10 max-w-lg w-full p-8 text-center relative overflow-hidden">
@@ -154,8 +164,13 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
         <div className="grid grid-cols-2 gap-4 mb-6" style={revealStyle(2)}>
           <div className={`rounded-lg p-4 border ${playerWon ? 'bg-player/10 border-player/30' : 'bg-dark-400 border-white/10'}`}>
             <div className="text-white/50 text-xs font-mono uppercase mb-1">Your Time</div>
-            <div className="text-white text-2xl font-bold font-mono">
+            <div className="text-white text-2xl font-bold font-mono flex items-center justify-center gap-2">
               {result.player_time != null ? formatRaceTime(result.player_time) : 'DNF'}
+              {personalBestResult?.medal && (
+                <span className="text-lg" title={`${personalBestResult.medal} medal`}>
+                  {MEDAL_ICONS[personalBestResult.medal]}
+                </span>
+              )}
             </div>
           </div>
           <div className={`rounded-lg p-4 border ${!playerWon ? 'bg-ai/10 border-ai/30' : 'bg-dark-400 border-white/10'}`}>
@@ -165,6 +180,42 @@ export function RaceResults({ result, onPlayAgain, onMainMenu, raceSettings, onI
             </div>
           </div>
         </div>
+
+        {/* Personal Best banner */}
+        {personalBestResult && revealStep >= 2 && (
+          <div style={revealStyle(2)} className="mb-4">
+            {personalBestResult.isNewBest ? (
+              <div
+                className="rounded-lg border border-yellow-500/40 bg-yellow-500/10 px-4 py-3"
+                style={{ animation: 'pb-slide-in 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) forwards' }}
+              >
+                <div
+                  className="text-yellow-400 text-lg font-black tracking-wide"
+                  style={{ animation: 'pb-glow 2s ease-in-out infinite' }}
+                >
+                  NEW PERSONAL BEST!
+                </div>
+                {personalBestResult.previousBest && personalBestResult.improvement != null && (
+                  <div className="text-yellow-400/70 text-xs font-mono mt-1">
+                    Previous best: {formatRaceTime(personalBestResult.previousBest.time)}
+                    <span className="text-green-400 ml-2">
+                      Improved by {personalBestResult.improvement.toFixed(2)}s
+                    </span>
+                  </div>
+                )}
+              </div>
+            ) : personalBestResult.previousBest ? (
+              <div className="text-white/40 text-xs font-mono">
+                Personal best: {formatRaceTime(personalBestResult.previousBest.time)}
+                {result.player_time != null && (
+                  <span className="text-warning/70 ml-2">
+                    +{(result.player_time - personalBestResult.previousBest.time).toFixed(2)}s
+                  </span>
+                )}
+              </div>
+            ) : null}
+          </div>
+        )}
 
         {/* Time difference callout */}
         {result.player_time != null && result.ai_time != null && (

@@ -36,6 +36,7 @@ export function RaceHUD({ raceState, latencyMs, className = '' }: RaceHUDProps) 
   if (!raceState) return null;
 
   const { player, ai, model, race_status, fps, countdown } = raceState;
+  const totalDriftScore = raceState.total_drift_score ?? 0;
 
   // During countdown, hide most HUD elements for a cinematic look
   const isCountdown = race_status === 'countdown';
@@ -149,6 +150,21 @@ export function RaceHUD({ raceState, latencyMs, className = '' }: RaceHUDProps) 
           )}
         </div>
       </div>
+
+      {/* Total drift score counter -- bottom left, only shows when > 0 */}
+      {totalDriftScore > 0 && (
+        <div
+          className={`absolute bottom-14 left-4 z-10 transition-opacity duration-500 ease-out ${hudOpacityClass}`}
+          style={{ transitionDelay: hudVisible ? '400ms' : '0ms' }}
+        >
+          <div className="bg-black/60 backdrop-blur-sm rounded-lg px-3 py-2 border border-purple-500/30">
+            <div className="text-purple-400/70 text-[10px] font-mono uppercase tracking-wider">Drift Score</div>
+            <div className="text-purple-300 text-lg font-bold font-mono tabular-nums">
+              {totalDriftScore.toLocaleString()}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Bottom center: lap timer -- hidden during countdown */}
       <div

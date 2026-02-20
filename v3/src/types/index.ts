@@ -97,8 +97,17 @@ export interface PerfStats {
   frames_sent: number;
 }
 
+/** Drift end event from server */
+export interface DriftEndEvent {
+  type: 'drift_end';
+  score: number;
+  combo: number;
+  multiplier: string;
+  total_score: number;
+}
+
 /** Any JSON message from the server */
-export type ServerMessage = RaceState | RaceFinished | HandshakeAck | PerfStats | {
+export type ServerMessage = RaceState | RaceFinished | HandshakeAck | PerfStats | DriftEndEvent | {
   type: 'pong';
   timestamp: number;
 } | {

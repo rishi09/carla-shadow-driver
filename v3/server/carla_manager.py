@@ -518,7 +518,8 @@ class RaceManager:
             fov=chase_cfg['fov'],
             x=cam_params['x'], y=0.0, z=cam_params['z'],
             pitch=cam_params['pitch'],
-            callback=self.chase_buffer.update
+            callback=self.chase_buffer.update,
+            cinematic=True
         )
 
         self._camera_mode = mode

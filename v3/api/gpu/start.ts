@@ -35,6 +35,7 @@ echo "[onstart] Shadow Driver v3 onstart starting at $(date)"
 echo "[onstart] INSTANCE_ID=\${INSTANCE_ID}"
 echo "[onstart] CALLBACK_URL=\${CALLBACK_URL}"
 echo "[onstart] VAST_CONTAINERLABEL=\${VAST_CONTAINERLABEL}"
+echo "[onstart] VASTAI_API_KEY=\${VASTAI_API_KEY:+set (\${#VASTAI_API_KEY} chars)}"
 
 INST_ID="\${VAST_CONTAINERLABEL:-\${INSTANCE_ID:-unknown}}"
 CB_URL="\${CALLBACK_URL:-https://shadow-driver-v3.vercel.app/api/gpu/callback}"
@@ -158,6 +159,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             env: {
               INSTANCE_ID: String(offer.id),
               CALLBACK_URL: CALLBACK_URL,
+              VASTAI_API_KEY: VASTAI_API_KEY,
               ...(NGROK_AUTHTOKEN ? { NGROK_AUTHTOKEN } : {}),
             },
           }),

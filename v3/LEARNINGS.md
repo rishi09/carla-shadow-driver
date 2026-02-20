@@ -487,3 +487,63 @@ Format: `## [timestamp] Category: Short description`
 - **Rule**: CSS custom properties (`--px`, `--py`) in animation keyframes enable per-element variation in a shared `@keyframes` rule. Without custom properties, you would need unique keyframes per particle, which scales poorly.
 
 ---
+
+## [2026-02-19] Research: Viral game mechanics, browser superpowers, and AI-as-gameplay
+
+### What makes browser games go viral (lessons from agar.io, Wordle, Slow Roads, GeoGuessr, Trackmania, PolyTrack)
+
+**Zero-friction access is the prerequisite, not the feature.** Every viral browser game shares one trait: the gap between seeing a link and playing is zero. Agar.io: click link, type name, play. Wordle: click link, start guessing. Slow Roads: click link, start driving. No downloads, no accounts, no tutorials that block gameplay. For Shadow Driver, this means the GPU provisioning wait (60-120s) is the single biggest viral-loop killer. Solutions: pre-warm instances, progressive loading during wait, or demo mode with local rendering.
+
+**Shareability must be designed, not added.** Wordle's colored emoji grid was not an afterthought -- it was the core viral mechanic. The grid showed your result without spoiling the answer, so every share was a non-spoiler flex AND an implicit challenge. For racing games, the equivalent is a compact visual result card (track, time, gap, racing line mini-viz) that looks good as a tweet. The Web Share API (`navigator.share()`) supports PNG files on mobile, enabling native sharing without any backend.
+
+**Async competition beats real-time multiplayer for virality.** Trackmania's genius is ghost racing: you compete against recordings, not live players. This means no matchmaking, no lag compensation, no server costs, and races are always available. Ghost data is lightweight (~10-30KB per lap) and can be stored in Vercel KV or even embedded in URLs. Daily tracks (one track per day, global leaderboard) create "come back tomorrow" retention. PolyTrack (kodub.itch.io/polytrack) replicated this for browsers: low-poly Trackmania-inspired racing with a level editor and community tracks, 4.7/5 rating from ~500 players.
+
+**The "just one more try" loop requires zero-cost restarts.** Trackmania's instant restart (press Enter, instantly back at start) is the most important retention mechanic. Every millisecond of friction between "I messed up" and "I'm trying again" kills the loop. For Shadow Driver: R key should teleport to start and reset timer with zero UI interaction. No confirmation dialog, no menu, no loading. Server implementation is trivial: teleport actors, reset timers, keep actors alive.
+
+**Shareable moments > persistent progression.** Forza Horizon 5's photo mode generates more social media engagement than its actual racing. Gran Turismo 7's livery editor does the same. For browser games, the equivalent is clip recording: `canvas.captureStream(30)` + `MediaRecorder` for automatic WebM recording, or GIF export of the last 5 seconds for instant social sharing. GIFs autoplay everywhere -- they are the native format of social virality.
+
+### Cloud gaming latency: what actually works
+
+**Negative latency (Google Stadia concept):** The idea was to run the game engine slightly ahead of the player's input, rendering multiple speculative frames for different possible inputs, then selecting the correct one when input arrives. In practice, this is impractical for complex 3D games due to exponential branching. What DOES work: client-side prediction (we already do this with steering), input pre-buffering (send input predictions based on key-hold duration), and temporal frame interpolation (blend between server frames on the client).
+
+**Transport overhead dominates encoding optimization.** Our measured data confirms this: Cloudflare tunnels added 40-80ms per message, more than all JPEG encoding + physics optimizations combined. Ngrok reduced this to 10-20ms. For the next leap: WebRTC with direct UDP (via Vast.ai Direct mode) eliminates the TCP head-of-line blocking penalty and enables browser hardware H.264 decode. Expected improvement: 30-50ms additional reduction.
+
+**Client-side prediction is the highest-ROI latency mitigation.** Our steering prediction overlay (CSS transform on key press) makes the game feel 40-80ms more responsive without any server changes. The key insight: match the server's authority curves exactly. The client must apply the same speed-dependent steering limits as the server, otherwise the correction snap when the real frame arrives is MORE disorienting than the latency. Next opportunities: camera motion extrapolation (shift the viewport by velocity * dt between server frames) and HUD value extrapolation (already done via useInterpolatedState).
+
+### Browser APIs we should be using
+
+**Gamepad API (baseline since 2017):** Analog input is transformative for racing games. `navigator.getGamepads()` gives analog stick (-1.0 to 1.0) and trigger (0.0 to 1.0) values every frame. This means proportional steering and throttle instead of binary on/off. Implementation is ~50 lines. The single biggest "game feel" improvement available. Ref: https://developer.mozilla.org/en-US/docs/Web/API/Gamepad_API/Using_the_Gamepad_API
+
+**ONNX Runtime Web with WebGPU:** Runs neural network models directly in the browser with GPU acceleration. Import `onnxruntime-web/webgpu`, create session with `executionProviders: ['webgpu']`, run inference. PilotNet (~1MB ONNX model, 200x66 input, single steering output) is well within browser inference capability. Use cases: drive ghost cars on track preview, visualize AI decisions client-side, run client-side PilotNet for comparison overlay. WebGPU supported in Chrome/Edge 113+ (~78% of users). Ref: https://onnxruntime.ai/docs/tutorials/web/ep-webgpu.html
+
+**Web Share API:** `navigator.share({ files: [pngFile], title, text })` triggers the native OS share sheet on mobile. Supports PNG, WebM, and MP4 files. This means one-tap sharing of race result cards and gameplay clips to Twitter, Discord, Messages, etc. with zero backend infrastructure. Secure context (HTTPS) only, requires user gesture. Ref: https://developer.mozilla.org/en-US/docs/Web/API/Navigator/share
+
+**Canvas captureStream + MediaRecorder:** `canvas.captureStream(30)` returns a MediaStream of the canvas at 30fps. Feed it to `new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' })`. Record gameplay as WebM video entirely client-side. Ring-buffer the last N chunks for "instant replay" style clip saving. Combine with Web Share API for one-tap clip sharing. Ref: https://developer.mozilla.org/en-US/docs/Web/API/HTMLCanvasElement/captureStream
+
+**Wake Lock API:** `navigator.wakeLock.request('screen')` prevents screen dimming during gameplay on mobile/tablet. Essential for longer races where the player isn't touching the screen (if using a gamepad). Trivial to implement, significant UX improvement.
+
+**Fullscreen API:** `element.requestFullscreen()` hides browser chrome for immersive racing. Important on mobile where the URL bar consumes significant screen real estate.
+
+**Web Bluetooth (experimental):** Can connect BLE steering wheels and controllers via `navigator.bluetooth.requestDevice()`. However, the API is experimental, Chrome-only, and not available in Firefox or Safari. Use as progressive enhancement only, not primary input. Ref: https://developer.mozilla.org/en-US/docs/Web/API/Web_Bluetooth_API
+
+### AI as a game mechanic (the HackerNews angle)
+
+**The "teach your AI" concept is the most viral-potential feature.** Let players record their driving, train a PilotNet clone on their data (~30s of GPU fine-tuning), and export a personalized AI driver. The AI clone can then compete in async tournaments against other players' AI clones. This combines the appeal of creature-training games (like Keiwan's Evolution simulator at keiwan.itch.io/evolution, which lets users build creatures that learn to walk through genetic algorithms and neural networks) with competitive racing. The HackerNews crowd specifically loves: watching AI learn (mesmerizing visualization), understanding AI decisions (explainable AI overlay), and competing at a meta-level (optimizing the training process, not just driving).
+
+**Neural network visualization is the "wow factor."** Radu Mariescu-Istodor's JavaScript self-driving car tutorial (github.com/gniziemazity/Self-driving-car) has millions of YouTube views specifically because it visualizes the neural network: you see the nodes light up, the connections fire, and the car respond. For Shadow Driver, showing a small inset with PilotNet's attention heatmap (Grad-CAM) while the AI drives would generate massive sharing. Implementation: compute Grad-CAM on the server (cheap with PyTorch register_backward_hook), downsample to 50x33, send as low-res JPEG alongside the main frame.
+
+**GT Sophy (Nature, 2022) proved superhuman racing AI is compelling.** Sony AI's GT Sophy achieved superhuman performance in Gran Turismo via reinforcement learning. The published results and accompanying media generated enormous interest. Shadow Driver can democratize this: instead of a corporate-trained superhuman agent, let every player train their own agent. The gap between "watch a corporate demo" and "do it yourself in your browser" is the viral opportunity.
+
+**AI race commentary is low-effort, high-delight.** Feed telemetry events (overtake, crash, close gap, final lap) to Claude API or Web Speech API for real-time commentary. "And the player takes the inside line through turn 3!" Shareable clips with AI commentary would be highly distinctive content. Implementation: batch telemetry events every 5 seconds, send to Claude with a "racing commentator" system prompt, display response as subtitles.
+
+### Racing game design patterns worth stealing
+
+**Mario Kart's rubber banding is invisible skill-floor management.** Items are weighted by position: last place gets blue shells, first place gets bananas. This keeps every race close without the player feeling cheated. Our existing distance-based rubber banding on the AI car serves the same purpose. Lesson: the best difficulty adjustment is one the player doesn't notice.
+
+**Trackmania's daily tracks create appointment viewing.** One track per day, same for everyone, global leaderboard. This turns a single-player game into a daily social event. Players share their times, compare strategies, and come back tomorrow. Implementation is trivial: `Math.floor(Date.now() / 86400000)` as seed for track/weather/spawn selection.
+
+**Forza Horizon 5 seasonal content prevents staleness.** Monthly themes (winter, spring, etc.) change the map, available events, and rewards. For Shadow Driver: monthly themed tournaments (night races, rain championship, reversed tracks) with aggregate scoring could serve the same purpose at much lower cost.
+
+**Drift scoring (angle * speed * duration) creates a second game mode.** Nearly every arcade racer has a drift scoring system. It's orthogonal to lap time competition and appeals to a different player personality. Implementation: compute slip angle from heading vs velocity vector (we already do this for countersteer assist), multiply by speed and duration, accumulate points. Display as a combo counter that resets on crash or grip recovery.
+
+---
