@@ -66,6 +66,8 @@ class FrameEncoder:
 
         # --- Frame delta detection ---
         self._prev_frame_hash: Optional[np.ndarray] = None  # Previous frame's block hash
+        self._consecutive_skips: int = 0  # Counter for consecutive delta skips
+        self._max_consecutive_skips: int = 15  # Force send after this many skips (~0.5s at 30fps)
 
         # --- Performance monitoring ---
         self._encode_times: deque = deque(maxlen=30)  # Last 30 encode times (ms)
@@ -199,6 +201,9 @@ class FrameEncoder:
 
         This runs in <0.5ms on a 1280x720 frame using numpy operations.
 
+        Also enforces a max consecutive skip limit to ensure at least ~2 fps
+        even when the scene is completely static.
+
         Args:
             frame: RGB numpy array (H, W, 3)
 
@@ -206,6 +211,13 @@ class FrameEncoder:
             True if frames are similar (caller should skip encoding)
         """
         if frame is None:
+            return False
+
+        # Force send after too many consecutive skips (ensures ~2fps minimum)
+        if self._consecutive_skips >= self._max_consecutive_skips:
+            self._consecutive_skips = 0
+            # Still update the hash for the next comparison
+            self._update_frame_hash(frame)
             return False
 
         # Compute block hash: downsample to small grid, take mean per block
@@ -228,6 +240,7 @@ class FrameEncoder:
         # Compare with previous
         if self._prev_frame_hash is None:
             self._prev_frame_hash = current_hash
+            self._consecutive_skips = 0
             return False
 
         # Mean absolute difference across all blocks
@@ -236,11 +249,27 @@ class FrameEncoder:
         # Always update the hash for next comparison
         self._prev_frame_hash = current_hash
 
-        return diff < DELTA_THRESHOLD
+        if diff < DELTA_THRESHOLD:
+            self._consecutive_skips += 1
+            return True
+
+        self._consecutive_skips = 0
+        return False
+
+    def _update_frame_hash(self, frame: np.ndarray):
+        """Update the stored frame hash without doing a similarity check."""
+        h, w = frame.shape[:2]
+        block_h = h // DELTA_BLOCK_SIZE
+        block_w = w // DELTA_BLOCK_SIZE
+        trimmed = frame[:block_h * DELTA_BLOCK_SIZE, :block_w * DELTA_BLOCK_SIZE]
+        gray = trimmed[:, :, 0] * 0.299 + trimmed[:, :, 1] * 0.587 + trimmed[:, :, 2] * 0.114
+        blocks = gray.reshape(DELTA_BLOCK_SIZE, block_h, DELTA_BLOCK_SIZE, block_w)
+        self._prev_frame_hash = blocks.mean(axis=(1, 3)).astype(np.float32)
 
     def reset_frame_hash(self):
         """Reset the stored frame hash (e.g., on camera mode change)."""
         self._prev_frame_hash = None
+        self._consecutive_skips = 0
 
     # ---------------------------------------------------------------
     # 3. Speed-Based Resolution Scaling
