@@ -137,7 +137,6 @@ export function RaceResultCard({ result, raceSettings }: RaceResultCardProps) {
     ctx.font = 'bold 36px system-ui, -apple-system, sans-serif';
     const badgeMetrics = ctx.measureText(badgeText);
     const badgePadX = 28;
-    const badgePadY = 10;
     const badgeW = badgeMetrics.width + badgePadX * 2;
     const badgeH = 48;
     const badgeX = (W - badgeW) / 2;

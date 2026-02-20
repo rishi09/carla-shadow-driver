@@ -133,7 +133,7 @@ export function ArcSpeedometer({ speedKmh, maxSpeed = 220, size = 120 }: ArcSpee
         )}
 
         {/* Tick marks */}
-        {ticks.map(({ val, outer, inner, label, angle }) => (
+        {ticks.map(({ val, outer, inner, label }) => (
           <g key={val}>
             <line
               x1={outer.x}

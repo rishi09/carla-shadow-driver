@@ -109,7 +109,6 @@ export function Race() {
 
   // --- Photo Mode state ---
   const [photoModeActive, setPhotoModeActive] = useState(false);
-  const photoCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // --- Replay clip recording ---
   const replayCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -620,21 +619,6 @@ export function Race() {
     }
   }, [replayRecorder.lastClipUrl]);
 
-  // --- Enter key for instant race again on results screen ---
-  useEffect(() => {
-    if (view !== 'results') return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        handleInstantReplay();
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [view, handleInstantReplay]);
-
   const handleProceedToRace = useCallback(() => {
     setView('pre_race');
   }, []);
@@ -712,6 +696,21 @@ export function Race() {
       setView('pre_race');
     }
   }, [handleStartRace]);
+
+  // --- Enter key for instant race again on results screen ---
+  useEffect(() => {
+    if (view !== 'results') return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        handleInstantReplay();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [view, handleInstantReplay]);
 
   const handleMainMenu = useCallback(() => {
     gpu.stopGPU();
