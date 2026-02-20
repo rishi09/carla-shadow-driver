@@ -149,6 +149,9 @@ export function Race() {
   const [niceSave, setNiceSave] = useState(false);
   const speedHistoryRef = useRef<number[]>([]);
 
+  // --- Comeback mechanic: slipstream boost visual when >3s behind ---
+  const [slipstreamBoost, setSlipstreamBoost] = useState(false);
+
   // --- Split time delta tracking ---
   // Stores lap_time at each checkpoint crossing during the current lap
   const checkpointTimesRef = useRef<number[]>([]);
@@ -406,6 +409,9 @@ export function Race() {
         }
         crowd.setAnticipation(0);
       }
+
+      // Comeback mechanic: show slipstream boost visual when player is >3s behind
+      setSlipstreamBoost(gap > 3.0);
     }
 
     // Final lap detection
@@ -1071,7 +1077,8 @@ export function Race() {
                     gForceTransform,
                   ].filter(Boolean).join(' '),
               filter: [
-                motionBlurPx > 0.05 ? `blur(${motionBlurPx.toFixed(2)}px)` : '',
+                // Skip CSS blur when WebGL2 is active (radial blur shader handles it)
+                !useWebGL2 && motionBlurPx > 0.05 ? `blur(${motionBlurPx.toFixed(2)}px)` : '',
                 crashDesaturate ? 'grayscale(50%)' : '',
               ].filter(Boolean).join(' ') || 'none',
               transition: 'filter 100ms ease-out',
@@ -1153,6 +1160,36 @@ export function Race() {
             />
           )}
 
+          {/* Comeback mechanic: slipstream boost edge glow when >3s behind */}
+          <div
+            className="absolute inset-0 pointer-events-none z-20"
+            style={{
+              boxShadow: slipstreamBoost
+                ? 'inset 0 0 80px 20px rgba(100,150,255,0.15)'
+                : 'inset 0 0 80px 20px rgba(100,150,255,0)',
+              transition: 'box-shadow 0.8s ease-in-out',
+            }}
+          />
+          {/* SLIPSTREAM label at top-center */}
+          <div
+            className="absolute top-8 left-1/2 -translate-x-1/2 pointer-events-none z-20"
+            style={{
+              opacity: slipstreamBoost ? 1 : 0,
+              transition: 'opacity 0.8s ease-in-out',
+            }}
+          >
+            <span
+              className="text-sm font-bold tracking-[0.3em] uppercase"
+              style={{
+                color: 'rgba(160,200,255,0.6)',
+                textShadow: '0 0 12px rgba(100,150,255,0.4), 0 0 24px rgba(100,150,255,0.2)',
+                animation: slipstreamBoost ? 'slipstreamPulse 2s ease-in-out infinite' : 'none',
+              }}
+            >
+              SLIPSTREAM
+            </span>
+          </div>
+
           {/* Split time delta popup at checkpoints */}
           <SplitTimeDelta
             delta={splitDelta}
@@ -1206,6 +1243,10 @@ export function Race() {
               25% { transform: scale(1.0) rotate(0deg); }
               65% { opacity: 1; }
               100% { opacity: 0; transform: scale(1.0) translateY(-15px); }
+            }
+            @keyframes slipstreamPulse {
+              0%, 100% { opacity: 0.5; }
+              50% { opacity: 1.0; }
             }
           `}</style>
 

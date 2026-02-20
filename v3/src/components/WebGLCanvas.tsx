@@ -28,12 +28,37 @@ out vec4 fragColor;
 uniform sampler2D u_frame;
 uniform float u_time;       // seconds since start
 uniform float u_intensity;  // 0..1 speed-based effect intensity
+uniform float u_chromatic;  // 0..1 chromatic aberration intensity (120-300 km/h)
+uniform float u_radialBlur; // 0..1 radial motion blur intensity (speed-based)
 
 // ---------- helpers ----------
 
 // Hash for film grain
 float hash(vec2 p) {
   return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+}
+
+// Radial blur: samples along direction from center, weighted by distance
+// Returns blurred color at uv. Blur = 0 at center, max at edges.
+vec3 sampleRadialBlur(sampler2D tex, vec2 uv, float blurAmount) {
+  vec2 dir = uv - 0.5;
+  float dist = length(dir); // 0 at center, ~0.707 at corners
+
+  // Per-pixel blur strength: proportional to distance from center
+  float strength = dist * blurAmount * 0.04;
+
+  // 7 samples along the radial direction, centered on current pixel
+  vec3 sum = vec3(0.0);
+  float totalWeight = 0.0;
+  for (int i = -3; i <= 3; i++) {
+    float offset = float(i) / 3.0; // -1 to 1
+    vec2 sampleUV = clamp(uv - dir * strength * offset, 0.0, 1.0);
+    // Gaussian-ish weight: center samples weigh more
+    float w = 1.0 - abs(offset) * 0.4;
+    sum += texture(tex, sampleUV).rgb * w;
+    totalWeight += w;
+  }
+  return sum / totalWeight;
 }
 
 void main() {
@@ -51,14 +76,38 @@ void main() {
   // Clamp to valid texture range
   uv = clamp(uv, vec2(0.0), vec2(1.0));
 
-  // --- 2. Chromatic aberration ---
+  // --- 2. Radial motion blur (applied before CA so aberration splits blurred image) ---
+  vec3 blurredColor;
+  if (u_radialBlur > 0.0) {
+    blurredColor = sampleRadialBlur(u_frame, uv, u_radialBlur);
+  } else {
+    blurredColor = texture(u_frame, uv).rgb;
+  }
+
+  // --- 3. Chromatic aberration ---
   float edgeDist = length(uv - 0.5) * 2.0; // 0 at center, ~1.4 at corners
-  float caAmount = mix(0.001, 0.004, t) * edgeDist;
   vec2 caDir = normalize(uv - 0.5 + 0.0001); // direction from center
-  float r = texture(u_frame, clamp(uv + caDir * caAmount, 0.0, 1.0)).r;
-  float g = texture(u_frame, uv).g;
-  float b = texture(u_frame, clamp(uv - caDir * caAmount, 0.0, 1.0)).b;
-  vec3 color = vec3(r, g, b);
+
+  // Base CA scales with barrel distortion intensity
+  float caBase = mix(0.001, 0.004, t) * edgeDist;
+  // Speed-based CA: radial shift from center, 0.003 at full intensity
+  float caSpeed = u_chromatic * 0.003;
+  // Combine: base edge-dependent + uniform speed-based
+  float caAmount = caBase + caSpeed;
+
+  // Sample R and B channels with CA offset, using radial blur when active
+  vec3 color;
+  if (u_radialBlur > 0.0) {
+    float r = sampleRadialBlur(u_frame, clamp(uv + caDir * caAmount, 0.0, 1.0), u_radialBlur).r;
+    float g = blurredColor.g;
+    float b = sampleRadialBlur(u_frame, clamp(uv - caDir * caAmount, 0.0, 1.0), u_radialBlur).b;
+    color = vec3(r, g, b);
+  } else {
+    float r = texture(u_frame, clamp(uv + caDir * caAmount, 0.0, 1.0)).r;
+    float g = texture(u_frame, uv).g;
+    float b = texture(u_frame, clamp(uv - caDir * caAmount, 0.0, 1.0)).b;
+    color = vec3(r, g, b);
+  }
 
   // --- 3. Color grading (cinematic warm) ---
   // Lift (shadows): warm push
@@ -153,7 +202,7 @@ export function WebGLCanvas({ onBinaryFrame, className = '', speedKmh = 0, exter
   const glRef = useRef<WebGL2RenderingContext | null>(null);
   const programRef = useRef<WebGLProgram | null>(null);
   const textureRef = useRef<WebGLTexture | null>(null);
-  const uniformsRef = useRef<{ time: WebGLUniformLocation | null; intensity: WebGLUniformLocation | null }>({ time: null, intensity: null });
+  const uniformsRef = useRef<{ time: WebGLUniformLocation | null; intensity: WebGLUniformLocation | null; chromatic: WebGLUniformLocation | null; radialBlur: WebGLUniformLocation | null }>({ time: null, intensity: null, chromatic: null, radialBlur: null });
   const pendingFrameRef = useRef<ImageBitmap | null>(null);
   const rafIdRef = useRef<number>(0);
   const frameCountRef = useRef<number>(0);
@@ -204,6 +253,8 @@ export function WebGLCanvas({ onBinaryFrame, className = '', speedKmh = 0, exter
     uniformsRef.current = {
       time: gl.getUniformLocation(prog, 'u_time'),
       intensity: gl.getUniformLocation(prog, 'u_intensity'),
+      chromatic: gl.getUniformLocation(prog, 'u_chromatic'),
+      radialBlur: gl.getUniformLocation(prog, 'u_radialBlur'),
     };
 
     // Texture
@@ -283,6 +334,14 @@ export function WebGLCanvas({ onBinaryFrame, className = '', speedKmh = 0, exter
         const speed = speedRef.current;
         const intensity = Math.min(1.0, Math.max(0.0, (speed - 50) / 100));
         gl.uniform1f(uniformsRef.current.intensity, intensity);
+
+        // Chromatic aberration: ramp from 0 at <=120 to 1 at >=300 km/h
+        const chromatic = Math.min(1.0, Math.max(0.0, (speed - 120) / 180));
+        gl.uniform1f(uniformsRef.current.chromatic, chromatic);
+
+        // Radial motion blur: ramp from 0 at rest to 1 at >=200 km/h
+        const radialBlur = Math.min(1.0, Math.max(0.0, speed / 200));
+        gl.uniform1f(uniformsRef.current.radialBlur, radialBlur);
 
         // Draw
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);

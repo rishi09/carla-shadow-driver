@@ -817,8 +817,8 @@ See `LEARNINGS.md` section "What Makes Racing Games Fun" for full rationale behi
 ### TIER 2: High Impact, Medium Effort (build this week)
 
 #### Speed Perception (Shader-Based)
-- [ ] **Chromatic aberration at speed**: WebGL shader on video canvas (or CSS filter workaround). Separate RGB channels radially from center: red shifts outward 1-2px, blue shifts inward 1-2px. Intensity: `Math.max(0, (speed - 120) / 180)`. Start at 120 km/h, max effect at 300 km/h. Strongest at horizontal edges. Implement in `WebGLCanvas.tsx`.
-- [ ] **Radial motion blur shader**: Replace uniform CSS `filter: blur()` with a WebGL radial blur from screen center. Blur amount per pixel = `distance_from_center * speed_factor`. This single change transforms "looks out of focus" into "looks fast." Implement as a fragment shader in `WebGLCanvas.tsx`.
+- [x] **Chromatic aberration at speed**: WebGL shader on video canvas (or CSS filter workaround). Separate RGB channels radially from center: red shifts outward 1-2px, blue shifts inward 1-2px. Intensity: `Math.max(0, (speed - 120) / 180)`. Start at 120 km/h, max effect at 300 km/h. Strongest at horizontal edges. Implement in `WebGLCanvas.tsx`.
+- [x] **Radial motion blur shader**: Replace uniform CSS `filter: blur()` with a WebGL radial blur from screen center. Blur amount per pixel = `distance_from_center * speed_factor`. This single change transforms "looks out of focus" into "looks fast." Implement as a fragment shader in `WebGLCanvas.tsx`.
 
 #### Controls & Physics Feel
 - [ ] **Speed-dependent steering ramp time**: In `carla_manager.py`, scale steering ramp duration with speed: `ramp_ms = 40 + speed * 0.3`. At 0 km/h: 40ms (snappy). At 200 km/h: 100ms (weighty). Makes high-speed steering feel deliberate and solid (GT7 "weight" feel).
@@ -843,7 +843,7 @@ See `LEARNINGS.md` section "What Makes Racing Games Fun" for full rationale behi
 - [x] **Victory/defeat results enhancements**: Show gap to 3 decimal places when < 1.0s. Show improvement vs previous attempt. Add "Best Improvement" stat (e.g., "1.3s faster than your first race on this track!"). Show time progression chart of last 5 attempts.
 - [x] **Slipstream/drafting visual**: When player is within 10m behind AI car, show faint blue-white speed streaks converging toward center (drafting visual). Even if no actual speed boost, the visual cue makes close following feel intentional and skill-based. If combining with actual draft speed boost, becomes a visible mechanic.
 - [ ] **AI blocking behavior on Hard**: On Hard difficulty, when player is within 5m behind AI, have AI take a defensive line (move toward the inside of the next turn). Creates "I need to outbrake them!" moments. Server-side in AI autopilot parameters.
-- [ ] **Comeback mechanic ("drafting boost")**: When player is >3 seconds behind, grant a subtle 3% speed boost with a faint blue-white screen-edge glow labeled "SLIPSTREAM". Frame rubber-banding as a physics mechanic (drafting) so it feels earned, not gifted. Mario Kart lesson: invisible help feels patronizing; visible help feels like a feature.
+- [x] **Comeback mechanic ("drafting boost")**: When player is >3 seconds behind, grant a subtle 3% speed boost with a faint blue-white screen-edge glow labeled "SLIPSTREAM". Frame rubber-banding as a physics mechanic (drafting) so it feels earned, not gifted. Mario Kart lesson: invisible help feels patronizing; visible help feels like a feature.
 - [x] **Post-race sharing text (Wordle-style)**: Generate copy-pasteable text block: "Shadow Driver v3 - Town05 | 1:23.456 | Beat AI by 2.3s | Top Speed: 187 km/h | Hard | shadow-driver-v3.vercel.app". One "Copy" button. Plain text travels everywhere.
 
 ### Implementation Priority (Top 10 for Maximum Fun-Per-Hour-Invested)
