@@ -4,6 +4,8 @@ interface WebGLCanvasProps {
   onBinaryFrame: (handler: ((data: Blob) => void) | null) => void;
   className?: string;
   speedKmh?: number;
+  /** Current steering value: -1 (full left) to 1 (full right) */
+  steer?: number;
   /** Optional external ref to access the underlying canvas element (e.g. for replay recording) */
   externalCanvasRef?: RefObject<HTMLCanvasElement | null>;
 }
@@ -32,6 +34,7 @@ uniform float u_time;       // seconds since start
 uniform float u_intensity;  // 0..1 speed-based effect intensity
 uniform float u_chromatic;  // 0..1 chromatic aberration intensity (120-300 km/h)
 uniform float u_radialBlur; // 0..1 radial motion blur intensity (speed-based)
+uniform vec2 u_motionVector; // velocity-based pixel shift for motion-compensated interpolation
 
 // ---------- helpers ----------
 
@@ -40,9 +43,14 @@ float hash(vec2 p) {
   return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
 }
 
-// Sample with crossfade: blend between previous and current frame
+// Sample with motion-compensated crossfade: shift prev/cur frames by motion vector
 vec4 sampleBlended(vec2 uv) {
-  return mix(texture(u_prevFrame, uv), texture(u_frame, uv), u_blend);
+  // When blending (u_blend ~0.5), shift each frame by half the motion vector
+  // so the intermediate result approximates where objects would be between frames.
+  // When u_blend = 1.0 (current-only), motionVector is zero so this is a no-op.
+  vec2 prevUV = clamp(uv + u_motionVector * 0.5, 0.0, 1.0);
+  vec2 curUV  = clamp(uv - u_motionVector * 0.5, 0.0, 1.0);
+  return mix(texture(u_prevFrame, prevUV), texture(u_frame, curUV), u_blend);
 }
 
 // Radial blur: samples along direction from center, weighted by distance
@@ -209,7 +217,7 @@ function createProgram(gl: WebGL2RenderingContext): WebGLProgram | null {
 
 // ---------- Component ----------
 
-export function WebGLCanvas({ onBinaryFrame, className = '', speedKmh = 0, externalCanvasRef }: WebGLCanvasProps) {
+export function WebGLCanvas({ onBinaryFrame, className = '', speedKmh = 0, steer = 0, externalCanvasRef }: WebGLCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   // Sync external canvas ref with internal ref
@@ -234,13 +242,15 @@ export function WebGLCanvas({ onBinaryFrame, className = '', speedKmh = 0, exter
     chromatic: WebGLUniformLocation | null;
     radialBlur: WebGLUniformLocation | null;
     blend: WebGLUniformLocation | null;
-  }>({ time: null, intensity: null, chromatic: null, radialBlur: null, blend: null });
+    motionVector: WebGLUniformLocation | null;
+  }>({ time: null, intensity: null, chromatic: null, radialBlur: null, blend: null, motionVector: null });
   const pendingFrameRef = useRef<ImageBitmap | null>(null);
   const rafIdRef = useRef<number>(0);
   const frameCountRef = useRef<number>(0);
   const fpsIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startTimeRef = useRef<number>(performance.now());
   const speedRef = useRef<number>(0);
+  const steerRef = useRef<number>(0);
   const [hasFirstFrame, setHasFirstFrame] = useState(false);
   const firstFrameReceivedRef = useRef(false);
   const textureInitializedRef = useRef(false);
@@ -248,8 +258,9 @@ export function WebGLCanvas({ onBinaryFrame, className = '', speedKmh = 0, exter
   const blendFrameRef = useRef(false);
   const hasUploadedAnyFrameRef = useRef(false);
 
-  // Keep speed ref in sync without triggering effect re-runs
+  // Keep speed/steer refs in sync without triggering effect re-runs
   speedRef.current = speedKmh;
+  steerRef.current = steer;
 
   const initGL = useCallback((canvas: HTMLCanvasElement): boolean => {
     const gl = canvas.getContext('webgl2', { alpha: false, antialias: false, premultipliedAlpha: false });
@@ -291,6 +302,7 @@ export function WebGLCanvas({ onBinaryFrame, className = '', speedKmh = 0, exter
       chromatic: gl.getUniformLocation(prog, 'u_chromatic'),
       radialBlur: gl.getUniformLocation(prog, 'u_radialBlur'),
       blend: gl.getUniformLocation(prog, 'u_blend'),
+      motionVector: gl.getUniformLocation(prog, 'u_motionVector'),
     };
 
     // Current frame texture (TEXTURE0)
@@ -433,11 +445,20 @@ export function WebGLCanvas({ onBinaryFrame, className = '', speedKmh = 0, exter
         gl.uniform1f(uniformsRef.current.radialBlur, radialBlur);
 
         // Crossfade blend: 0.5 on first tick after new frame, 1.0 otherwise
+        // Motion vector: velocity-based pixel shift for motion-compensated interpolation
         if (blendFrameRef.current) {
           gl.uniform1f(uniformsRef.current.blend, 0.5);
+          // Compute motion vector from telemetry:
+          //   X = lateral shift from steering (negative steer = scene shifts right = positive X)
+          //   Y = forward motion = slight downward shift in screen space
+          const motionX = -steerRef.current * 0.005 * (speed / 100);
+          const motionY = speed * 0.00003;
+          gl.uniform2f(uniformsRef.current.motionVector, motionX, motionY);
           blendFrameRef.current = false;
         } else {
           gl.uniform1f(uniformsRef.current.blend, 1.0);
+          // No blending = no motion shift needed
+          gl.uniform2f(uniformsRef.current.motionVector, 0.0, 0.0);
         }
 
         // Draw

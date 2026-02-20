@@ -93,6 +93,7 @@ export interface UseEngineSoundReturn {
   update: (rpm: number, throttle: number, speed: number, steer: number) => void;
   playCountdownBeeps: () => void;
   playImpact: (intensity: number) => void;
+  playImpactPreClick: () => void;
   playDownshiftBlip: () => void;
   playPassingWhoosh: () => void;
   triggerEvent: (event: 'overtake' | 'close_gap' | 'final_lap' | 'collision_hit') => void;
@@ -505,6 +506,40 @@ export function useEngineSound(): UseEngineSoundReturn {
     }
   }, []);
 
+  // Play a very short (30ms) white noise burst through a highpass filter at 3000Hz
+  // Used as a client-predicted impact pre-click before the server collision event arrives
+  const playImpactPreClick = useCallback(() => {
+    const nodes = nodesRef.current;
+    if (!nodes || nodes.ctx.state !== 'running' || !noiseBufferRef.current) return;
+
+    const ctx = nodes.ctx;
+    const now = ctx.currentTime;
+
+    const source = ctx.createBufferSource();
+    source.buffer = noiseBufferRef.current;
+    source.loop = false;
+
+    // Highpass filter at 3000Hz for a sharp click character
+    const hpFilter = ctx.createBiquadFilter();
+    hpFilter.type = 'highpass';
+    hpFilter.frequency.value = 3000;
+    hpFilter.Q.value = 1.0;
+
+    const clickGain = ctx.createGain();
+    // Quick attack (2ms), sustain at 0.15, sharp cutoff at 30ms
+    clickGain.gain.setValueAtTime(0, now);
+    clickGain.gain.linearRampToValueAtTime(0.15, now + 0.002);
+    clickGain.gain.setValueAtTime(0.15, now + 0.025);
+    clickGain.gain.linearRampToValueAtTime(0, now + 0.03);
+
+    source.connect(hpFilter);
+    hpFilter.connect(clickGain);
+    clickGain.connect(nodes.masterGain);
+
+    source.start(now);
+    source.stop(now + 0.035);
+  }, []);
+
   // Play a brief rev-match blip on downshift: 30ms sine burst at 250Hz
   // Simulates the rev-match downshift sound. Volume 0.2 (subtle).
   const playDownshiftBlip = useCallback(() => {
@@ -752,7 +787,7 @@ export function useEngineSound(): UseEngineSoundReturn {
     };
   }, []);
 
-  return { update, playCountdownBeeps, playImpact, playDownshiftBlip, playPassingWhoosh, triggerEvent, stopCloseGapTension, setMuted, isMuted };
+  return { update, playCountdownBeeps, playImpact, playImpactPreClick, playDownshiftBlip, playPassingWhoosh, triggerEvent, stopCloseGapTension, setMuted, isMuted };
 }
 
 export default useEngineSound;

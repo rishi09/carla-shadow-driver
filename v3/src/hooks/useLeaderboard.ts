@@ -18,6 +18,8 @@ export interface LeaderboardEntry {
   date: string;         // ISO date string
   difficulty: string;   // AI difficulty
   playerCar: string;    // Car used
+  winner?: 'player' | 'ai';  // Who won the race
+  aiTime?: number | null;     // AI's total race time in seconds
 }
 
 export interface TrackRecord {

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useSocialPresence } from '../hooks/useSocialPresence.ts';
 import { RecentRaces } from '../components/RecentRaces.tsx';
+import { RecentResultsTicker } from '../components/RecentResultsTicker.tsx';
 
 // ============================================================
 // SPEED CANVAS — road-like vanishing point with rushing light streaks
@@ -414,6 +415,13 @@ export function Landing() {
           <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="text-white/25">
             <polyline points="6 9 12 15 18 9" />
           </svg>
+        </div>
+      </section>
+
+      {/* ===================== YOUR RECENT RESULTS ===================== */}
+      <section className="relative z-10 py-4 sm:py-6 px-4 sm:px-6">
+        <div className="max-w-5xl mx-auto">
+          <RecentResultsTicker />
         </div>
       </section>
 

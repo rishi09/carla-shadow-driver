@@ -37,6 +37,7 @@ import { ClipPreview } from '../components/ClipPreview.tsx';
 import { RearMirror } from '../components/RearMirror.tsx';
 import { RecordingControls } from '../components/RecordingControls.tsx';
 import { SplitTimeDelta } from '../components/SplitTimeDelta.tsx';
+import { useGhostRecorder } from '../hooks/useGhostRecorder.ts';
 import { useReplayRecorder } from '../hooks/useReplayRecorder.ts';
 import { useScreenRecorder } from '../hooks/useScreenRecorder.ts';
 import type { KeyState } from '../types/index.ts';
@@ -89,6 +90,7 @@ export function Race() {
   const streak = useStreak();
   const adaptiveDifficulty = useAdaptiveDifficulty();
   const steeringPrediction = useSteeringPrediction(keysRef, view === 'racing', gpu.raceState?.player?.speed_kmh ?? 0);
+  const ghostRecorder = useGhostRecorder();
   const frameExtrapolation = useFrameExtrapolation(
     gpu.raceState?.player?.speed_kmh ?? 0,
     gpu.raceState?.player?.steer ?? 0,
@@ -154,6 +156,14 @@ export function Race() {
   const [niceSave, setNiceSave] = useState(false);
   const speedHistoryRef = useRef<number[]>([]);
 
+  // --- Photo Finish detection state ---
+  const [photoFinish, setPhotoFinish] = useState(false);
+  // Building tension: approaching photo finish (final lap, last ~10% checkpoints, gap < 1.0s)
+  const [photoFinishTension, setPhotoFinishTension] = useState(false);
+  const photoFinishTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Audio swell ref for cleanup
+  const photoFinishAudioRef = useRef<{ ctx: AudioContext; nodes: AudioNode[] } | null>(null);
+
   // --- Comeback mechanic: slipstream boost visual when >3s behind ---
   const [slipstreamBoost, setSlipstreamBoost] = useState(false);
 
@@ -213,6 +223,11 @@ export function Race() {
           player.steer ?? 0,
         );
 
+        // Record ghost frame (internally throttled to 10Hz)
+        if (player.x != null && player.y != null) {
+          ghostRecorder.recordFrame(player.x, player.y, player.yaw ?? 0, player.speed_kmh);
+        }
+
         // Update background music intensity based on speed and gap
         const speedFactor = player.speed_kmh / 150;
         const gapCloseFactor = (player.gap_seconds != null && Math.abs(player.gap_seconds) < 3) ? 0.3 : 0;
@@ -237,7 +252,7 @@ export function Race() {
     rafId = requestAnimationFrame(tick);
 
     return () => { cancelAnimationFrame(rafId); };
-  }, [view, gpu.raceState, engineSound.update, bgMusic.updateIntensity, aiEngineSound.update]);
+  }, [view, gpu.raceState, engineSound.update, bgMusic.updateIntensity, aiEngineSound.update, ghostRecorder.recordFrame]);
 
   // --- Countdown beeps + GO screen shake ---
   useEffect(() => {
@@ -248,6 +263,8 @@ export function Race() {
     }
     // Show controls hint when transitioning from countdown to racing
     if (status === 'racing' && prevRaceStatusRef.current === 'countdown') {
+      // Start ghost recorder when race begins
+      ghostRecorder.start();
       // First-time players get the full controls overlay; returning players get the brief hint
       if (!hasPlayedBeforeRef.current()) {
         setShowFirstTimeOverlay(true);
@@ -265,13 +282,17 @@ export function Race() {
     }
 
     prevRaceStatusRef.current = status;
-  }, [gpu.raceState?.race_status, gpu.raceState?.countdown, engineSound.playCountdownBeeps]);
+  }, [gpu.raceState?.race_status, gpu.raceState?.countdown, engineSound.playCountdownBeeps, ghostRecorder.start]);
 
   // --- Screen shake helper ---
-  const triggerScreenShake = useCallback((magnitude: number, duration: number) => {
+  // dirX/dirY: optional directional bias for the initial impulse (normalized direction vector).
+  // Head-on collision: dirY > 0 jolts camera back; side collision: dirX != 0 jolts laterally.
+  // The initial frame uses the direction vector scaled by magnitude; subsequent frames decay with random jitter.
+  const triggerScreenShake = useCallback((magnitude: number, duration: number, dirX?: number, dirY?: number) => {
+    const hasDirection = dirX != null && dirY != null;
     shakeRef.current = {
-      x: (Math.random() - 0.5) * 2 * magnitude,
-      y: (Math.random() - 0.5) * 2 * magnitude,
+      x: hasDirection ? dirX * magnitude : (Math.random() - 0.5) * 2 * magnitude,
+      y: hasDirection ? dirY * magnitude : (Math.random() - 0.5) * 2 * magnitude,
       decay: magnitude,
     };
 
@@ -280,6 +301,9 @@ export function Race() {
     }
 
     const shakeStart = performance.now();
+    // Set the initial directional impulse immediately
+    setShakeX(shakeRef.current.x);
+    setShakeY(shakeRef.current.y);
 
     const animateShake = (now: number) => {
       const elapsed = now - shakeStart;
@@ -291,8 +315,14 @@ export function Race() {
       }
       const decayFactor = 1 - elapsed / duration;
       const currentMag = magnitude * decayFactor;
-      setShakeX((Math.random() - 0.5) * 2 * currentMag);
-      setShakeY((Math.random() - 0.5) * 2 * currentMag);
+      // Early frames: blend directional bias with random jitter (bias fades over first 40% of duration)
+      const dirBlend = hasDirection ? Math.max(0, 1 - elapsed / (duration * 0.4)) : 0;
+      const randomX = (Math.random() - 0.5) * 2 * currentMag;
+      const randomY = (Math.random() - 0.5) * 2 * currentMag;
+      const biasX = hasDirection ? dirX! * currentMag : 0;
+      const biasY = hasDirection ? dirY! * currentMag : 0;
+      setShakeX(randomX * (1 - dirBlend) + biasX * dirBlend);
+      setShakeY(randomY * (1 - dirBlend) + biasY * dirBlend);
       shakeRafRef.current = requestAnimationFrame(animateShake);
     };
 
@@ -315,7 +345,23 @@ export function Race() {
     const magnitude = Math.min(15, Math.sqrt(maxIntensity) * 0.5);
     // Duration scales with magnitude: 200ms for light taps, up to 500ms for heavy impacts
     const shakeDuration = 200 + Math.min(300, magnitude * 20);
-    triggerScreenShake(magnitude, shakeDuration);
+
+    // Directional shake: compute direction from player to AI for collision impulse
+    const player = gpu.raceState?.player;
+    const ai = gpu.raceState?.ai;
+    let collDirX: number | undefined;
+    let collDirY: number | undefined;
+    if (player && ai && player.x != null && player.y != null && ai.x != null && ai.y != null) {
+      const dx = ai.x - player.x;
+      const dy = ai.y - player.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist > 0.01) {
+        // Normalize: camera jolts away from the collision source (opposite to impact direction)
+        collDirX = -(dx / dist);
+        collDirY = -(dy / dist);
+      }
+    }
+    triggerScreenShake(magnitude, shakeDuration, collDirX, collDirY);
 
     // Haptic feedback on mobile (Vibration API)
     if (navigator.vibrate) {
@@ -340,6 +386,7 @@ export function Race() {
   const prevThrottleRef = useRef(0);
   const prevBrakeRef = useRef(0);
   const prevSpeedForShakeRef = useRef(0);
+  const impactPreClickCooldownRef = useRef(0); // timestamp of last pre-click
 
   useEffect(() => {
     if (view !== 'racing') return;
@@ -349,20 +396,22 @@ export function Race() {
     const throttle = player.throttle ?? 0;
     const brake = player.brake ?? 0;
     const speed = player.speed_kmh ?? 0;
+    const prevSpeed = prevSpeedForShakeRef.current;
 
     // Hard acceleration onset: throttle jumps up significantly while moving
     const throttleDelta = throttle - prevThrottleRef.current;
     if (throttleDelta > 0.4 && speed > 5) {
-      // Subtle forward-heavy shake scaled by speed
+      // Subtle backward jolt (dirY = 1 pushes camera down/back) scaled by speed
       const mag = Math.min(3, 1 + speed / 80);
-      triggerScreenShake(mag, 120);
+      triggerScreenShake(mag, 120, 0, 1);
     }
 
     // Hard braking onset: brake jumps up while at speed
     const brakeDelta = brake - prevBrakeRef.current;
     if (brakeDelta > 0.4 && speed > 20) {
+      // Forward jolt (dirY = -1 pushes camera up/forward)
       const mag = Math.min(4, 1.5 + speed / 60);
-      triggerScreenShake(mag, 180);
+      triggerScreenShake(mag, 180, 0, -1);
     }
 
     // Speed loss jolt: sudden deceleration (not from braking) e.g. scraping wall
@@ -372,10 +421,20 @@ export function Race() {
       triggerScreenShake(mag, 150);
     }
 
+    // Client-side impact pre-trigger: detect sudden speed change (likely collision)
+    // Plays a short click BEFORE the server collision event arrives for instant feedback
+    if (Math.abs(speed - prevSpeed) > 20 && brake < 0.3) {
+      const now = performance.now();
+      if (now - impactPreClickCooldownRef.current > 500) {
+        impactPreClickCooldownRef.current = now;
+        engineSound.playImpactPreClick();
+      }
+    }
+
     prevThrottleRef.current = throttle;
     prevBrakeRef.current = brake;
     prevSpeedForShakeRef.current = speed;
-  }, [view, gpu.raceState?.player?.throttle, gpu.raceState?.player?.brake, gpu.raceState?.player?.speed_kmh, triggerScreenShake]);
+  }, [view, gpu.raceState?.player?.throttle, gpu.raceState?.player?.brake, gpu.raceState?.player?.speed_kmh, triggerScreenShake, engineSound.playImpactPreClick]);
 
   // --- Adaptive music event triggers ---
   // Track previous gap sign for overtake detection and previous lap for final lap
@@ -576,6 +635,32 @@ export function Race() {
       }
     }
   }, [view, gpu.raceState?.player?.speed_kmh]);
+
+  // --- Photo Finish tension detection: golden glow builds when approaching finish with gap < 1.0s ---
+  useEffect(() => {
+    if (view !== 'racing') return;
+    const player = gpu.raceState?.player;
+    if (!player) return;
+    const gap = player.gap_seconds;
+    const raceStatus = gpu.raceState?.race_status;
+
+    // Detect approaching photo finish: final lap (or finishing), last ~10% checkpoints, gap < 1.0s
+    const isFinalLap = player.lap === player.total_laps;
+    const isFinishing = raceStatus === 'finishing';
+    const totalCp = player.total_checkpoints ?? 0;
+    const cpProgress = totalCp > 0 ? player.checkpoint / totalCp : 0;
+    const isNearEnd = cpProgress >= 0.9;
+
+    if (gap != null && Math.abs(gap) < 1.0 && (isFinishing || (isFinalLap && isNearEnd))) {
+      if (!photoFinishTension) {
+        setPhotoFinishTension(true);
+      }
+    } else {
+      if (photoFinishTension) {
+        setPhotoFinishTension(false);
+      }
+    }
+  }, [view, gpu.raceState?.player?.gap_seconds, gpu.raceState?.player?.lap, gpu.raceState?.player?.total_laps, gpu.raceState?.player?.checkpoint, gpu.raceState?.player?.total_checkpoints, gpu.raceState?.race_status, photoFinishTension]);
 
   // --- Near-miss detection: "CLOSE CALL!" when player and AI pass within 3m at relative speed > 30 km/h ---
   useEffect(() => {
@@ -872,6 +957,112 @@ export function Race() {
       setView('results');
       crowd.roar();
 
+      // Stop ghost recording
+      ghostRecorder.stop();
+
+      // --- Photo Finish detection: gap < 1.0s between player and AI ---
+      const pTime = gpu.raceFinished.player_time;
+      const aTime = gpu.raceFinished.ai_time;
+      if (pTime != null && aTime != null && Math.abs(pTime - aTime) < 1.0) {
+        setPhotoFinish(true);
+        setPhotoFinishTension(false); // clear tension, show the finish overlay
+
+        // Play dramatic audio swell (rising chord + cymbal wash)
+        try {
+          const ctx = new AudioContext();
+          const nodes: AudioNode[] = [];
+          const now = ctx.currentTime;
+
+          // Master gain for the swell
+          const master = ctx.createGain();
+          master.gain.setValueAtTime(0, now);
+          master.gain.linearRampToValueAtTime(0.25, now + 0.8);
+          master.gain.linearRampToValueAtTime(0.15, now + 2.0);
+          master.gain.linearRampToValueAtTime(0, now + 3.0);
+          master.connect(ctx.destination);
+          nodes.push(master);
+
+          // Rising chord: D major (D4=294, F#4=370, A4=440) with upward pitch bend
+          const chordFreqs = [294, 370, 440];
+          for (const freq of chordFreqs) {
+            const osc = ctx.createOscillator();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(freq * 0.9, now);
+            osc.frequency.exponentialRampToValueAtTime(freq, now + 0.6);
+            osc.frequency.exponentialRampToValueAtTime(freq * 1.02, now + 2.5);
+            const oscGain = ctx.createGain();
+            oscGain.gain.setValueAtTime(0.3, now);
+            osc.connect(oscGain);
+            oscGain.connect(master);
+            osc.start(now);
+            osc.stop(now + 3.0);
+            nodes.push(osc, oscGain);
+          }
+
+          // Shimmering high pad (octave above, sawtooth for brightness)
+          const shimmer = ctx.createOscillator();
+          shimmer.type = 'sawtooth';
+          shimmer.frequency.setValueAtTime(880, now);
+          shimmer.frequency.linearRampToValueAtTime(900, now + 2.5);
+          const shimmerFilter = ctx.createBiquadFilter();
+          shimmerFilter.type = 'lowpass';
+          shimmerFilter.frequency.setValueAtTime(2000, now);
+          shimmerFilter.frequency.linearRampToValueAtTime(4000, now + 1.0);
+          shimmerFilter.frequency.linearRampToValueAtTime(1500, now + 2.5);
+          const shimmerGain = ctx.createGain();
+          shimmerGain.gain.setValueAtTime(0.08, now);
+          shimmer.connect(shimmerFilter);
+          shimmerFilter.connect(shimmerGain);
+          shimmerGain.connect(master);
+          shimmer.start(now);
+          shimmer.stop(now + 3.0);
+          nodes.push(shimmer, shimmerFilter, shimmerGain);
+
+          // Cymbal wash: filtered white noise burst
+          const noiseLen = 3.0 * ctx.sampleRate;
+          const noiseBuffer = ctx.createBuffer(1, noiseLen, ctx.sampleRate);
+          const noiseData = noiseBuffer.getChannelData(0);
+          for (let i = 0; i < noiseLen; i++) {
+            noiseData[i] = (Math.random() * 2 - 1) * 0.5;
+          }
+          const noise = ctx.createBufferSource();
+          noise.buffer = noiseBuffer;
+          const noiseFilter = ctx.createBiquadFilter();
+          noiseFilter.type = 'highpass';
+          noiseFilter.frequency.setValueAtTime(6000, now);
+          const noiseGain = ctx.createGain();
+          noiseGain.gain.setValueAtTime(0, now);
+          noiseGain.gain.linearRampToValueAtTime(0.12, now + 0.3);
+          noiseGain.gain.linearRampToValueAtTime(0.06, now + 1.5);
+          noiseGain.gain.linearRampToValueAtTime(0, now + 3.0);
+          noise.connect(noiseFilter);
+          noiseFilter.connect(noiseGain);
+          noiseGain.connect(master);
+          noise.start(now);
+          noise.stop(now + 3.0);
+          nodes.push(noise, noiseFilter, noiseGain);
+
+          photoFinishAudioRef.current = { ctx, nodes };
+
+          // Clean up audio context after swell finishes
+          setTimeout(() => {
+            ctx.close().catch(() => {});
+            photoFinishAudioRef.current = null;
+          }, 3500);
+        } catch {
+          // Web Audio API not available -- visual-only fallback
+        }
+
+        // Auto-dismiss after 3 seconds
+        if (photoFinishTimeoutRef.current) clearTimeout(photoFinishTimeoutRef.current);
+        photoFinishTimeoutRef.current = setTimeout(() => {
+          setPhotoFinish(false);
+        }, 3000);
+      } else {
+        setPhotoFinish(false);
+        setPhotoFinishTension(false);
+      }
+
       // Record streak (consecutive days played)
       const streakRes = streak.recordRace();
       setStreakResult(streakRes);
@@ -898,6 +1089,8 @@ export function Race() {
           driftScore: gpu.raceFinished.total_drift_score ?? 0,
           difficulty: config.model,
           playerCar: config.playerCar,
+          winner: gpu.raceFinished.winner,
+          aiTime: gpu.raceFinished.ai_time,
         });
 
         // Compute personal best result BEFORE saving (so we compare against the old best)
@@ -927,6 +1120,9 @@ export function Race() {
           topSpeed: gpu.raceFinished.player_max_speed ?? 0,
           driftScore: gpu.raceFinished.total_drift_score,
         });
+
+        // Save ghost replay data if this was a personal best
+        ghostRecorder.saveAsPersonalBest(config.track, config.laps, gpu.raceFinished.player_time);
 
         // Save daily challenge result if applicable
         if (isDailyChallenge) {
@@ -1013,6 +1209,8 @@ export function Race() {
     // Reset split time tracking for the new race
     checkpointTimesRef.current = [];
     splitLapRef.current = 0;
+    // Reset ghost recorder for the new race
+    ghostRecorder.reset();
     if (isDemo || directWsUrl) {
       pendingDemoRaceRef.current = { track, laps, weather, model, player_car: playerCar, time_of_day: timeOfDay };
       const wsUrl = directWsUrl || DEMO_WS_URL;
@@ -1097,6 +1295,7 @@ export function Race() {
           onStartGPU={gpu.startGPU}
           onStopGPU={gpu.stopGPU}
           onProceedToRace={handleProceedToRace}
+          selectedTrack={urlSettings.track}
         />
       )}
 
@@ -1150,6 +1349,7 @@ export function Race() {
               onBinaryFrame={gpu.onBinaryFrame}
               className="absolute inset-0 w-full h-full object-cover"
               speedKmh={gpu.raceState?.player?.speed_kmh ?? 0}
+              steer={gpu.raceState?.player?.steer ?? 0}
               externalCanvasRef={replayCanvasRef}
             />
           ) : (
@@ -1310,6 +1510,60 @@ export function Race() {
             </>
           )}
 
+          {/* Photo Finish approaching tension: pulsing golden edge glow during final stretch */}
+          <div
+            className="absolute inset-0 pointer-events-none z-20"
+            style={{
+              boxShadow: photoFinishTension
+                ? 'inset 0 0 100px 30px rgba(255,200,50,0.2)'
+                : 'inset 0 0 100px 30px rgba(255,200,50,0)',
+              transition: 'box-shadow 0.6s ease-in-out',
+              animation: photoFinishTension ? 'photoFinishTensionPulse 1.2s ease-in-out infinite' : 'none',
+            }}
+          />
+
+          {/* PHOTO FINISH! text overlay (on race results transition) */}
+          {photoFinish && (
+            <>
+              {/* Golden edge glow (stronger than tension, non-pulsing) */}
+              <div
+                className="absolute inset-0 pointer-events-none z-30"
+                style={{
+                  boxShadow: 'inset 0 0 120px 40px rgba(255,200,50,0.3)',
+                  animation: 'photoFinishGlow 3s ease-out forwards',
+                }}
+              />
+              {/* Dramatic text */}
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-40">
+                <div
+                  className="text-center"
+                  style={{ animation: 'photoFinishText 3s ease-out forwards' }}
+                >
+                  <div
+                    className="text-5xl sm:text-7xl lg:text-8xl font-black tracking-widest uppercase"
+                    style={{
+                      color: '#ffd700',
+                      textShadow: '0 0 40px rgba(255,215,0,0.6), 0 0 80px rgba(255,200,50,0.3), 0 0 120px rgba(255,180,0,0.15), 0 4px 12px rgba(0,0,0,0.9)',
+                      WebkitTextStroke: '1px rgba(255,240,200,0.3)',
+                    }}
+                  >
+                    PHOTO FINISH!
+                  </div>
+                  <div
+                    className="mt-2 text-lg sm:text-xl font-bold tracking-[0.4em] uppercase"
+                    style={{
+                      color: 'rgba(255,230,150,0.7)',
+                      textShadow: '0 0 15px rgba(255,215,0,0.4), 0 2px 6px rgba(0,0,0,0.8)',
+                      animation: 'photoFinishSubtext 3s ease-out forwards',
+                    }}
+                  >
+                    TOO CLOSE TO CALL
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+
           <style>{`
             @keyframes checkpointFlash {
               from { opacity: 1; }
@@ -1343,6 +1597,30 @@ export function Race() {
             @keyframes nearMissGlow {
               0% { opacity: 0; }
               50% { opacity: 1; }
+              100% { opacity: 0; }
+            }
+            @keyframes photoFinishTensionPulse {
+              0%, 100% { opacity: 0.5; }
+              50% { opacity: 1.0; }
+            }
+            @keyframes photoFinishGlow {
+              0% { opacity: 0; }
+              15% { opacity: 1; }
+              70% { opacity: 0.8; }
+              100% { opacity: 0; }
+            }
+            @keyframes photoFinishText {
+              0% { opacity: 0; transform: scale(0.3) translateY(20px); }
+              8% { opacity: 1; transform: scale(1.15) translateY(0); }
+              16% { transform: scale(1.0) translateY(0); }
+              60% { opacity: 1; transform: scale(1.0) translateY(0); }
+              100% { opacity: 0; transform: scale(1.05) translateY(-30px); }
+            }
+            @keyframes photoFinishSubtext {
+              0% { opacity: 0; transform: translateY(10px); }
+              15% { opacity: 0; }
+              25% { opacity: 0.7; transform: translateY(0); }
+              60% { opacity: 0.7; }
               100% { opacity: 0; }
             }
           `}</style>

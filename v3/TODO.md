@@ -114,7 +114,7 @@ Learnings from Forza Horizon 5, Mario Kart, Trackmania, Slow Roads, agar.io.
 - [x] Lap-by-lap breakdown with per-lap winner highlighting (green bold)
 - [x] Time difference callout (e.g., "-2.3s ahead" / "+1.5s behind")
 - [x] Share button: copies URL with track/laps/weather/model pre-filled
-- [ ] Ghost replay of your previous best lap
+- [x] Ghost replay of your previous best lap
 - [x] Personal best times with medals (Bronze/Silver/Gold per track) -- useLeaderboard.ts + LeaderboardPanel.tsx on RaceSetup + usePersonalBests.ts
 - [x] Simple leaderboard (per track, stored in localStorage) -- LeaderboardPanel.tsx shows records per track/lap combo
 
@@ -211,7 +211,7 @@ The #1 lesson from every viral browser game (agar.io, slither.io, Wordle, GeoGue
 
 - [x] **:star: Sub-3-second cold start for returning players**: Cache the React bundle aggressively (service worker). Pre-connect to the WebSocket URL. If the user has a recent `?ws=` URL in localStorage, auto-connect on page load. Target: URL click -> gameplay in <3 seconds.
 
-- [ ] **Progressive loading during GPU wait**: While the GPU instance is provisioning (~60-120s), show: interactive track preview (client-side 3D minimap), controls tutorial, leaderboard for selected track, and a "warm up" mode where the player can practice steering with a local 2D car physics sim. The wait becomes part of the experience, not dead time.
+- [x] **Progressive loading during GPU wait**: While the GPU instance is provisioning (~60-120s), show: interactive track preview (client-side 3D minimap), controls tutorial, leaderboard for selected track, and a "warm up" mode where the player can practice steering with a local 2D car physics sim. The wait becomes part of the experience, not dead time.
 
 - [x] **Deep linking everything**: Every game state should be a URL. `?ws=X` for direct connect, `?track=town05&weather=rain&laps=3` for settings pre-fill. Share button generates link with track/laps/weather/model/car/timeOfDay params. RaceSetup auto-fills from URL, auto-expands advanced options when URL includes model/car/timeOfDay.
 
@@ -493,7 +493,7 @@ Comprehensive research into AI in games beyond self-driving, with concrete imple
 - DLSS Frame Generation creates up to 3 extra frames per rendered frame; Oasis (Decart + Etched) generates entire game worlds at 20fps via Diffusion Transformer -- but both require dedicated GPU hardware.
 - **Feasibility**: 4/10 for neural approach, 6/10 for motion-compensated blending.
 - [x] Implement simple alpha-blend crossfade at 60fps in VideoCanvas.tsx
-- [ ] Implement velocity-based pixel shifting using telemetry motion vector
+- [x] Implement velocity-based pixel shifting using telemetry motion vector
 - [ ] Benchmark and evaluate visual quality vs native 30fps
 
 **Neural Style Transfer (Visual Themes)**
@@ -801,10 +801,10 @@ See `LEARNINGS.md` section "What Makes Racing Games Fun" for full rationale behi
 - [ ] **Client-side impact pre-trigger**: In `Race.tsx`, track speed between frames. If `Math.abs(speed_now - speed_prev) > 20`, immediately play a short 30ms click sound (high-freq noise burst) BEFORE the server collision event arrives. Creates two-stage impact: instant click + delayed thud.
 
 #### Game Flow / Retention
-- [ ] **Live PB split at checkpoints**: When passing a checkpoint, show "+0.3s" or "-0.2s" vs personal best for that checkpoint. Store per-checkpoint split times in `usePersonalBests.ts`. Display as a brief toast near the checkpoint arrow that fades after 1.5s. This is Trackmania's core retention mechanic.
+- [x] **Live PB split at checkpoints**: When passing a checkpoint, show "+0.3s" or "-0.2s" vs personal best for that checkpoint. Store per-checkpoint split times in `usePersonalBests.ts`. Display as a brief toast near the checkpoint arrow that fades after 1.5s. This is Trackmania's core retention mechanic.
 - [x] **Checkpoint celebration flash**: On checkpoint hit, brief green edge flash (100ms, reuse collision flash code but green, lower intensity 0.15). Play a short ascending "ding" tone (800 Hz, 50ms). Turn every checkpoint into a micro-reward.
 - [ ] **"PHOTO FINISH!" effect**: When gap < 1.0s on final checkpoint, trigger special treatment: screen-edge golden glow, dramatic audio swell (engine volume 1.5x, add chord), and "PHOTO FINISH!" text overlay. If final gap < 0.3s, show gap to 3 decimal places on results screen.
-- [ ] **Time improvement trajectory**: On RaceResults screen, show last 5 race times as a simple sparkline/list: "1:23 -> 1:21 -> 1:19 -> 1:18". Stored in localStorage per track. Seeing the downward trend is deeply satisfying.
+- [x] **Time improvement trajectory**: On RaceResults screen, show last 5 race times as a simple sparkline/list: "1:23 -> 1:21 -> 1:19 -> 1:18". Stored in localStorage per track. Seeing the downward trend is deeply satisfying.
 - [x] **Hidden difficulty adaptation**: Track win/loss ratio in localStorage. If player wins >60% at current difficulty, subtly boost AI performance next race (+5% speed factor). If winning <30%, reduce by 5%. Separate from the explicit difficulty selector. Target: 40% win rate.
 
 #### Visual Juice
