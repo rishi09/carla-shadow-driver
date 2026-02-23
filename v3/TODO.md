@@ -1,3 +1,7 @@
+> **Partially Superseded** — Many items below are completed or superseded by the roadmap at `v3/docs/ROADMAP_VISUAL_QUALITY.md`. Latency/encoding items are now covered by the roadmap's Tier 1-3 plan. The "Graphics & Visual Quality" and "Game Feel" sections remain useful reference. See `.claude/CLAUDE.md` for current status.
+
+---
+
 # Shadow Driver v3 - TODO
 
 ## Latency & Streaming (the #1 problem)

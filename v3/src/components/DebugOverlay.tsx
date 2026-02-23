@@ -45,10 +45,8 @@ export function DebugOverlay({
   const [clientFps, setClientFps] = useState(0);
   const [avgFrameBytes, setAvgFrameBytes] = useState(0);
   const prevFrameTimeRef = useRef(0);
-  const prevTotalFrameCountRef = useRef(0);
 
   // Track frame sizes for average calculation (from binary messages)
-  const frameSizesRef = useRef<number[]>([]);
 
   // Update client FPS whenever a new frame arrives
   useEffect(() => {

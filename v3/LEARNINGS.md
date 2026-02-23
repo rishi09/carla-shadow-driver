@@ -1,3 +1,7 @@
+> **Historical Log** — This is an append-only bug journal from the v3 development swarm (Feb 17-20, 2026). It is NOT active planning. See `.claude/CLAUDE.md` for current status and `v3/docs/ROADMAP_VISUAL_QUALITY.md` for the roadmap.
+
+---
+
 # V3 Learnings (Ralph Wiggum Loop)
 
 Shared learnings file. Every agent writes here when they find and fix a bug.

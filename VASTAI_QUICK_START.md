@@ -1,3 +1,7 @@
+> **ARCHIVED** — This file describes v1 of Shadow Driver. The active project is v3. See `.claude/CLAUDE.md` for current docs and `v3/docs/ROADMAP_VISUAL_QUALITY.md` for the roadmap.
+
+---
+
 # Vast.ai Quick Start Guide
 
 Run real AI models (PilotNet or NVIDIA Alpamayo) on GPU and connect from the browser demo.

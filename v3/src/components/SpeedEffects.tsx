@@ -20,14 +20,13 @@ interface SpeedEffectsProps {
  * Canvas speed lines are handled by SpeedLines.tsx (separate component).
  * All rapidly-changing values are stored in refs to avoid effect teardown (LEARNINGS.md pattern).
  */
-export function SpeedEffects({ speedKmh, collisions, gear, className = '' }: SpeedEffectsProps) {
+export function SpeedEffects({ speedKmh, collisions: _collisions, gear, className = '' }: SpeedEffectsProps) {
   const warpCanvasRef = useRef<HTMLCanvasElement>(null);
   const animRef = useRef<number>(0);
   const speedRef = useRef(speedKmh);
 
   // Collision pulse state (managed via refs for RAF loop)
   const collisionPulseRef = useRef(0); // 0..1, decays over time
-  const prevCollisionCountRef = useRef(0);
 
   // Gear shift flash state
   const gearFlashRef = useRef(0); // 0..1, decays

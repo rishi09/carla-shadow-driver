@@ -2,8 +2,9 @@ import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useGPUConnection } from '../hooks/useGPUConnection.ts';
 import { getLastWsUrl } from '../hooks/useGPUConnection.ts';
 import { useEngineSound } from '../hooks/useEngineSound.ts';
-import { useSteeringPrediction } from '../hooks/useSteeringPrediction.ts';
-import { useFrameExtrapolation } from '../hooks/useFrameExtrapolation.ts';
+// Disabled for high-latency playability — re-enable when latency < 100ms
+// import { useSteeringPrediction } from '../hooks/useSteeringPrediction.ts';
+// import { useFrameExtrapolation } from '../hooks/useFrameExtrapolation.ts';
 import { useLeaderboard } from '../hooks/useLeaderboard.ts';
 import { usePersonalBests } from '../hooks/usePersonalBests.ts';
 import type { PersonalBestResult } from '../hooks/usePersonalBests.ts';
@@ -14,10 +15,10 @@ import { VideoCanvas } from '../components/VideoCanvas.tsx';
 import { WebGLCanvas, supportsWebGL2 } from '../components/WebGLCanvas.tsx';
 import { WebRTCVideo } from '../components/WebRTCVideo.tsx';
 import { RaceHUD } from '../components/RaceHUD.tsx';
-import { SpeedEffects } from '../components/SpeedEffects.tsx';
-import { SpeedLines } from '../components/SpeedLines.tsx';
-import { ParticleOverlay } from '../components/ParticleOverlay.tsx';
-import { DriftScore } from '../components/DriftScore.tsx';
+import { SpeedEffects as _SpeedEffects } from '../components/SpeedEffects.tsx';
+import { SpeedLines as _SpeedLines } from '../components/SpeedLines.tsx';
+import { ParticleOverlay as _ParticleOverlay } from '../components/ParticleOverlay.tsx';
+import { DriftScore as _DriftScore } from '../components/DriftScore.tsx';
 import { GPUConnectionModal } from '../components/GPUConnectionModal.tsx';
 import { RaceResults } from '../components/RaceResults.tsx';
 import { RaceSetup } from '../components/RaceSetup.tsx';
@@ -27,7 +28,7 @@ import { FirstTimeOverlay } from '../components/FirstTimeOverlay.tsx';
 import { PhotoMode } from '../components/PhotoMode.tsx';
 import { DebugOverlay } from '../components/DebugOverlay.tsx';
 
-import { SplitTimeDelta } from '../components/SplitTimeDelta.tsx';
+import { SplitTimeDelta as _SplitTimeDelta } from '../components/SplitTimeDelta.tsx';
 import type { KeyState } from '../types/index.ts';
 
 type RaceView = 'setup' | 'pre_race' | 'racing' | 'results';
@@ -55,7 +56,7 @@ export function Race() {
 
   const [view, setView] = useState<RaceView>(isDemo || directWsUrl || isQuickstart ? 'pre_race' : 'setup');
   const [showRespawning, setShowRespawning] = useState(false);
-  const [raceWeather, setRaceWeather] = useState('clear');
+  const [_raceWeather, setRaceWeather] = useState('clear');
 
   const keysRef = useRef<KeyState>({ w: false, a: false, s: false, d: false, space: false });
   const keyIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -77,13 +78,14 @@ export function Race() {
   const personalBests = usePersonalBests();
   const gamepad = useGamepad();
   const streak = useStreak();
-  const steeringPrediction = useSteeringPrediction(keysRef, view === 'racing', gpu.raceState?.player?.speed_kmh ?? 0);
-  const frameExtrapolation = useFrameExtrapolation(
-    gpu.raceState?.player?.speed_kmh ?? 0,
-    gpu.raceState?.player?.steer ?? 0,
-    gpu.lastFrameTime,
-    view === 'racing',
-  );
+  // Disabled for high-latency playability — re-enable when latency < 100ms
+  // const steeringPrediction = useSteeringPrediction(keysRef, view === 'racing', gpu.raceState?.player?.speed_kmh ?? 0);
+  // const frameExtrapolation = useFrameExtrapolation(
+  //   gpu.raceState?.player?.speed_kmh ?? 0,
+  //   gpu.raceState?.player?.steer ?? 0,
+  //   gpu.lastFrameTime,
+  //   view === 'racing',
+  // );
 
   // Track race config for leaderboard saving
   const raceConfigRef = useRef<{ track: string; laps: number; model: string; playerCar: string } | null>(null);
@@ -140,15 +142,15 @@ export function Race() {
   const replayCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // --- Screen shake state ---
-  const [shakeX, setShakeX] = useState(0);
-  const [shakeY, setShakeY] = useState(0);
+  const [_shakeX, setShakeX] = useState(0);
+  const [_shakeY, setShakeY] = useState(0);
   const shakeRef = useRef<{ x: number; y: number; decay: number }>({ x: 0, y: 0, decay: 0 });
   const shakeRafRef = useRef<number | null>(null);
   const [crashDesaturate, setCrashDesaturate] = useState(false);
-  const [checkpointFlash, setCheckpointFlash] = useState(false);
+  const [_checkpointFlash, setCheckpointFlash] = useState(false);
   const prevCheckpointRef = useRef(0);
-  const [lastLapOvertake, setLastLapOvertake] = useState(false);
-  const [niceSave, setNiceSave] = useState(false);
+  const [_lastLapOvertake, setLastLapOvertake] = useState(false);
+  const [_niceSave, setNiceSave] = useState(false);
   const speedHistoryRef = useRef<number[]>([]);
 
   // --- Photo Finish detection state ---
@@ -160,24 +162,24 @@ export function Race() {
   const photoFinishAudioRef = useRef<{ ctx: AudioContext; nodes: AudioNode[] } | null>(null);
 
   // --- Comeback mechanic: slipstream boost visual when >3s behind ---
-  const [slipstreamBoost, setSlipstreamBoost] = useState(false);
+  const [_slipstreamBoost, setSlipstreamBoost] = useState(false);
 
   // --- Near-miss detection: "CLOSE CALL!" popup when cars pass within 3m at relative speed > 30 km/h ---
-  const [nearMiss, setNearMiss] = useState(false);
+  const [_nearMiss, setNearMiss] = useState(false);
   const nearMissCooldownRef = useRef(false);
 
   // --- Drift boost: "DRIFT BOOST!" popup + orange glow + speed line intensification ---
-  const [driftBoostActive, setDriftBoostActive] = useState(false);
-  const [driftBoostGlow, setDriftBoostGlow] = useState(false);
-  const [driftBoostSpeedLines, setDriftBoostSpeedLines] = useState(false);
+  const [_driftBoostActive, setDriftBoostActive] = useState(false);
+  const [_driftBoostGlow, setDriftBoostGlow] = useState(false);
+  const [_driftBoostSpeedLines, setDriftBoostSpeedLines] = useState(false);
   const lastDriftBoostEventRef = useRef<unknown>(null);
 
   // --- Split time delta tracking ---
   const checkpointTimesRef = useRef<number[]>([]);
   const splitLapRef = useRef(0);
-  const [splitDelta, setSplitDelta] = useState<number | null>(null);
-  const [splitRawTime, setSplitRawTime] = useState<number>(0);
-  const [splitTrigger, setSplitTrigger] = useState(0);
+  const [_splitDelta, setSplitDelta] = useState<number | null>(null);
+  const [_splitRawTime, setSplitRawTime] = useState<number>(0);
+  const [_splitTrigger, setSplitTrigger] = useState(0);
 
   // --- GO screen shake trigger ---
   const goShakeTriggeredRef = useRef(false);
@@ -1092,24 +1094,24 @@ export function Race() {
     return 1.0 + 0.08 * Math.pow(t, 1.5);
   }, [gpu.raceState?.player?.speed_kmh, isFirstPersonCam]);
 
-  // --- Camera G-force shift + brake/accel tilt ---
-  const gForceTransform = useMemo(() => {
-    const throttle = gpu.raceState?.player?.throttle ?? 0;
-    const brake = gpu.raceState?.player?.brake ?? 0;
-    const speed = gpu.raceState?.player?.speed_kmh ?? 0;
-    if (speed < 5) return '';
-    const gY = throttle > 0.6 ? (throttle - 0.6) * 5 : brake > 0.6 ? -(brake - 0.6) * 5 : 0;
-    const tiltX = throttle > 0.6 ? -(throttle - 0.6) * 0.5 : brake > 0.6 ? (brake - 0.6) * 0.75 : 0;
-    if (Math.abs(gY) < 0.1 && Math.abs(tiltX) < 0.01) return '';
-    return `translateY(${gY.toFixed(1)}px) rotateX(${tiltX.toFixed(2)}deg)`;
-  }, [gpu.raceState?.player?.throttle, gpu.raceState?.player?.brake, gpu.raceState?.player?.speed_kmh]);
+  // --- Camera G-force shift + brake/accel tilt (disabled for high-latency) ---
+  // const gForceTransform = useMemo(() => {
+  //   const throttle = gpu.raceState?.player?.throttle ?? 0;
+  //   const brake = gpu.raceState?.player?.brake ?? 0;
+  //   const speed = gpu.raceState?.player?.speed_kmh ?? 0;
+  //   if (speed < 5) return '';
+  //   const gY = throttle > 0.6 ? (throttle - 0.6) * 5 : brake > 0.6 ? -(brake - 0.6) * 5 : 0;
+  //   const tiltX = throttle > 0.6 ? -(throttle - 0.6) * 0.5 : brake > 0.6 ? (brake - 0.6) * 0.75 : 0;
+  //   if (Math.abs(gY) < 0.1 && Math.abs(tiltX) < 0.01) return '';
+  //   return `translateY(${gY.toFixed(1)}px) rotateX(${tiltX.toFixed(2)}deg)`;
+  // }, [gpu.raceState?.player?.throttle, gpu.raceState?.player?.brake, gpu.raceState?.player?.speed_kmh]);
 
-  // --- Speed-based motion blur ---
-  const motionBlurPx = useMemo(() => {
-    const speed = gpu.raceState?.player?.speed_kmh ?? 0;
-    const t = Math.min(1, speed / 200);
-    return t * 1.5;
-  }, [gpu.raceState?.player?.speed_kmh]);
+  // --- Speed-based motion blur (disabled for high-latency) ---
+  // const motionBlurPx = useMemo(() => {
+  //   const speed = gpu.raceState?.player?.speed_kmh ?? 0;
+  //   const t = Math.min(1, speed / 200);
+  //   return t * 1.5;
+  // }, [gpu.raceState?.player?.speed_kmh]);
 
   // Track pending demo race config to send once WebSocket connects
   const pendingDemoRaceRef = useRef<{ track: string; laps: number; weather: string; model?: string; player_car?: string; time_of_day?: string; postprocess?: string } | null>(null);
