@@ -46,6 +46,24 @@ else
     echo "CARLA will use headless mode (camera sensor fallback)"
 fi
 
+# Step 1b: Patch DefaultEngine.ini for visual quality
+# These settings improve rendering quality at minimal GPU cost:
+# - Bloom: warm lighting glow on headlights, streetlights, sun
+# - Ambient Occlusion: contact shadows where objects meet surfaces
+# - FXAA: anti-aliasing that works reliably on Linux camera sensors (TAA=2 is broken)
+# - Supersampling: render at 125% resolution, downsample to output for sharper edges
+INI="/home/carla/CarlaUE4/Config/DefaultEngine.ini"
+if [ -f "$INI" ]; then
+    sed -i 's/r.DefaultFeature.Bloom=False/r.DefaultFeature.Bloom=True/' "$INI"
+    sed -i 's/r.DefaultFeature.AmbientOcclusion=False/r.DefaultFeature.AmbientOcclusion=True/' "$INI"
+    sed -i 's/r.DefaultFeature.AntiAliasing=2/r.DefaultFeature.AntiAliasing=1/' "$INI"
+    grep -q 'r.ScreenPercentage' "$INI" || \
+        sed -i '/\[\/Script\/Engine.RendererSettings\]/a r.ScreenPercentage=125' "$INI"
+    echo "[entrypoint] DefaultEngine.ini patched (bloom, AO, FXAA, 125% supersampling)"
+else
+    echo "[entrypoint] DefaultEngine.ini not found at $INI, skipping visual quality patch"
+fi
+
 # Step 2: Start CARLA
 report_status "starting" "Starting CARLA simulator"
 

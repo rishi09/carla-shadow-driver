@@ -137,6 +137,11 @@ class RaceManager:
                 'focal_distance': '1000.0',   # cm (10 meters)
                 'fstop': '2.8',               # shallow DoF
                 'blade_count': '5',           # bokeh shape
+                # Tone mapping: S-curve for cinematic contrast
+                'slope': '0.88',              # S-curve steepness
+                'toe': '0.55',                # Dark crush
+                'shoulder': '0.26',           # Bright rolloff
+                'temp': '5800.0',             # Slightly warm color temperature
                 # Exposure
                 'enable_postprocess_effects': 'true',
             },
@@ -359,7 +364,12 @@ class RaceManager:
             return False
 
     def set_weather(self, weather: str):
-        """Set weather conditions in the CARLA world."""
+        """Set weather conditions in the CARLA world.
+
+        After applying the base weather preset, applies cinematic atmospheric
+        effects (scattering, godrays, wet road reflections) to ALL presets
+        for improved visual quality.
+        """
         if not self.world:
             return
         presets = {
@@ -372,7 +382,34 @@ class RaceManager:
         }
         weather_params = presets.get(weather, carla.WeatherParameters.ClearNoon)
         self.world.set_weather(weather_params)
-        print(f"Weather set to: {weather}")
+        # Apply cinematic atmospheric effects on top of every preset
+        self._apply_atmospheric_effects()
+        print(f"Weather set to: {weather} (with atmospheric effects)")
+
+    def _apply_atmospheric_effects(self):
+        """Apply cinematic atmospheric effects to the current weather.
+
+        Adds subtle depth haze, sun glare/godrays, and wet road reflections
+        to improve visual quality in every weather condition. These effects
+        are additive -- they enhance the existing weather preset without
+        overriding its core parameters (sun position, cloudiness, rain, etc.).
+        """
+        if not self.world:
+            return
+        try:
+            weather = self.world.get_weather()
+            # Atmospheric haze: adds depth/distance effect
+            weather.scattering_intensity = 0.5
+            # Sun glare / godrays through atmosphere
+            weather.mie_scattering_scale = 0.03
+            # Wet road reflections (even in clear weather for realism)
+            # Only boost if the preset hasn't already set a higher value
+            weather.precipitation_deposits = max(weather.precipitation_deposits, 30.0)
+            # Subtle road sheen
+            weather.wetness = max(weather.wetness, 20.0)
+            self.world.set_weather(weather)
+        except Exception as e:
+            print(f"Failed to apply atmospheric effects: {e}")
 
     def set_postprocess_preset(self, preset: str):
         """Set the post-processing preset for cameras.
@@ -520,6 +557,8 @@ class RaceManager:
             weather.wind_intensity = params['wind_intensity']
             weather.wetness = params['wetness']
             self.world.set_weather(weather)
+            # Apply cinematic atmospheric effects on top of time-of-day preset
+            self._apply_atmospheric_effects()
             print(f"Time of day set to: {preset} "
                   f"(sun_alt={params['sun_altitude_angle']}, "
                   f"sun_az={params['sun_azimuth_angle']}, "
@@ -687,7 +726,8 @@ class RaceManager:
 
     def apply_player_control(self, keys: Dict[str, bool],
                              difficulty: str = 'medium',
-                             next_checkpoint: Optional[Tuple[float, float]] = None):
+                             next_checkpoint: Optional[Tuple[float, float]] = None,
+                             latency_ms: Optional[float] = None):
         """Convert WASD keys to vehicle control with driving assists.
 
         Integrates:
@@ -697,11 +737,15 @@ class RaceManager:
         4. Handbrake drift mechanics (reduces rear tire friction)
         5. Speed-dependent steering ramp time (snappy at low speed, weighty at high speed)
         6. Auto-brake assist for Easy mode (brakes into sharp turns)
+        7. Latency-adaptive steering (reduces steer_limit at high RTT to prevent wall-riding)
 
         Args:
             keys: Dict of WASD + space key states.
             difficulty: Current difficulty level ('easy', 'medium', 'hard').
             next_checkpoint: Optional (x, y) of the next checkpoint for auto-brake assist.
+            latency_ms: Client-measured round-trip latency in milliseconds.
+                        Used to reduce steering limit at high latency to prevent
+                        overcorrection (wall-riding). None or 0 defaults to no reduction.
         """
         if not self.player_car:
             print("[CTRL] WARNING: player_car is None!")
@@ -741,6 +785,18 @@ class RaceManager:
         # At 120 km/h: 0.08 + 0.42 * 0.18  = 0.16
         # At 200 km/h: 0.08 + 0.42 * 0.057 = 0.10
         steer_limit = 0.08 + 0.42 * math.exp(-speed_kmh / 70.0)
+
+        # --- Feature 7: Latency-adaptive steering ---
+        # At high RTT (>80ms), reduce effective steering limit proportionally to
+        # prevent overcorrection from delayed input. At 280ms, the player sees
+        # frames from 280ms ago, so their steering decisions are always "late",
+        # causing wall-riding. Reducing steer_limit compensates by making each
+        # input smaller, giving more time to react.
+        # Factor: 1.0 at 80ms, linearly decays to 0.3 at 380ms+
+        latency_factor = 1.0
+        if latency_ms is not None and latency_ms > 80:
+            latency_factor = max(0.3, 1.0 - (latency_ms - 80) / 300)
+        steer_limit *= latency_factor
 
         # --- Feature 5: Speed-dependent steering ramp time ---
         # Scale steering ramp duration with speed for GT7 "weight" feel.
@@ -857,6 +913,8 @@ class RaceManager:
                 assists.append("HB_DRIFT")
             if auto_brake > 0.0:
                 assists.append(f"AUTO_BRK={auto_brake:.2f}")
+            if latency_factor < 1.0:
+                assists.append(f"LAT_STEER={latency_factor:.2f}(rtt={latency_ms:.0f}ms)")
             assist_str = " | assists: " + ", ".join(assists) if assists else ""
             print(f"[CTRL#{self._ctrl_frame}] keys={active} spd={speed_kmh:.1f} "
                   f"steerLim={steer_limit:.2f} rampMs={ramp_ms:.0f} "

@@ -270,6 +270,7 @@ class RaceServer:
         self._stats_skip_count: int = 0          # Frames skipped in current 1s window
         self._stats_latencies: list = []         # Latency samples in current 1s window
         self._stats_last_log_time: float = 0.0   # Timestamp of last per-second log
+        self._last_latency_ms: Optional[float] = None  # Most recent client RTT for adaptive steering
 
         # --- Session-level metrics (accumulated across entire connection) ---
         self._session_start_time: float = 0.0
@@ -893,6 +894,7 @@ class RaceServer:
         """Record a latency sample for per-second and session-level stats."""
         self._stats_latencies.append(latency_ms)
         self._session_latencies.append(latency_ms)
+        self._last_latency_ms = latency_ms
 
     def _log_per_second_stats(self):
         """Log a single concise per-second stats line during an active race.
@@ -968,6 +970,7 @@ class RaceServer:
         self._stats_skip_count = 0
         self._stats_latencies = []
         self._stats_last_log_time = time.time()
+        self._last_latency_ms = None
 
     async def _switch_model(self, model_name: str):
         """Switch the AI driving model."""
@@ -1404,6 +1407,7 @@ class RaceServer:
                         self.player_keys,
                         difficulty=self.difficulty,
                         next_checkpoint=next_cp,
+                        latency_ms=self._last_latency_ms,
                     )
 
                     # 2. AI control based on difficulty
@@ -1666,6 +1670,7 @@ class RaceServer:
                         self.player_keys,
                         difficulty=self.difficulty,
                         next_checkpoint=next_cp_finish,
+                        latency_ms=self._last_latency_ms,
                     )
                     self.carla.tick()
                     await asyncio.sleep(0)
