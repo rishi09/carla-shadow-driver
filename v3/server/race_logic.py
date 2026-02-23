@@ -536,8 +536,15 @@ class RaceState:
             return None
         elapsed = time.time() - self.countdown_start
         if elapsed >= 3.0:
-            return 0  # GO!
+            return 0  # GO! (shown for 1 second before race starts)
         return 3 - int(elapsed)
+
+    def is_countdown_complete(self) -> bool:
+        """Check if countdown has finished including the GO! display period.
+        Returns True when 4 seconds have elapsed (3s countdown + 1s GO!)."""
+        if self.countdown_start is None:
+            return False
+        return time.time() - self.countdown_start >= 4.0
 
     def _check_checkpoint(self, pos_x: float, pos_y: float,
                           current_checkpoint: int) -> bool:

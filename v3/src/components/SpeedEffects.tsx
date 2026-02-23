@@ -38,23 +38,23 @@ export function SpeedEffects({ speedKmh, collisions, gear, className = '' }: Spe
   // Update refs on every render (no effect teardown needed)
   speedRef.current = speedKmh;
 
-  // Detect collision for pulse
-  const currentCollisionCount = collisions?.length ?? 0;
-  if (currentCollisionCount > 0 && currentCollisionCount !== prevCollisionCountRef.current) {
-    const maxIntensity = Math.max(...(collisions ?? []).map(c => c.intensity));
-    collisionPulseRef.current = Math.min(1, maxIntensity / 800);
-  }
-  prevCollisionCountRef.current = currentCollisionCount;
+  // Detect collision for pulse — disabled for high-latency playability
+  // const currentCollisionCount = collisions?.length ?? 0;
+  // if (currentCollisionCount > 0 && currentCollisionCount !== prevCollisionCountRef.current) {
+  //   const maxIntensity = Math.max(...(collisions ?? []).map(c => c.intensity));
+  //   collisionPulseRef.current = Math.min(1, maxIntensity / 800);
+  // }
+  // prevCollisionCountRef.current = currentCollisionCount;
 
-  // Detect gear change for flash
-  if (gear !== undefined && prevGearRef.current !== undefined && gear !== prevGearRef.current && prevGearRef.current !== 0) {
-    gearFlashRef.current = 0.6;
-  }
+  // Detect gear change for flash — disabled for high-latency playability
+  // if (gear !== undefined && prevGearRef.current !== undefined && gear !== prevGearRef.current && prevGearRef.current !== 0) {
+  //   gearFlashRef.current = 0.6;
+  // }
   prevGearRef.current = gear;
 
   // --- CSS Vignette ---
   const vignetteStyle = useMemo(() => {
-    const t = Math.min(1, speedKmh / 150);
+    const t = Math.min(1, speedKmh / 200); // Tuned for high-latency playability
     const baseOpacity = t * 0.7;
 
     if (baseOpacity < 0.03) return undefined;
@@ -120,14 +120,14 @@ export function SpeedEffects({ speedKmh, collisions, gear, className = '' }: Spe
         setGearFlashOpacity(gearFlashRef.current);
       }
 
-      // Warp streaks only above 180 km/h
-      if (speed < 180) {
+      // Warp streaks only above 220 km/h // Tuned for high-latency playability
+      if (speed < 220) {
         warpLines.length = 0;
         animRef.current = requestAnimationFrame(draw);
         return;
       }
 
-      const warpIntensity = Math.min(1, (speed - 180) / 120); // 0 at 180, 1 at 300
+      const warpIntensity = Math.min(1, (speed - 220) / 120); // 0 at 220, 1 at 340
       const centerX = w / 2;
       const centerY = h / 2;
       const maxRadius = Math.sqrt(centerX * centerX + centerY * centerY);

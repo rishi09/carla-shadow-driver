@@ -829,14 +829,10 @@ class RaceManager:
                       f"thr={reverse_throttle:.2f} steer={control.steer:.2f} brk=0.0")
             return
 
-        # --- Feature 6: Auto-brake assist for Easy mode ---
-        # When approaching a sharp turn at high speed, auto-apply 30% brake.
-        # Only active on Easy difficulty. Checks the bearing angle to the next
-        # checkpoint relative to the car's heading. If the turn is sharp (>60 deg)
-        # and speed is high (>100 km/h), gently brake to help beginners.
+        # --- Feature 6: Auto-brake assist — DISABLED for high-latency playability ---
+        # At 280ms latency, auto-brake fights the player's inputs (applied 280ms
+        # after the steering decision, when the turn situation has already changed).
         auto_brake = 0.0
-        if difficulty == 'easy' and next_checkpoint is not None and speed_kmh > 100.0:
-            auto_brake = self._compute_auto_brake(next_checkpoint, speed_kmh)
 
         effective_brake = max(self._current_brake, auto_brake)
 
@@ -981,75 +977,16 @@ class RaceManager:
         return 0.0
 
     def _apply_traction_control(self, throttle: float, speed_kmh: float, dt: float) -> float:
-        """Apply traction control to prevent wheel spin.
+        """Traction control — DISABLED for high-latency playability.
 
-        Detects wheel spin when:
-        - High throttle input but car isn't accelerating as expected
-        - Very low speed with high throttle (launch spin)
-
-        Recovery: When stuck at near-zero speed for >2s with throttle applied,
-        TC fully disables for 3 seconds to let the player power out of walls.
-
-        Returns:
-            Effective throttle value (may be reduced from input).
+        At 280ms latency, TC reduces throttle 280ms after wheel spin started,
+        by which time the car may have already recovered. This makes the car
+        feel sluggish ("driving through molasses") without preventing the spin.
+        Re-enable when latency drops below ~100ms.
         """
-        # If in recovery period, skip all TC and let player have full throttle
-        if self._tc_recovery_time > 0:
-            self._tc_recovery_time -= dt
-            self._tc_throttle_cap = 1.0
-            self._traction_control_active = False
-            if self._tc_recovery_time <= 0:
-                self._tc_recovery_time = 0.0
-                self._tc_stuck_time = 0.0
-            return throttle
-
-        # --- Global stuck detection (independent of TC conditions) ---
-        # If player is pressing throttle but car isn't moving, track it.
-        # This catches cases where TC oscillation prevents the stuck timer
-        # inside condition 1 from ever accumulating.
-        if speed_kmh < 2.0 and throttle > 0.3:
-            self._tc_stuck_time += dt
-        elif speed_kmh >= 5.0:
-            # Only reset when clearly moving (hysteresis prevents flapping)
-            self._tc_stuck_time = 0.0
-
-        # If stuck for >2s, enter recovery: fully disable TC for 3s
-        if self._tc_stuck_time > 2.0:
-            self._tc_recovery_time = 3.0
-            self._tc_throttle_cap = 1.0
-            self._traction_control_active = False
-            print(f"[TC] Stuck {self._tc_stuck_time:.1f}s at {speed_kmh:.1f}km/h, 3s recovery")
-            return throttle
-
-        # Calculate expected vs actual acceleration
-        acceleration = (speed_kmh - self._prev_speed_kmh) / dt  # km/h per second
-
-        # Condition 1: Launch traction control
-        # At very low speed with high throttle, cap to prevent standing wheel spin.
-        if speed_kmh < 10.0 and throttle > 0.5:
-            expected_accel = throttle * 25.0  # Realistic: full throttle ~25 km/h/s in CARLA
-            if acceleration < expected_accel * 0.15 and acceleration >= 0:
-                # Wheels spinning: almost no acceleration despite throttle.
-                # Cap at 0.5 minimum so TC slows wheelspin without killing launch.
-                self._tc_throttle_cap = max(0.5, self._tc_throttle_cap - dt * 3.0)
-                self._traction_control_active = True
-                return min(throttle, self._tc_throttle_cap)
-
-        # Condition 2: Mid-speed traction loss (e.g., on wet/gravel)
-        # If accelerating should produce gain but speed is flat or dropping
-        # Skip if speed is very low (car stuck against wall, not traction loss)
-        if speed_kmh > 5.0 and speed_kmh < 50.0 and throttle > 0.6 and acceleration < -5.0:
-            # Speed is DROPPING despite throttle - definite traction loss
-            self._tc_throttle_cap = max(0.4, self._tc_throttle_cap - dt * 3.0)
-            self._traction_control_active = True
-            return min(throttle, self._tc_throttle_cap)
-
-        # No traction issue: gradually release the cap back to 1.0
-        self._tc_throttle_cap = min(1.0, self._tc_throttle_cap + dt * 2.0)
-        if self._tc_throttle_cap >= 0.99:
-            self._traction_control_active = False
-
-        return min(throttle, self._tc_throttle_cap)
+        self._traction_control_active = False
+        self._tc_throttle_cap = 1.0
+        return throttle
 
     def activate_drift_boost(self, score: float):
         """Activate a temporary 5% throttle boost after a successful drift.

@@ -24,21 +24,23 @@ MAX_QUALITY = 75
 # round-trip latency that is NOT bandwidth-related. These thresholds are
 # generous to avoid tanking quality when bandwidth is actually fine.
 LATENCY_TIERS = [
-    # latency > 500ms: emergency quality, reduced resolution
-    (500, 30, 960, 540),
-    # latency 300-500ms: moderate quality, full resolution (SSH tunnel tier)
-    (300, 50, 1280, 720),
-    # latency 150-300ms: good quality, full resolution
-    (150, 60, 1280, 720),
-    # latency 80-150ms: high quality, full resolution
-    (80, 70, 1280, 720),
-    # latency < 80ms: best quality, full resolution
-    (0, 75, 1280, 720),
+    # SSH tunnels have high latency but plenty of bandwidth.
+    # Don't sacrifice quality for latency — only reduce on extreme lag.
+    # latency > 500ms: reduce resolution only, keep decent quality
+    (500, 60, 960, 540),
+    # latency 150-500ms: full quality, full resolution (SSH tunnel sweet spot)
+    (150, 80, 1280, 720),
+    # latency 80-150ms: high quality
+    (80, 85, 1280, 720),
+    # latency < 80ms: best quality
+    (0, 90, 1920, 1080),
 ]
 
-# Frame delta detection: block-based mean comparison
+# Frame delta detection: DISABLED — was skipping 12+ frames/sec at speed
+# because block-mean comparison is too sensitive to compression artifacts.
+# Re-enable after switching to perceptual hashing or SSIM.
 DELTA_BLOCK_SIZE = 8      # Downsample to 8x8 blocks for comparison
-DELTA_THRESHOLD = 3.0     # Mean absolute difference threshold (0-255 scale)
+DELTA_THRESHOLD = 0.0     # Effectively disabled (0 = never consider frames similar)
 
 
 class FrameEncoder:

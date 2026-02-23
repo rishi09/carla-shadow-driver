@@ -16,9 +16,9 @@ interface SpeedLine {
   opacity: number;     // base opacity
 }
 
-const MIN_SPEED = 80;   // speed lines start appearing
-const MAX_SPEED = 150;  // fully visible
-const MAX_LINES = 36;   // max number of active lines
+const MIN_SPEED = 120;  // speed lines start appearing // Tuned for high-latency playability
+const MAX_SPEED = 200;  // fully visible // Tuned for high-latency playability
+const MAX_LINES = 20;   // max number of active lines // Tuned for high-latency playability
 const LINE_COLOR_R = 220;
 const LINE_COLOR_G = 235;
 const LINE_COLOR_B = 255;
@@ -59,7 +59,7 @@ export function SpeedLines({ speedKmh, className = '', intensityMultiplier = 1.0
         progress: 0,
         speed: 0.008 + Math.random() * 0.012, // varied speeds
         length: 0.06 + Math.random() * 0.10,   // varied lengths
-        opacity: 0.3 + Math.random() * 0.7,
+        opacity: 0.15 + Math.random() * 0.35, // Reduced ~50% for high-latency playability
       };
     }
 
@@ -127,7 +127,7 @@ export function SpeedLines({ speedKmh, className = '', intensityMultiplier = 1.0
           line.progress = 0;
           line.speed = 0.008 + Math.random() * 0.012;
           line.length = 0.06 + Math.random() * 0.10;
-          line.opacity = 0.3 + Math.random() * 0.7;
+          line.opacity = 0.15 + Math.random() * 0.35; // Reduced ~50% for high-latency playability
           continue;
         }
 
@@ -146,7 +146,7 @@ export function SpeedLines({ speedKmh, className = '', intensityMultiplier = 1.0
         // Fade in at start, fade out at end
         const fadeIn = Math.min(1, line.progress * 5);
         const fadeOut = Math.max(0, 1 - (line.progress - 0.7) / 0.3);
-        const alpha = intensity * line.opacity * fadeIn * Math.min(1, fadeOut) * 0.45;
+        const alpha = intensity * line.opacity * fadeIn * Math.min(1, fadeOut) * 0.25; // Reduced for high-latency playability
 
         if (alpha < 0.01) continue;
 

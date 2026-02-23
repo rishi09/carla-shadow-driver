@@ -103,11 +103,11 @@ void main() {
   vec2 uv = v_uv;
   float t = u_intensity; // 0 = slow, 1 = fast
 
-  // --- 1. Barrel distortion ---
+  // --- 1. Barrel distortion --- DISABLED for high-latency playability
   // Shift UV so center = (0,0)
   vec2 centered = uv - 0.5;
   float r2 = dot(centered, centered);
-  float distortStrength = mix(0.05, 0.20, t);
+  float distortStrength = 0.0; // was: mix(0.05, 0.20, t)
   vec2 distorted = centered * (1.0 + distortStrength * r2);
   uv = distorted + 0.5;
 
@@ -147,35 +147,36 @@ void main() {
     color = vec3(r, g, b);
   }
 
-  // --- 3. Color grading (cinematic warm) ---
-  // Lift (shadows): warm push
-  vec3 lift = vec3(0.02, 0.01, -0.01) * mix(0.5, 1.0, t);
-  // Gain (highlights): cool tint
-  vec3 gain = vec3(0.98, 1.0, 1.04);
-  // Gamma (midtones): slight warm
-  vec3 gamma = vec3(0.98, 1.0, 1.02);
+  // --- 3. Color grading --- DISABLED for high-latency playability
+  // Identity values: image passes through unchanged
+  // Lift (shadows): no change
+  vec3 lift = vec3(0.0); // was: vec3(0.02, 0.01, -0.01) * mix(0.5, 1.0, t)
+  // Gain (highlights): no change
+  vec3 gain = vec3(1.0); // was: vec3(0.98, 1.0, 1.04)
+  // Gamma (midtones): no change
+  vec3 gamma = vec3(1.0); // was: vec3(0.98, 1.0, 1.02)
 
   color = pow(max(color, 0.0), gamma) * gain + lift;
 
-  // Contrast boost (centered around 0.5)
-  float contrast = mix(1.05, 1.15, t);
+  // Contrast: no change
+  float contrast = 1.0; // was: mix(1.05, 1.15, t)
   color = (color - 0.5) * contrast + 0.5;
 
-  // Saturation boost
+  // Saturation: no change
   float luma = dot(color, vec3(0.2126, 0.7152, 0.0722));
-  float saturation = mix(1.05, 1.15, t);
+  float saturation = 1.0; // was: mix(1.05, 1.15, t)
   color = mix(vec3(luma), color, saturation);
 
-  // --- 4. Vignette ---
-  float vignetteRadius = mix(0.85, 0.55, t);
+  // --- 4. Vignette --- (reduced for high-latency playability)
+  float vignetteRadius = mix(0.90, 0.70, t);
   float vignetteSoft = 0.45;
   float vignette = smoothstep(vignetteRadius, vignetteRadius + vignetteSoft, edgeDist);
-  color *= 1.0 - vignette * mix(0.3, 0.7, t);
+  color *= 1.0 - vignette * mix(0.15, 0.35, t);
 
-  // --- 5. Film grain ---
-  float grainStrength = mix(0.02, 0.06, t);
-  float grain = hash(uv * 1000.0 + u_time * 60.0) - 0.5;
-  color += grain * grainStrength;
+  // --- 5. Film grain --- (disabled for high-latency playability)
+  // float grainStrength = mix(0.02, 0.06, t);
+  // float grain = hash(uv * 1000.0 + u_time * 60.0) - 0.5;
+  // color += grain * grainStrength;
 
   // Final clamp
   color = clamp(color, 0.0, 1.0);
@@ -460,13 +461,13 @@ export function WebGLCanvas({ onBinaryFrame, onH264Frame, onCodecConfig, classNa
         const intensity = Math.min(1.0, Math.max(0.0, (speed - 50) / 100));
         gl.uniform1f(uniformsRef.current.intensity, intensity);
 
-        // Chromatic aberration: ramp from 0 at <=120 to 1 at >=300 km/h
-        const chromatic = Math.min(1.0, Math.max(0.0, (speed - 120) / 180));
-        gl.uniform1f(uniformsRef.current.chromatic, chromatic);
+        // Chromatic aberration: DISABLED for high-latency playability
+        // Re-enable when latency <100ms: Math.min(1.0, Math.max(0.0, (speed - 120) / 180))
+        gl.uniform1f(uniformsRef.current.chromatic, 0.0);
 
-        // Radial motion blur: ramp from 0 at rest to 1 at >=200 km/h
-        const radialBlur = Math.min(1.0, Math.max(0.0, speed / 200));
-        gl.uniform1f(uniformsRef.current.radialBlur, radialBlur);
+        // Radial motion blur: DISABLED for high-latency playability
+        // Re-enable when latency <100ms: Math.min(1.0, Math.max(0.0, speed / 200))
+        gl.uniform1f(uniformsRef.current.radialBlur, 0.0);
 
         // Crossfade blend: 0.5 on first tick after new frame, 1.0 otherwise
         // Motion vector: velocity-based pixel shift for motion-compensated interpolation

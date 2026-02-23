@@ -83,15 +83,19 @@ export function DebugOverlay({
   }, [totalFrameCount, noChangeCount]);
 
   // --- Toggle with backtick/tilde key ---
+  // Use e.code === 'Backquote' as primary check (works regardless of shift/dead-key state),
+  // with e.key fallback for non-standard keyboards. // Tuned for high-latency playability
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === '`' || e.key === '~') {
+      if (e.code === 'Backquote' || e.key === '`' || e.key === '~') {
         e.preventDefault();
+        e.stopPropagation();
         setVisible(prev => !prev);
       }
     };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    // Use capture phase so this fires before other keydown handlers that might interfere
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, []);
 
   if (!visible) return null;

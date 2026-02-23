@@ -13,57 +13,89 @@ Shadow Driver is a browser-based racing game where you race against an AI car in
 
 ---
 
-## Current Status (Feb 20, 2026)
+## Meta-Rules (Read First)
 
-### Working (E2E verified with Safari automation + Vast.ai GPU)
+> **"Written ≠ Working."** If nobody tested it in gameplay, it's not done — it's a hypothesis. Never mark a feature "Working" or a bug "Fixed" without verifiable evidence from actual gameplay. Commit messages must describe what was verified, not what was intended.
+
+> **"Coding Blind."** The AI agent edits code it cannot see the output of. It edits GLSL shaders but cannot see what they render. It changes frame delivery logic but cannot see the FPS the user experiences. Documentation amplifies this blindness across sessions: Session 1 writes "disabled ✓", Session 2 reads it and skips re-verification, Session 3 the user reports it's still broken. Three sessions of compounding false confidence.
+
+### Layer Checklist (Visual Changes)
+When disabling or modifying any visual effect, verify ALL 4 layers:
+1. **CSS transforms** — React component `style={}` props (steering prediction, G-force tilt, shake)
+2. **GLSL shader uniforms** — WebGLCanvas.tsx fragment shader (barrel distortion, chromatic aberration, radial blur, film grain, color grading, vignette)
+3. **CSS overlays** — SpeedEffects.tsx (vignette, collision flash), SpeedLines.tsx (radial lines), ParticleOverlay.tsx (sparks, smoke)
+4. **Server camera config** — carla_manager.py post-processing (depth of field, bloom, exposure)
+
+### Metric Trust Rules
+1. Always verify which **codec path** is active before trusting `encode_ms` or `fps` stats. Server may log JPEG encoder stats while NVENC is the active codec — making `fps=29` a lie when real delivery is 3 FPS.
+2. `total_frames` in session summary is the **ground truth** for delivery — not per-second `fps`.
+3. Tab title FPS is **client-measured truth** — if it disagrees with server stats, client wins.
+4. When reporting metrics, always state the source: "(JPEG path)", "(NVENC path)", "(client-measured)".
+
+### Pre-Play Testing Checklist
+Before telling the user to play, ALL must pass:
+- [ ] Server: `total_frames` increasing at 15+ per second in logs
+- [ ] Server: `skip` count < 5 per second in `[stats]` line
+- [ ] Server: rear mirror frames NOT being sent (bandwidth waste)
+- [ ] Client: tab title shows 15+ fps
+- [ ] Client: no visible shader effects (barrel distortion, chromatic aberration, blur)
+- [ ] Client: countdown 3-2-1-GO displays when race starts
+- [ ] Client: input bars (throttle/brake/steer) visible and responding to keys
+- [ ] Client: gap timer shows numbers, not "---"
+- [ ] Client: debug overlay toggles with ~ key
+
+---
+
+## Current Status (Feb 23, 2026)
+
+### Gameplay Test History
+| Test | Date | Score | Key Changes | Key Findings |
+|------|------|-------|-------------|--------------|
+| 1 | Feb 23 | 3/10 | Baseline | 3.1 FPS, all shader effects active, no HUD, car crawls |
+| 2 | Feb 23 | 4/10 | Shaders disabled, NVENC fallback | Clean video 10/10, but still 7.9 FPS, TC/auto-brake throttle car |
+| 3 | Feb 23 | 6/10 | TC/auto-brake disabled, quality raised, delta skip disabled, overlays removed | 21-30 FPS, sharp video, car drives fast. Missing: input bars, countdown, AI visibility |
+
+### Working (verified via Gemini video analysis, Test 3)
 - CARLA 0.9.15 running on Vast.ai GPU (RTX 3090, root privilege fix applied)
 - Direct WebSocket connection via `?ws=<tunnel_url>` query parameter
-- H.264 video via NVENC hardware encoding + WebCodecs decode (~30 FPS, ~80-120ms latency target). Falls back to JPEG when unavailable.
-- NVENC encoder now matched to camera resolution (1920x1080) — fixes frame size mismatch that caused 548 encode errors and black screen
+- H.264 video via NVENC hardware encoding + WebCodecs decode. Falls back to JPEG when NVENC starves (>100ms without frame) or is unavailable.
+- NVENC encoder matched to camera resolution (1920x1080)
 - NVENC spatial-AQ for 10-15% better perceived quality at zero latency cost
-- NVENC H.264 encoding pipeline (server) + WebCodecs VideoDecoder (client) — auto-fallback to JPEG if unavailable
+- **Video feed: 21-30 FPS, sharp image quality** (Gemini: 8/10 video, 7/10 smoothness)
+- **Car speed and physics: fast acceleration, 140+ km/h achievable** (Gemini: 9/10)
 - Player car controls: WASD + Space (handbrake), R (respawn), C (camera toggle)
 - Car selection: 6 vehicles (Tesla Model 3, Ford Mustang, Dodge Charger, Audi TT, Mini Cooper, Chevrolet Impala)
 - AI opponent using CARLA autopilot with 3 difficulty levels (Easy/Medium/Hard)
-- AI rubber banding: distance-based speed adjustment keeps races close (50m threshold, per-difficulty scaling)
-- AI mistake injection: periodic speed penalties create overtaking opportunities
-- AI personality system with emotional states (confident, nervous, impressed, desperate)
-- AI trash talk ("Right on your tail...", "Contact! Watch the walls!")
-- Hard mode: 55% over speed limit, aggressive lane changes
+- AI rubber banding, mistake injection, personality system, trash talk
 - Steering: progressive ramping (~100-130ms attack, ~130-200ms release), speed-limited (0.7 low, 0.15 high)
 - Faster throttle (~150ms) and brake (~60ms) response; reverse threshold 15 km/h
-- Traction control + countersteer assist (10° threshold, 0.35 max correction — tuned for high latency)
+- Traction control **DISABLED** for high-latency playability (was capping throttle at 63-77%)
+- Auto-brake **DISABLED** for high-latency playability (was applying 30% brake during turns)
+- Countersteer assist active (10° threshold, 0.35 max correction)
 - Tire grip tuned for high-latency stability: front friction 4.0, rear 3.8, matched lateral stiffness, CoM -0.4
-- Drift detection and scoring system
-- Compass navigation arrow pointing to next checkpoint
-- Race HUD: speedometer, lap timer, gap timer, throttle/brake/steer bars, connection quality, drift score
-- Minimap with player/AI positions + race progress tracker
-- Countdown overlay (3-2-1-GO with traffic light colors)
+- Race HUD: speedometer (verified), gap timer (verified, shows numbers), minimap (verified)
 - Engine sound + background music with speed-based intensity
 - Camera FOV scaling at speed (1.0→1.05x at 150+ km/h)
-- Speed vignette (GPU-accelerated CSS gradient) + speed lines above 80 km/h
-- Screen shake, motion blur, steering prediction transforms, G-force tilt all **disabled** for high-latency playability
-- Rear-view mirror camera (disabled — can be re-enabled)
-- Daily Challenge system (unique track/weather/difficulty per day)
-- Photo mode (F key)
-- Race recording overlay (REC indicator)
-- FirstTimeOverlay with controls tutorial
+- All overlay effects **REMOVED for MVP** (SpeedLines, SpeedEffects, ParticleOverlay, DriftScore, checkpoint flash, etc.) — re-enable after 7+/10 rating
+- Screen shake, motion blur, steering prediction transforms, G-force tilt all **disabled** at CSS layer
+- GLSL shader effects all **disabled** (barrel distortion=0, CA=0, radial blur=0, film grain removed, color grading=identity)
+- Rear-view mirror camera (disabled client + server — server no longer sends rear frames)
+- Frame delta detection **DISABLED** (was skipping 12+ frames/sec due to block-mean hash sensitivity)
 - Debug overlay (~ key): FPS, latency, quality, resolution, encode time, codec
-- Tab title stats: shows `18fps 340ms | Shadow Driver` during racing
-- Health check script: `node v3/scripts/health_check.mjs` tests full WebSocket pipeline
-- Server session metrics: per-second [stats] log line, session summary on disconnect
-- GitHub Actions auto-builds Docker image on push to v3 (server/docker/configs paths)
+- Tab title stats: shows FPS and latency during racing
+- Health check script, server session metrics, GitHub Actions Docker auto-build
 - NvFBC zero-copy GPU framebuffer capture (with x11grab fallback, then CARLA sensor fallback)
-- Adaptive bitrate (2-12 Mbps) based on client network quality (jitter, drop rate, RTT)
-- CARLA depth-of-field post-processing presets (Cinematic/Balanced/Raw) selectable in Race Setup
-- WebRTC data channel for low-latency input (~30-50ms savings, falls back to WebSocket over tunnels)
-- Xvfb virtual display (:99) for NvFBC capture compatibility
-- Visual Style selector in Race Setup advanced settings
-- Adaptive quality tiers relaxed for SSH tunnels: >500ms->q25/540p, 300-500ms->q50/720p, 150-300ms->q60, 80-150ms->q70, <80ms->q75
-- `v3/play.sh` — one-command local play setup: auto-detects Vast.ai instance, loads SSH key, starts tunnel + Vite
+- Adaptive bitrate (2-12 Mbps), CARLA DoF presets, Visual Style selector
+- Adaptive quality tiers for SSH tunnels: >500ms->q60/540p, 150-500ms->q80/720p, 80-150ms->q85/720p, <80ms->q90/1080p
+- Frame skip: min 2fps guarantee, disabled during countdown, 0.5m position delta threshold
+- `v3/play.sh` — one-command local play setup
 
-### Not Working / TODO
-- **Latency-adaptive steering**: Server should reduce steering limits when RTT is high (280ms+) to prevent overcorrection fishtailing. Partially addressed by grip tuning, but a dynamic latency→steer_limit multiplier is the right fix.
+### Not Working / TODO (priority order)
+- **Input bars (throttle/brake/steer) not visible** — Gemini Test 3 confirmed missing. RaceHUD renders them but they may not be receiving data or may be hidden by layout.
+- **Countdown (3-2-1-GO) not appearing** — Gemini Test 3 confirmed race starts abruptly with no countdown. Code exists in Race.tsx and race_logic.py but isn't triggering.
+- **AI opponent not visible on track** — Gap timer works (+53.5s) but AI car never appears in the camera view. May be on a different route or too far ahead.
+- **Latency ~155ms still causes wall-riding** — Down from 280ms but still causes late turns. Latency-adaptive steering (dynamic steer_limit based on RTT) is the right fix.
+- **Re-enable overlay effects post-MVP** — SpeedLines, SpeedEffects, ParticleOverlay, DriftScore, checkpoint flash, drift boost, etc. were all removed from Race.tsx for MVP. Bring back selectively after reaching 7+/10 Gemini rating. Code is in git history.
 - **Tunneling**: ngrok blocked by IT restrictions. bore.pub unreachable from some Vast.ai datacenters. Cloudflare QUIC timeouts on Russian datacenters. **SSH port forwarding is the most reliable option**: `ssh -N -L 8765:localhost:8765 -p PORT root@IP`. Localtunnel.me may work as alternative.
 - **Vercel deploy**: Project is `shadow-driver-v3` under team `rishi09-3609s-projects`. Root directory is `v3/`.
   - **CLI deploy** (from repo root, NOT from v3/): `npx vercel deploy --prod --yes --scope rishi09-3609s-projects --token <VERCEL_TOKEN>`
@@ -155,9 +187,12 @@ The sandbox cannot access `~/.ssh/id_ed25519` directly (macOS restriction), but 
 
 If `ssh-add -l` shows "no identities", tell the user: `ssh-add ~/.ssh/id_ed25519` — nothing else.
 
+### Vast.ai API Key
+The API key is stored in `v3/.vercel/.env.development.local` (pulled from Vercel env vars). Read `VASTAI_API_KEY` from that file. It is also cached at `~/.config/vastai/api_key`. The Vast.ai API requires trailing slashes on endpoints (e.g., `/api/v0/instances/?owner=me`).
+
 ### Steps Claude performs
 1. **Check SSH key**: Run `ssh-add -l` — if no identities, ask user to run `ssh-add ~/.ssh/id_ed25519` and wait.
-2. **Find GPU instance**: Query Vast.ai API for running instances. If none, tell user to rent one.
+2. **Find GPU instance**: Query Vast.ai API for running instances. If none, provision one (RTX 3090/4090, image `rkshah09/shadow-driver-v3:latest`, 40GB disk, NA datacenter preferred). **IMPORTANT**: Only use `verified` hosts. Filter with `"verified":{"eq":true}`. Blocked hosts (CDI errors): 85323, 189245, 344939. Blocked machines: 16146, 32581, 42700, 52157. These fail with "failed to inject CDI devices" OCI runtime errors.
 3. **Check race server**: `ssh -p <PORT> root@<HOST> 'pgrep -af race_server'` — if not running, start it.
 4. **Set idle timeout**: `ssh -p <PORT> root@<HOST> "sed -i 's/IDLE_TIMEOUT_SECONDS = 10 \* 60/IDLE_TIMEOUT_SECONDS = 60 * 60/' /opt/shadow-driver/server/race_server.py"` (only if server was restarted).
 5. **Start SSH tunnel**: `ssh -o StrictHostKeyChecking=no -N -L 8765:localhost:8765 -p <PORT> root@<HOST> &` (background).
@@ -283,6 +318,14 @@ cd v3 && npm run dev
 ### Issue: Screen tilt/shake/blur makes high-latency play nauseating
 **Cause:** CSS transforms (steering prediction rotation, G-force tilt, frame extrapolation, motion blur, screen shake) fight with 280ms-delayed server frames, making the visual feed disorienting.
 **Fix (applied):** Disabled all CSS transforms on the video feed except basic FOV scale. Disabled screen shake on collisions. These can be re-enabled when latency drops below ~100ms.
+
+### Issue: NVENC encoder starvation — 5 frames in 54 seconds (FIXED)
+**Cause:** When H.264 was negotiated, `_send_frame()` entered the NVENC path and returned early even if `get_encoded_frame()` returned None. No JPEG fallback existed for the H.264 path. Combined with aggressive frame skipping (position delta < 0.1m skipping 28/30 frames when car is slow/stationary), resulted in 3.1 FPS delivered despite server logging `fps=29` from the JPEG encoder metrics. The JPEG metrics masked the NVENC starvation because they measured the wrong codec path.
+**Fix (applied):** Added JPEG fallback when NVENC starves (>100ms without frame). Added `_nvenc_consecutive_empty` counter — after 10 empty polls, temporarily disables H.264 for 5 seconds. Raised frame skip position delta from 0.1m to 0.5m. Added minimum frame rate guarantee (never skip if >500ms since last frame). Disabled frame skipping during countdown.
+
+### Issue: GLSL shader effects still active despite "disabled" in docs (FIXED)
+**Cause:** Visual effects exist at 4 independent layers: CSS transforms, GLSL shader, CSS overlays, server camera config. Previous fix only disabled CSS transforms and documented "effects disabled" — but barrel distortion, chromatic aberration, radial blur, film grain, and speed-based color grading were all still active in the GLSL fragment shader in WebGLCanvas.tsx. The AI agent couldn't see the rendered output, so it trusted its own documentation from the previous session.
+**Fix (applied):** Disabled ALL GLSL shader effects: barrel distortion=0.0, chromatic aberration=0.0, radial blur=0.0, film grain removed, color grading set to identity (no-op). Added Layer Checklist to CLAUDE.md to prevent recurrence.
 
 ---
 

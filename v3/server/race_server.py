@@ -302,6 +302,9 @@ class RaceServer:
         self._nvenc_encoder: Optional[NVENCEncoder] = None
         self._h264_enabled: bool = False  # True if client negotiated h264
         self._client_supports_h264: bool = False
+        self._nvenc_consecutive_empty: int = 0  # Consecutive polls with no encoded frame
+        self._nvenc_last_frame_sent: float = 0.0  # Time of last successfully sent NVENC frame
+        self._nvenc_disabled_until: float = 0.0  # Temporarily disable H.264 until this time
 
         # --- NvFBC GPU framebuffer capture (zero-copy alternative to CARLA sensor) ---
         # Initialized lazily when a race starts. Falls back to CARLA camera sensor
@@ -1040,6 +1043,9 @@ class RaceServer:
             self._nvenc_encoder = None
         self._h264_enabled = False
         self._client_supports_h264 = False
+        self._nvenc_consecutive_empty = 0
+        self._nvenc_last_frame_sent = 0.0
+        self._nvenc_disabled_until = 0.0
 
         # Stop NvFBC capture if active
         self._stop_nvfbc_capture()
@@ -1116,6 +1122,9 @@ class RaceServer:
         self._frame_skip_count = 0
         self._delta_skip_count = 0
         self._rear_frame_counter = 0
+        self._nvenc_consecutive_empty = 0
+        self._nvenc_last_frame_sent = 0.0
+        self._nvenc_disabled_until = 0.0
         self.encoder.reset_frame_hash()
         self.rear_encoder.reset_frame_hash()
 
@@ -1361,7 +1370,7 @@ class RaceServer:
                 # Handle countdown
                 if self.race_state.status == "countdown":
                     countdown = self.race_state.get_countdown()
-                    if countdown == 0:
+                    if self.race_state.is_countdown_complete():
                         self.race_state.start_race()
                         # Start recording training data
                         self.training_recorder.start_recording()
@@ -1795,10 +1804,10 @@ class RaceServer:
         """Check if the frame can be skipped because the car is stationary.
 
         Skip conditions (ALL must be true):
-          - Position delta < 0.1m
+          - Position delta < 0.5m
           - Yaw delta < 0.5 degrees
           - Speed < 2 km/h
-          - Less than 1 second since last sent frame (ensures at least 1 fps when idle)
+          - Less than 500ms since last sent frame (ensures at least 2 fps when idle)
 
         Never skip during countdown or when we have no previous reference frame.
         """
@@ -1808,6 +1817,11 @@ class RaceServer:
 
         # Never skip during countdown
         if self.race_state and self.race_state.status == "countdown":
+            return False
+
+        # Minimum frame rate guarantee: never skip if >500ms since last sent frame
+        now = time.time()
+        if now - self._last_sent_time >= 0.5:
             return False
 
         # Get current player telemetry
@@ -1833,7 +1847,7 @@ class RaceServer:
         dy = y - self._last_sent_y
         pos_delta = (dx * dx + dy * dy) ** 0.5
 
-        if pos_delta >= 0.1:
+        if pos_delta >= 0.5:
             return False
 
         # Check yaw delta (handle wraparound at +/-180)
@@ -1843,23 +1857,19 @@ class RaceServer:
         if yaw_delta >= 0.5:
             return False
 
-        # Stationary: but enforce at least 1 frame per second
-        now = time.time()
-        if now - self._last_sent_time >= 1.0:
-            return False
-
         return True
 
     async def _send_frame(self):
         """Encode and send chase camera frame as binary WebSocket message.
-        Also sends rear-view mirror frames at half rate (15fps).
 
         Binary frame format: 1-byte type prefix + data
           0x00 = main camera JPEG frame
-          0x01 = rear-view mirror JPEG frame
           0x10 = H.264 keyframe (SPS+PPS+IDR)
           0x11 = H.264 delta frame (non-IDR slice)
           0x12 = codec config JSON
+
+        Rear-view mirror (0x01) is disabled — the client RearMirror component
+        is commented out, so sending rear frames wastes bandwidth.
 
         Optimizations:
           - Skipped when WebRTC is active and connected (video flows via RTP track)
@@ -1869,6 +1879,9 @@ class RaceServer:
           - JPEG encoding runs in thread pool to avoid blocking asyncio event loop
           - Periodically sends perf_stats to client for debug overlay
           - When NVENC H.264 is enabled: uses GPU hardware encoding (1-2ms vs 5-10ms JPEG)
+          - NVENC fallback: if NVENC queue starves (no frames for >100ms), falls back
+            to JPEG for that frame. After 10 consecutive empty polls, temporarily
+            disables H.264 for 5 seconds.
         """
         if not self.ws_client:
             return
@@ -1886,7 +1899,19 @@ class RaceServer:
             return
 
         # --- H.264 NVENC path ---
-        if self._h264_enabled and self._nvenc_encoder and self._nvenc_encoder.is_running:
+        # Check if H.264 is temporarily disabled due to NVENC starvation
+        if self._nvenc_disabled_until > 0 and time.time() >= self._nvenc_disabled_until:
+            # Re-enable H.264 now that the fallback period has elapsed
+            self._nvenc_disabled_until = 0.0
+            self._nvenc_consecutive_empty = 0
+            print("[NVENC] Re-enabling H.264 after temporary fallback period")
+
+        nvenc_temporarily_disabled = (
+            self._nvenc_disabled_until > 0 and time.time() < self._nvenc_disabled_until
+        )
+
+        if (self._h264_enabled and self._nvenc_encoder
+                and self._nvenc_encoder.is_running and not nvenc_temporarily_disabled):
             # Try NvFBC capture first (zero-copy from GPU framebuffer)
             # Falls back to CARLA camera sensor if NvFBC unavailable
             raw_frame = None
@@ -1905,6 +1930,7 @@ class RaceServer:
             await loop.run_in_executor(None, self._nvenc_encoder.encode_frame, raw_frame)
 
             # Drain all available encoded frames
+            frames_sent_this_poll = 0
             while True:
                 result = self._nvenc_encoder.get_encoded_frame()
                 if result is None:
@@ -1918,43 +1944,72 @@ class RaceServer:
                     self.frame_count += 1
                     self._stats_frames_sent += 1
                     self._session_total_frames += 1
+                    frames_sent_this_poll += 1
+                    self._nvenc_last_frame_sent = time.time()
+                    self._nvenc_consecutive_empty = 0
                 except Exception:
                     pass
 
-            # Update frame skip tracking with current position
-            if self.carla.player_car:
-                try:
-                    telem = self.carla.get_telemetry(self.carla.player_car)
-                    self._last_sent_x = telem['x']
-                    self._last_sent_y = telem['y']
-                    self._last_sent_yaw = telem.get('yaw', 0.0)
-                    self._last_sent_time = time.time()
-                except Exception:
+            # Track NVENC starvation: if no frames came out of the encoder
+            if frames_sent_this_poll == 0:
+                self._nvenc_consecutive_empty += 1
+                now = time.time()
+                time_since_last = now - self._nvenc_last_frame_sent if self._nvenc_last_frame_sent > 0 else float('inf')
+
+                # After 10 consecutive empty polls, temporarily disable H.264
+                if self._nvenc_consecutive_empty > 10:
+                    self._nvenc_disabled_until = now + 5.0
+                    print(f"[NVENC] WARNING: {self._nvenc_consecutive_empty} consecutive empty polls, "
+                          f"temporarily falling back to JPEG for 5 seconds")
+                    # Fall through to JPEG path below (don't return)
+                elif time_since_last > 0.1:
+                    # NVENC produced nothing for >100ms — send a JPEG fallback frame
+                    # so the client isn't starved. Fall through to JPEG path.
                     pass
+                else:
+                    # NVENC just hasn't caught up yet, normal pipeline delay
+                    # Update position tracking and return
+                    if self.carla.player_car:
+                        try:
+                            telem = self.carla.get_telemetry(self.carla.player_car)
+                            self._last_sent_x = telem['x']
+                            self._last_sent_y = telem['y']
+                            self._last_sent_yaw = telem.get('yaw', 0.0)
+                            self._last_sent_time = time.time()
+                        except Exception:
+                            pass
+                    return
+            else:
+                # Frames were sent successfully via NVENC
+                # Update frame skip tracking with current position
+                if self.carla.player_car:
+                    try:
+                        telem = self.carla.get_telemetry(self.carla.player_car)
+                        self._last_sent_x = telem['x']
+                        self._last_sent_y = telem['y']
+                        self._last_sent_yaw = telem.get('yaw', 0.0)
+                        self._last_sent_time = time.time()
+                    except Exception:
+                        pass
 
-            # Perf logging
-            if self.frame_count % 90 == 0:
-                stats = self._nvenc_encoder.get_stats()
-                capture_info = ""
-                if self._nvfbc_enabled and self._nvfbc_capture:
-                    cap_stats = self._nvfbc_capture.get_stats()
-                    capture_info = (f", capture={cap_stats['method']}, "
-                                    f"cap_avg={cap_stats['avg_capture_ms']:.2f}ms")
-                print(f"[perf] frame #{self.frame_count}: "
-                      f"nvenc_encoded={stats['frames_encoded']}, "
-                      f"queue={stats['queue_size']}, "
-                      f"errors={stats['errors']}, "
-                      f"fps={self.fps:.1f}"
-                      f"{capture_info}")
-                self._frame_skip_count = 0
-                self._delta_skip_count = 0
+                # Perf logging
+                if self.frame_count % 90 == 0:
+                    stats = self._nvenc_encoder.get_stats()
+                    capture_info = ""
+                    if self._nvfbc_enabled and self._nvfbc_capture:
+                        cap_stats = self._nvfbc_capture.get_stats()
+                        capture_info = (f", capture={cap_stats['method']}, "
+                                        f"cap_avg={cap_stats['avg_capture_ms']:.2f}ms")
+                    print(f"[perf] frame #{self.frame_count}: "
+                          f"nvenc_encoded={stats['frames_encoded']}, "
+                          f"queue={stats['queue_size']}, "
+                          f"errors={stats['errors']}, "
+                          f"fps={self.fps:.1f}"
+                          f"{capture_info}")
+                    self._frame_skip_count = 0
+                    self._delta_skip_count = 0
 
-            # Rear-view mirror (still JPEG, lower priority)
-            self._rear_frame_counter += 1
-            if self._rear_frame_counter % 2 == 0:
-                await self._send_rear_frame()
-
-            return
+                return
 
         # --- JPEG fallback path (original) ---
 
@@ -2056,10 +2111,8 @@ class RaceServer:
                 except Exception:
                     pass
 
-            # --- Rear-view mirror frame (sent at 15fps = every 2nd main frame) ---
-            self._rear_frame_counter += 1
-            if self._rear_frame_counter % 2 == 0:
-                await self._send_rear_frame()
+            # Rear-view mirror disabled — client RearMirror component is commented out
+            # Sending rear frames wastes ~15fps of bandwidth for nothing
 
         except Exception:
             pass
@@ -2171,14 +2224,15 @@ class RaceServer:
             try:
                 if self.race_state and self.race_state.status in ("countdown", "racing", "finishing"):
                     # Read current telemetry (works between CARLA ticks)
+                    # Read during all active states including countdown so the
+                    # client always has speed/throttle/brake/steer values
                     player_telem = None
                     ai_telem = None
-                    if self.race_state.status in ("racing", "finishing"):
-                        try:
-                            player_telem = self.carla.get_telemetry(self.carla.player_car)
-                            ai_telem = self.carla.get_telemetry(self.carla.ai_car)
-                        except Exception:
-                            pass  # Telemetry read failed, send state without vehicle data
+                    try:
+                        player_telem = self.carla.get_telemetry(self.carla.player_car)
+                        ai_telem = self.carla.get_telemetry(self.carla.ai_car)
+                    except Exception:
+                        pass  # Telemetry read failed, send state without vehicle data
                     await self._send_race_state(player_telem, ai_telem)
             except asyncio.CancelledError:
                 raise
@@ -2215,6 +2269,8 @@ class RaceServer:
                     self.skill_matcher.record_collision()
 
         # Fill in telemetry from both vehicles
+        # Always include throttle/brake/steer with defaults so the client's
+        # input bars render consistently (checks `player.throttle !== undefined`)
         if player_telem:
             state['player']['speed_kmh'] = round(player_telem['speed_kmh'], 1)
             state['player']['gear'] = player_telem.get('gear', 0)
@@ -2223,6 +2279,11 @@ class RaceServer:
             state['player']['brake'] = round(player_telem.get('brake', 0), 2)
             state['player']['steer'] = round(player_telem.get('steer', 0), 2)
             state['player']['yaw'] = round(player_telem.get('yaw', 0), 1)
+        else:
+            # Defaults so input bars still render
+            state['player']['throttle'] = 0.0
+            state['player']['brake'] = 0.0
+            state['player']['steer'] = 0.0
         if ai_telem:
             state['ai']['speed_kmh'] = round(ai_telem['speed_kmh'], 1)
             state['ai']['gear'] = ai_telem.get('gear', 0)
