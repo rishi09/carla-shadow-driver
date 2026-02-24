@@ -54,15 +54,23 @@ Before telling the user to play, ALL must pass:
 | 1 | Feb 23 | 3/10 | Baseline | 3.1 FPS, all shader effects active, no HUD, car crawls |
 | 2 | Feb 23 | 4/10 | Shaders disabled, NVENC fallback | Clean video 10/10, but still 7.9 FPS, TC/auto-brake throttle car |
 | 3 | Feb 23 | 6/10 | TC/auto-brake disabled, quality raised, delta skip disabled, overlays removed | 21-30 FPS, sharp video, car drives fast. Missing: input bars, countdown, AI visibility |
+| 4 | Feb 23 | 5/10 | Countdown fix, AI route, direct WS, HUD improvements | Countdown working, speedometer missing, AI invisible, H.264 macroblocking |
+| 5 | Feb 23 | 4/10 | NVENC multipass fix (two_pass_quarter→1) | NVENC crash (invalid multipass string), fell back to JPEG 720p. Gap timer freezes. |
+| 6 | Feb 23 | 4/10 | NVENC multipass deployed, HUD contrast boost, input bars unconditional | NVENC working (1761 frames, 0 errors). Speedometer+inputs NOW VISIBLE (user confirmed). AI still invisible. Macroblocking on turns. |
 
-### Working (verified via Gemini video analysis, Test 3)
-- CARLA 0.9.15 running on Vast.ai GPU (RTX 3090, root privilege fix applied)
+### Working (verified via Gemini video analysis + user confirmation, Test 6)
+- CARLA 0.9.15 running on Vast.ai GPU (RTX 4090)
 - Direct WebSocket connection via `?ws=<tunnel_url>` query parameter
-- H.264 video via NVENC hardware encoding + WebCodecs decode. Falls back to JPEG when NVENC starves (>100ms without frame) or is unavailable.
-- NVENC encoder matched to camera resolution (1920x1080)
+- H.264 video via NVENC hardware encoding + WebCodecs decode (1920x1080 @ 8Mbps, avc1.4D4028)
+- NVENC encoder: `-surfaces 1 -delay 0 -forced-idr 1 -multipass 1` (quarter-res prepass)
 - NVENC spatial-AQ for 10-15% better perceived quality at zero latency cost
-- **Video feed: 21-30 FPS, sharp image quality** (Gemini: 8/10 video, 7/10 smoothness)
-- **Car speed and physics: fast acceleration, 140+ km/h achievable** (Gemini: 9/10)
+- BGRA→YUV420P conversion via cv2 reduces pipe bandwidth by 62%
+- Falls back to JPEG when NVENC starves (>100ms without frame) or is unavailable
+- **Video feed: 23-30 FPS** (server-measured). Macroblocking on camera pans/turns.
+- **Car speed and physics: 140-168 km/h achievable** (server logs: spd=168.6 at frame #240)
+- **Speedometer: VISIBLE** (user confirmed, Test 6) — arc with needle, km/h number, gear indicator
+- **Input bars: VISIBLE** (user confirmed, Test 6) — THR/BRK/STR colored bars always rendered
+- **Countdown: WORKING** (3-2-1-GO traffic light, verified Tests 4-6)
 - Player car controls: WASD + Space (handbrake), R (respawn), C (camera toggle)
 - Car selection: 6 vehicles (Tesla Model 3, Ford Mustang, Dodge Charger, Audi TT, Mini Cooper, Chevrolet Impala)
 - AI opponent using CARLA autopilot with 3 difficulty levels (Easy/Medium/Hard)
@@ -91,11 +99,11 @@ Before telling the user to play, ALL must pass:
 - `v3/play.sh` — one-command local play setup
 
 ### Not Working / TODO (priority order)
-- **Input bars (throttle/brake/steer) not visible** — Gemini Test 3 confirmed missing. RaceHUD renders them but they may not be receiving data or may be hidden by layout.
-- **Countdown (3-2-1-GO) not appearing** — Gemini Test 3 confirmed race starts abruptly with no countdown. Code exists in Race.tsx and race_logic.py but isn't triggering.
-- **AI opponent not visible on track** — Gap timer works (+53.5s) but AI car never appears in the camera view. May be on a different route or too far ahead.
-- **Latency ~155ms still causes wall-riding** — Down from 280ms but still causes late turns. Latency-adaptive steering (dynamic steer_limit based on RTT) is the right fix.
-- **Re-enable overlay effects post-MVP** — SpeedLines, SpeedEffects, ParticleOverlay, DriftScore, checkpoint flash, drift boost, etc. were all removed from Race.tsx for MVP. Bring back selectively after reaching 7+/10 Gemini rating. Code is in git history.
+- **AI opponent not visible on track** — `set_path()` likely doesn't work in CARLA 0.9.15. AI autopilot chooses its own route through the city, ending up kilometers from the player. Gap timer shows +62.5s (AI IS racing, just on wrong roads). Fix: replace `set_path()` with manual waypoint following, or periodically teleport AI to nearby road.
+- **H.264 macroblocking on camera pans/turns** — NVENC is working (1761 frames, 0 errors) but 8Mbps at 1080p 30fps is low for motion-heavy scenes. Bitrate dropped to 6.4M via adaptive. Fix: increase base bitrate to 12-15M, or reduce resolution to 720p with higher bitrate.
+- **[stats] log line shows JPEG metrics even when NVENC active** — `_log_per_second_stats()` reads from JPEG encoder object (`self.encoder`), not NVENC. Shows `q=75 res=1280x720` which is misleading. Fix: check `self._h264_enabled` and log NVENC stats instead.
+- **Latency ~139-154ms still causes wall-riding** — Latency-adaptive steering reduces steer_limit to 75% (`LAT_STEER=0.75(rtt=154ms)`). Still causes late turns at high speed. Consider more aggressive latency compensation.
+- **Re-enable overlay effects post-MVP** — SpeedEffects re-enabled for vignette but Gemini doesn't report it visible. SpeedLines, ParticleOverlay, DriftScore, etc. still removed. Bring back after 7+/10 rating.
 - **Tunneling**: ngrok blocked by IT restrictions. bore.pub unreachable from some Vast.ai datacenters. Cloudflare QUIC timeouts on Russian datacenters. **SSH port forwarding is the most reliable option**: `ssh -N -L 8765:localhost:8765 -p PORT root@IP`. Localtunnel.me may work as alternative.
 - **Vercel deploy**: Project is `shadow-driver-v3` under team `rishi09-3609s-projects`. Root directory is `v3/`.
   - **CLI deploy** (from repo root, NOT from v3/): `npx vercel deploy --prod --yes --scope rishi09-3609s-projects --token <VERCEL_TOKEN>`
@@ -326,6 +334,18 @@ cd v3 && npm run dev
 ### Issue: GLSL shader effects still active despite "disabled" in docs (FIXED)
 **Cause:** Visual effects exist at 4 independent layers: CSS transforms, GLSL shader, CSS overlays, server camera config. Previous fix only disabled CSS transforms and documented "effects disabled" — but barrel distortion, chromatic aberration, radial blur, film grain, and speed-based color grading were all still active in the GLSL fragment shader in WebGLCanvas.tsx. The AI agent couldn't see the rendered output, so it trusted its own documentation from the previous session.
 **Fix (applied):** Disabled ALL GLSL shader effects: barrel distortion=0.0, chromatic aberration=0.0, radial blur=0.0, film grain removed, color grading set to identity (no-op). Added Layer Checklist to CLAUDE.md to prevent recurrence.
+
+### Issue: NVENC `-multipass two_pass_quarter` crash (FIXED)
+**Cause:** The NVENC encoder used `-multipass two_pass_quarter` which is not valid on the server's FFmpeg version. FFmpeg NVENC only accepts integers: 0 (disabled), 1 (quarter-res prepass), 2 (full-res prepass). The invalid string caused FFmpeg to exit immediately after 1 frame, triggering JPEG fallback for the entire session. The `[stats]` log line masked this because it always reads JPEG encoder metrics, not NVENC metrics.
+**Fix (applied):** Changed both encoder start paths (initial and adaptive-bitrate restart) to use `-multipass 1`. Result: 1761 frames encoded, 0 errors.
+
+### Issue: HUD speedometer and input bars invisible (FIXED)
+**Cause:** Two contributing factors: (1) Input bars were guarded by `player.throttle !== undefined` — if the first race_state message arrived before telemetry, the conditional evaluated false and bars never appeared. (2) The bottom-left HUD container used `bg-black/60` with `border-white/10` which blended into dark road surfaces, making it nearly invisible in screen recordings.
+**Fix (applied):** Removed the conditional guard (always render input bars with `?? 0` fallback). Increased container contrast: `bg-black/70`, `backdrop-blur-md`, `border-white/20`, `shadow-lg shadow-black/50`. User confirmed speedometer + input bars are now visible in Test 6.
+
+### Issue: AI opponent invisible — autopilot routes to wrong roads
+**Cause:** `tm.set_path()` in CARLA 0.9.15 does not reliably control the autopilot's route. The AI car spawns correctly (4m to the right of player), but once autopilot engages, CARLA's traffic manager routes it through different city streets. The AI IS racing and passing checkpoints (gap timer shows +62.5s), but it's physically on a different part of the map. The `[stats]` line confirmed AI position updates, and the gap timer works, but the camera never captures the AI car.
+**Status:** Not yet fixed. Needs: manual waypoint-following AI, or periodic teleportation near player's path, or a different CARLA TM API call.
 
 ---
 

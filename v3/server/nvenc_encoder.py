@@ -136,7 +136,7 @@ class NVENCEncoder:
             '-surfaces', '1',        # Pipeline depth of 1 (default 4+)
             '-delay', '0',           # No output delay
             '-forced-idr', '1',      # Every keyframe is IDR (recovery)
-            '-multipass', 'two_pass_quarter',  # Better quality spatial analysis
+            '-multipass', '1',               # Quarter-res prepass for better quality
             '-spatial-aq', '1',      # Adaptive quantization: more bits to edges/detail
             '-aq-strength', '8',     # AQ strength (1-15, 8=default, higher=more redistribution)
             '-bf', '0',              # No B-frames (latency)
@@ -316,7 +316,7 @@ class NVENCEncoder:
                 '-surfaces', '1',
                 '-delay', '0',
                 '-forced-idr', '1',
-                '-multipass', 'two_pass_quarter',
+                '-multipass', '1',               # Quarter-res prepass for better quality
                 '-spatial-aq', '1',
                 '-aq-strength', '8',
                 '-bf', '0',

@@ -134,25 +134,23 @@ export function RaceHUD({ raceState, latencyMs, gamepadConnected = false, classN
         className={`absolute bottom-4 left-4 z-10 transition-opacity duration-500 ease-out ${hudOpacityClass}`}
         style={{ transitionDelay: hudVisible ? '200ms' : '0ms' }}
       >
-        <div className="bg-black/60 backdrop-blur-sm rounded-lg px-3 py-3 border border-white/10 flex flex-col items-center">
+        <div className="bg-black/70 backdrop-blur-md rounded-lg px-3 py-3 border border-white/20 flex flex-col items-center shadow-lg shadow-black/50">
           <ArcSpeedometer speedKmh={player.speed_kmh} gear={player.gear} />
           {player.gear !== undefined && (
-            <div className="text-white/40 text-xs font-mono -mt-1">
+            <div className="text-white/50 text-xs font-mono -mt-1">
               Gear {player.gear}
             </div>
           )}
-          {/* Input visualization: steering wheel + bars */}
-          {player.throttle !== undefined && (
-            <div className="mt-2 flex items-center gap-2">
-              {/* Mini steering wheel that rotates with input */}
-              <SteeringWheelIcon steer={player.steer ?? 0} />
-              <div className="space-y-1">
-                <InputBar label="THR" value={player.throttle} color="#4CAF50" localValue={localKeys?.current?.w ? 1 : undefined} />
-                <InputBar label="BRK" value={player.brake ?? 0} color="#f44336" localValue={localKeys?.current?.s || localKeys?.current?.space ? 1 : undefined} />
-                <InputBar label="STR" value={(player.steer ?? 0) * 0.5 + 0.5} color="#2196F3" centered localValue={localKeys ? (localKeys.current.a ? 0 : localKeys.current.d ? 1 : 0.5) : undefined} />
-              </div>
+          {/* Input visualization: steering wheel + bars — always show */}
+          <div className="mt-2 flex items-center gap-2">
+            {/* Mini steering wheel that rotates with input */}
+            <SteeringWheelIcon steer={player.steer ?? 0} />
+            <div className="space-y-1">
+              <InputBar label="THR" value={player.throttle ?? 0} color="#4CAF50" localValue={localKeys?.current?.w ? 1 : undefined} />
+              <InputBar label="BRK" value={player.brake ?? 0} color="#f44336" localValue={localKeys?.current?.s || localKeys?.current?.space ? 1 : undefined} />
+              <InputBar label="STR" value={(player.steer ?? 0) * 0.5 + 0.5} color="#2196F3" centered localValue={localKeys ? (localKeys.current.a ? 0 : localKeys.current.d ? 1 : 0.5) : undefined} />
             </div>
-          )}
+          </div>
         </div>
       </div>
 
@@ -161,7 +159,7 @@ export function RaceHUD({ raceState, latencyMs, gamepadConnected = false, classN
         className={`absolute bottom-4 left-1/2 -translate-x-1/2 z-10 transition-opacity duration-500 ease-out ${hudOpacityClass}`}
         style={{ transitionDelay: hudVisible ? '300ms' : '0ms' }}
       >
-        <div className="bg-black/60 backdrop-blur-sm rounded-lg px-6 py-3 border border-white/10">
+        <div className="bg-black/70 backdrop-blur-md rounded-lg px-6 py-3 border border-white/20 shadow-lg shadow-black/50">
           <div className="flex gap-6">
             <div>
               <div className="text-white/50 text-xs font-mono uppercase">Current</div>
