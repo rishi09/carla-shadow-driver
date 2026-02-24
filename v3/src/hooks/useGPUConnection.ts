@@ -527,10 +527,15 @@ export function useGPUConnection(): UseGPUConnectionReturn {
             }
 
             // Set up WebRTC data channel for low-latency controls (UDP)
-            // This works even through Cloudflare tunnels since STUN can find
-            // a direct path via ICE candidates, bypassing the tunnel for input.
+            // Only for direct connections (ws://) — tunnels (wss://) don't support UDP.
+            // STUN can find a direct path via ICE candidates for local/SSH-forwarded connections.
             // Falls back to WebSocket if data channel setup fails.
-            setupDataChannel(ws);
+            if (wsUrl.startsWith('ws://')) {
+              setupDataChannel(ws);
+              console.log('[DC] Direct connection detected (ws://) — attempting WebRTC data channel for low-latency controls');
+            } else {
+              console.log('[DC] Tunnel connection detected (wss://) — skipping WebRTC data channel, using WebSocket for controls');
+            }
           } else if (data.type === 'dc_answer') {
             // Server's SDP answer for the data channel peer connection
             const answer = data as { sdp: string; sdpType: RTCSdpType };

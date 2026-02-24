@@ -25,7 +25,16 @@ import subprocess
 import threading
 import queue
 import time
+import numpy as np
 from typing import Optional, Tuple
+
+try:
+    import cv2
+    _HAS_CV2 = True
+except ImportError:
+    _HAS_CV2 = False
+    print("[NVENC] cv2 not available — BGRA→YUV420P conversion disabled, "
+          "will send raw BGRA to FFmpeg (62% more pipe bandwidth)")
 
 
 class NVENCEncoder:
@@ -59,6 +68,27 @@ class NVENCEncoder:
         self._pending_bitrate: Optional[str] = None  # bitrate to apply on next keyframe
         self._restart_lock = threading.Lock()  # serialize restart operations
 
+    def _compute_bufsize(self) -> str:
+        """Compute minimum VBV buffer size = bitrate / fps.
+
+        This gives the smallest possible buffer for lowest latency.
+        E.g., 8M at 30fps -> 266666 -> '266k'
+        """
+        # Parse bitrate string like '8M', '2M', '12M', '500k'
+        br = self.bitrate.strip()
+        if br.upper().endswith('M'):
+            bits = float(br[:-1]) * 1_000_000
+        elif br.upper().endswith('K'):
+            bits = float(br[:-1]) * 1_000
+        else:
+            bits = float(br)
+        buf = int(bits / max(self.fps, 1))
+        if buf >= 1_000_000:
+            return f'{buf // 1_000_000}M'
+        elif buf >= 1_000:
+            return f'{buf // 1_000}k'
+        return str(buf)
+
     @property
     def codec_config(self) -> Optional[dict]:
         """Return codec config dict once SPS/PPS have been extracted from the first keyframe.
@@ -84,12 +114,15 @@ class NVENCEncoder:
         if self._running:
             return True
 
+        pix_fmt = 'yuv420p' if _HAS_CV2 else 'bgra'
+        bufsize = self._compute_bufsize()
+
         cmd = [
             'ffmpeg',
             '-hide_banner', '-loglevel', 'error',
-            # Input: raw BGRA from pipe
+            # Input: raw frames from pipe
             '-f', 'rawvideo',
-            '-pix_fmt', 'bgra',
+            '-pix_fmt', pix_fmt,
             '-s', f'{self.width}x{self.height}',
             '-r', str(self.fps),
             '-i', 'pipe:0',
@@ -99,6 +132,11 @@ class NVENCEncoder:
             '-tune', 'ull',          # Ultra-low latency tuning
             '-rc', 'cbr',            # Constant bitrate
             '-b:v', self.bitrate,
+            '-bufsize', bufsize,     # Minimum VBV buffer = bitrate/fps
+            '-surfaces', '1',        # Pipeline depth of 1 (default 4+)
+            '-delay', '0',           # No output delay
+            '-forced-idr', '1',      # Every keyframe is IDR (recovery)
+            '-multipass', 'two_pass_quarter',  # Better quality spatial analysis
             '-spatial-aq', '1',      # Adaptive quantization: more bits to edges/detail
             '-aq-strength', '8',     # AQ strength (1-15, 8=default, higher=more redistribution)
             '-bf', '0',              # No B-frames (latency)
@@ -139,7 +177,7 @@ class NVENCEncoder:
         self._reader_thread.start()
 
         print(f"[NVENC] Encoder started ({self.width}x{self.height} @ {self.fps}fps, "
-              f"bitrate={self.bitrate}, preset=p1/ull)")
+              f"bitrate={self.bitrate}, bufsize={bufsize}, pix_fmt={pix_fmt}, preset=p1/ull)")
         return True
 
     def stop(self):
@@ -259,11 +297,13 @@ class NVENCEncoder:
             self._codec_config_event.clear()
 
             # Build new FFmpeg command with updated bitrate
+            pix_fmt = 'yuv420p' if _HAS_CV2 else 'bgra'
+            bufsize = self._compute_bufsize()
             cmd = [
                 'ffmpeg',
                 '-hide_banner', '-loglevel', 'error',
                 '-f', 'rawvideo',
-                '-pix_fmt', 'bgra',
+                '-pix_fmt', pix_fmt,
                 '-s', f'{self.width}x{self.height}',
                 '-r', str(self.fps),
                 '-i', 'pipe:0',
@@ -272,6 +312,11 @@ class NVENCEncoder:
                 '-tune', 'ull',
                 '-rc', 'cbr',
                 '-b:v', self.bitrate,
+                '-bufsize', bufsize,
+                '-surfaces', '1',
+                '-delay', '0',
+                '-forced-idr', '1',
+                '-multipass', 'two_pass_quarter',
                 '-spatial-aq', '1',
                 '-aq-strength', '8',
                 '-bf', '0',
@@ -312,7 +357,13 @@ class NVENCEncoder:
 
             # Force a keyframe by feeding a blank frame to prime the new encoder
             # This ensures the client receives SPS/PPS immediately
-            blank = b'\x00' * (self.width * self.height * 4)
+            if _HAS_CV2:
+                # YUV420P: Y plane (w*h) + U plane (w*h/4) + V plane (w*h/4) = w*h*1.5
+                blank_size = self.width * self.height * 3 // 2
+            else:
+                # BGRA: 4 bytes per pixel
+                blank_size = self.width * self.height * 4
+            blank = b'\x00' * blank_size
             try:
                 self._process.stdin.write(blank)
                 self._process.stdin.flush()
@@ -325,6 +376,9 @@ class NVENCEncoder:
     def encode_frame(self, raw_bgra: bytes) -> bool:
         """Feed a raw BGRA frame to FFmpeg for encoding.
 
+        If cv2 is available, converts BGRA→YUV420P before writing to reduce
+        pipe throughput by 62% (8.3MB→3.1MB per 1920x1080 frame).
+
         Args:
             raw_bgra: Raw BGRA pixel data (width * height * 4 bytes).
 
@@ -334,16 +388,25 @@ class NVENCEncoder:
         if not self._running or not self._process or not self._process.stdin:
             return False
 
-        expected_size = self.width * self.height * 4
-        if len(raw_bgra) != expected_size:
+        expected_bgra_size = self.width * self.height * 4
+        if len(raw_bgra) != expected_bgra_size:
             self._encode_errors += 1
             if self._encode_errors <= 3:
                 print(f"[NVENC] Frame size mismatch: got {len(raw_bgra)}, "
-                      f"expected {expected_size}")
+                      f"expected {expected_bgra_size}")
             return False
 
         try:
-            self._process.stdin.write(raw_bgra)
+            if _HAS_CV2:
+                # Convert BGRA → YUV420P (I420) to reduce pipe write by 62%
+                frame = np.frombuffer(raw_bgra, dtype=np.uint8).reshape(
+                    (self.height, self.width, 4))
+                yuv = cv2.cvtColor(frame, cv2.COLOR_BGRA2YUV_I420)
+                pipe_data = yuv.tobytes()
+            else:
+                pipe_data = raw_bgra
+
+            self._process.stdin.write(pipe_data)
             self._process.stdin.flush()
             self._frames_encoded += 1
             return True

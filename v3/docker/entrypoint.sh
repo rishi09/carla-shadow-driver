@@ -124,14 +124,38 @@ if ! kill -0 $SERVER_PID 2>/dev/null; then
 fi
 echo "Race server is running (PID: $SERVER_PID)"
 
-# Step 4: Start tunnel (ngrok preferred for lower latency, Cloudflare as fallback)
+# Step 3b: Detect Vast.ai direct port mapping for WebSocket
+# Vast.ai provides VAST_TCP_PORT_8765 and PUBLIC_IPADDR when port 8765 is mapped
+DIRECT_WS_URL=""
+if [ -n "$VAST_TCP_PORT_8765" ] && [ -n "$PUBLIC_IPADDR" ]; then
+    DIRECT_WS_URL="ws://${PUBLIC_IPADDR}:${VAST_TCP_PORT_8765}"
+    echo "[entrypoint] Direct WebSocket: $DIRECT_WS_URL"
+    echo "$DIRECT_WS_URL" > /tmp/ws_url.txt
+
+    # Report direct WS URL to callback endpoint
+    curl -s -X POST "$CALLBACK_URL" \
+        -H "Content-Type: application/json" \
+        -d "{\"instance_id\":\"$INST_ID\",\"tunnel_url\":\"$DIRECT_WS_URL\",\"status\":\"ready\",\"message\":\"Direct WebSocket available\"}" 2>&1 || true
+elif [ -n "$VAST_TCP_PORT_8765" ]; then
+    echo "[entrypoint] VAST_TCP_PORT_8765=$VAST_TCP_PORT_8765 but PUBLIC_IPADDR not set"
+else
+    echo "[entrypoint] No direct port mapping (VAST_TCP_PORT_8765 not set)"
+fi
+
+# Step 4: Start tunnel (ngrok preferred, Cloudflare fallback, skip if direct WS available)
 report_status "tunneling" "Establishing secure tunnel"
 
 TUNNEL_URL=""
 
+# If direct WS URL is available, use it as the primary URL and skip tunnel setup
+if [ -n "$DIRECT_WS_URL" ]; then
+    TUNNEL_URL="$DIRECT_WS_URL"
+    echo "[entrypoint] Using direct WebSocket URL, skipping tunnel setup"
+fi
+
 # --- Option A: ngrok (lower latency, ~10-20ms overhead vs Cloudflare's ~40-80ms) ---
 # Requires NGROK_AUTHTOKEN env var. Get a free token at https://dashboard.ngrok.com/signup
-if [ -n "$NGROK_AUTHTOKEN" ]; then
+if [ -z "$TUNNEL_URL" ] && [ -n "$NGROK_AUTHTOKEN" ]; then
     echo "Starting ngrok tunnel (auth token present)..."
     ngrok config add-authtoken "$NGROK_AUTHTOKEN" 2>/dev/null || true
 
@@ -188,6 +212,8 @@ fi
 
 # Report tunnel URL
 if [ -n "$TUNNEL_URL" ]; then
+    # Write URL to file for external tools to read
+    echo "$TUNNEL_URL" > /tmp/ws_url.txt
     echo "Reporting tunnel URL to callback..."
     curl -v -X POST "$CALLBACK_URL" \
         -H "Content-Type: application/json" \

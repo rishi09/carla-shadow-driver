@@ -24,8 +24,8 @@ export function RaceHUD({ raceState, latencyMs, gamepadConnected = false, classN
       const timer = setTimeout(() => setHudVisible(true), 100);
       return () => clearTimeout(timer);
     }
-    // If already racing (e.g., reconnect), show immediately
-    if (status === 'racing' && prevStatusRef.current !== 'countdown') {
+    // If already racing (e.g., reconnect, or any non-countdown -> racing transition), show immediately
+    if (status === 'racing' || status === 'finishing') {
       setHudVisible(true);
     }
     // Hide during countdown
@@ -490,8 +490,8 @@ function InputBar({ label, value, color, centered, localValue }: { label: string
   const localPct = localValue != null ? Math.max(0, Math.min(1, localValue)) * 100 : undefined;
   return (
     <div className="flex items-center gap-1.5">
-      <span className="text-white/30 text-[10px] font-mono w-6">{label}</span>
-      <div className="w-16 h-1.5 bg-white/10 rounded-full overflow-hidden relative">
+      <span className="text-white/40 text-[11px] font-mono w-7 font-bold">{label}</span>
+      <div className="w-20 h-2.5 bg-white/15 rounded-full overflow-hidden relative">
         {centered ? (
           <>
             {/* Background bar: local input (instant) */}
@@ -502,7 +502,7 @@ function InputBar({ label, value, color, centered, localValue }: { label: string
                   backgroundColor: color,
                   left: localPct < 50 ? `${localPct}%` : '50%',
                   width: `${Math.abs(localPct - 50)}%`,
-                  opacity: 0.2,
+                  opacity: 0.25,
                 }}
               />
             )}
@@ -513,7 +513,7 @@ function InputBar({ label, value, color, centered, localValue }: { label: string
                 backgroundColor: color,
                 left: pct < 50 ? `${pct}%` : '50%',
                 width: `${Math.abs(pct - 50)}%`,
-                opacity: 0.7,
+                opacity: 0.8,
               }}
             />
           </>
@@ -523,13 +523,13 @@ function InputBar({ label, value, color, centered, localValue }: { label: string
             {localPct != null && (
               <div
                 className="absolute top-0 h-full rounded-full"
-                style={{ backgroundColor: color, width: `${localPct}%`, opacity: 0.2 }}
+                style={{ backgroundColor: color, width: `${localPct}%`, opacity: 0.25 }}
               />
             )}
             {/* Foreground bar: server-confirmed input */}
             <div
               className="absolute top-0 h-full rounded-full"
-              style={{ backgroundColor: color, width: `${pct}%`, opacity: 0.7 }}
+              style={{ backgroundColor: color, width: `${pct}%`, opacity: 0.8 }}
             />
           </>
         )}

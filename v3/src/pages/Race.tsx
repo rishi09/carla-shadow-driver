@@ -15,7 +15,7 @@ import { VideoCanvas } from '../components/VideoCanvas.tsx';
 import { WebGLCanvas, supportsWebGL2 } from '../components/WebGLCanvas.tsx';
 import { WebRTCVideo } from '../components/WebRTCVideo.tsx';
 import { RaceHUD } from '../components/RaceHUD.tsx';
-import { SpeedEffects as _SpeedEffects } from '../components/SpeedEffects.tsx';
+import { SpeedEffects } from '../components/SpeedEffects.tsx';
 import { SpeedLines as _SpeedLines } from '../components/SpeedLines.tsx';
 import { ParticleOverlay as _ParticleOverlay } from '../components/ParticleOverlay.tsx';
 import { DriftScore as _DriftScore } from '../components/DriftScore.tsx';
@@ -1279,10 +1279,17 @@ export function Race() {
 
           {/* === ALL OVERLAY EFFECTS REMOVED FOR MVP === */}
           {/* Re-enable after core gameplay is solid (target: 7+/10 Gemini rating). */}
-          {/* Removed: SpeedLines, SpeedEffects, ParticleOverlay, DriftScore, */}
+          {/* Removed: SpeedLines, ParticleOverlay, DriftScore, */}
           {/* checkpointFlash, niceSave, driftBoostGlow, slipstream, SplitTimeDelta, */}
           {/* lastLapOvertake, nearMiss/closeCall, photoFinish/photoFinishTension */}
           {/* See git history for the full overlay code. */}
+
+          {/* SpeedEffects: speed vignette + warp streaks at 220+ km/h (low perf cost, safe at any latency) */}
+          <SpeedEffects
+            speedKmh={gpu.raceState?.player?.speed_kmh ?? 0}
+            collisions={gpu.raceState?.collisions}
+            gear={gpu.raceState?.player?.gear}
+          />
 
           {/* HUD overlay */}
           <RaceHUD raceState={gpu.raceState} latencyMs={gpu.latencyMs} gamepadConnected={gamepad.connected} localKeys={keysRef} />

@@ -1160,7 +1160,9 @@ class RaceServer:
         # Create fresh race state with same lap count
         old_laps = self.race_state.total_laps if self.race_state else 3
         self.race_state = RaceState(checkpoints, total_laps=old_laps)
-        self.race_state.start_countdown()
+
+        # Force AI to follow checkpoint route on restart too
+        self.carla.set_ai_route(checkpoints)
 
         # Re-create race director and mistake generator with same difficulty
         self.race_director = RaceDirector(difficulty=self.difficulty)
@@ -1183,6 +1185,9 @@ class RaceServer:
         self.cost_tracker.start_session()
 
         self.running = True
+
+        # Start countdown AFTER all setup is done so the client sees the full 4 seconds
+        self.race_state.start_countdown()
 
         # Send ack to client
         await websocket.send(json.dumps({'type': 'restart_ack'}))
@@ -1328,8 +1333,13 @@ class RaceServer:
             return
 
         self.race_state = RaceState(checkpoints, total_laps=laps)
-        self.race_state.start_countdown()
         self.running = True
+
+        # Force the AI to follow the same route as the checkpoints
+        # Without this, the AI autopilot picks its own route through the city
+        # and is never visible to the player
+        self.carla.set_ai_route(checkpoints)
+
         self.race_director = RaceDirector(difficulty=self.difficulty)
         self.mistake_generator = AIMistakeGenerator(difficulty=self.difficulty)
         self.weather_manager = WeatherTransitionManager(weather, total_laps=laps)
@@ -1357,6 +1367,11 @@ class RaceServer:
         # framebuffer. This eliminates CPU memory copies in the capture pipeline.
         # Falls back silently to CARLA camera sensor if unavailable.
         self._start_nvfbc_capture()
+
+        # Start countdown AFTER all setup is done so the full 4 seconds (3-2-1-GO)
+        # are visible to the client. Previously countdown started before encoder
+        # setup, which could eat 1-2 seconds of countdown time.
+        self.race_state.start_countdown()
 
         # Run the frame loop (30fps) and telemetry loop (30Hz) concurrently
         self._race_task = asyncio.create_task(self._race_loop())

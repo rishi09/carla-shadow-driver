@@ -158,13 +158,13 @@ void main() {
 
   color = pow(max(color, 0.0), gamma) * gain + lift;
 
-  // Contrast: no change
-  float contrast = 1.0; // was: mix(1.05, 1.15, t)
+  // Contrast: subtle enhancement for punchier midtones (safe at any latency)
+  float contrast = 1.08; // was: 1.0 (identity) — originally mix(1.05, 1.15, t)
   color = (color - 0.5) * contrast + 0.5;
 
-  // Saturation: no change
+  // Saturation: subtle enhancement for richer colors (safe at any latency)
   float luma = dot(color, vec3(0.2126, 0.7152, 0.0722));
-  float saturation = 1.0; // was: mix(1.05, 1.15, t)
+  float saturation = 1.10; // was: 1.0 (identity) — originally mix(1.05, 1.15, t)
   color = mix(vec3(luma), color, saturation);
 
   // --- 4. Vignette --- (reduced for high-latency playability)

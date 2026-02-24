@@ -1129,6 +1129,37 @@ class RaceManager:
                 print(f"[DRIFT] Failed to restore rear friction: {e}")
             self._handbrake_was_active = False
 
+    def set_ai_route(self, checkpoints: List[Tuple[float, float, float]]):
+        """Set the AI car's autopilot route to follow the same checkpoint path.
+
+        Uses CARLA traffic manager's set_path() to force the AI to drive through
+        the checkpoint locations instead of choosing its own route. This ensures
+        the AI is visible to the player and actually races the same course.
+
+        Args:
+            checkpoints: List of (x, y, radius) tuples from race_logic.
+        """
+        if not self.ai_car or not self.client or not self._ai_autopilot:
+            return
+
+        try:
+            tm = self.client.get_trafficmanager()
+
+            # Build a list of carla.Location objects from checkpoint coordinates
+            route_locations = []
+            for cx, cy, _radius in checkpoints:
+                route_locations.append(carla.Location(x=cx, y=cy, z=0.0))
+
+            # set_path forces the autopilot to follow this route
+            # The AI will drive through these locations in order
+            tm.set_path(self.ai_car, route_locations)
+            print(f"AI route set: {len(route_locations)} waypoints from checkpoints")
+        except AttributeError:
+            # Older CARLA versions may not have set_path
+            print("AI route: set_path not available in this CARLA version")
+        except Exception as e:
+            print(f"Failed to set AI route: {e}")
+
     def enable_ai_autopilot(self, difficulty: str = 'medium'):
         """Enable CARLA's built-in autopilot for the AI car.
         Difficulty levels adjust autopilot aggressiveness:
