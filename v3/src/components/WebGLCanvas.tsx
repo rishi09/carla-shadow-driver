@@ -122,56 +122,34 @@ void main() {
     blurredColor = sampleBlended(uv).rgb;
   }
 
-  // --- 3. Chromatic aberration ---
-  float edgeDist = length(uv - 0.5) * 2.0; // 0 at center, ~1.4 at corners
-  vec2 caDir = normalize(uv - 0.5 + 0.0001); // direction from center
+  // --- 3. Chromatic aberration --- DISABLED for clean video
+  vec3 color = blurredColor;
+  float edgeDist = length(uv - 0.5) * 2.0; // used by vignette below
 
-  // Base CA scales with barrel distortion intensity
-  float caBase = mix(0.001, 0.004, t) * edgeDist;
-  // Speed-based CA: radial shift from center, 0.003 at full intensity
-  float caSpeed = u_chromatic * 0.003;
-  // Combine: base edge-dependent + uniform speed-based
-  float caAmount = caBase + caSpeed;
-
-  // Sample R and B channels with CA offset, using radial blur when active
-  vec3 color;
-  if (u_radialBlur > 0.0) {
-    float r = sampleRadialBlurBlended(clamp(uv + caDir * caAmount, 0.0, 1.0), u_radialBlur).r;
-    float g = blurredColor.g;
-    float b = sampleRadialBlurBlended(clamp(uv - caDir * caAmount, 0.0, 1.0), u_radialBlur).b;
-    color = vec3(r, g, b);
-  } else {
-    float r = sampleBlended(clamp(uv + caDir * caAmount, 0.0, 1.0)).r;
-    float g = sampleBlended(uv).g;
-    float b = sampleBlended(clamp(uv - caDir * caAmount, 0.0, 1.0)).b;
-    color = vec3(r, g, b);
-  }
-
-  // --- 3. Color grading --- DISABLED for high-latency playability
-  // Identity values: image passes through unchanged
-  // Lift (shadows): no change
-  vec3 lift = vec3(0.0); // was: vec3(0.02, 0.01, -0.01) * mix(0.5, 1.0, t)
-  // Gain (highlights): no change
-  vec3 gain = vec3(1.0); // was: vec3(0.98, 1.0, 1.04)
-  // Gamma (midtones): no change
-  vec3 gamma = vec3(1.0); // was: vec3(0.98, 1.0, 1.02)
+  // --- 3. Color grading --- subtle cinematic warmth
+  // Lift (shadows): very slight warm push
+  vec3 lift = vec3(0.01, 0.005, -0.005);
+  // Gain (highlights): slight warm/cool split
+  vec3 gain = vec3(0.99, 1.0, 1.02);
+  // Gamma (midtones): subtle warmth
+  vec3 gamma = vec3(0.99, 1.0, 1.01);
 
   color = pow(max(color, 0.0), gamma) * gain + lift;
 
-  // Contrast: subtle enhancement for punchier midtones (safe at any latency)
-  float contrast = 1.08; // was: 1.0 (identity) — originally mix(1.05, 1.15, t)
+  // Contrast: moderate enhancement for punchier image
+  float contrast = 1.12; // cinematic contrast boost
   color = (color - 0.5) * contrast + 0.5;
 
-  // Saturation: subtle enhancement for richer colors (safe at any latency)
+  // Saturation: moderate enhancement for richer colors
   float luma = dot(color, vec3(0.2126, 0.7152, 0.0722));
-  float saturation = 1.10; // was: 1.0 (identity) — originally mix(1.05, 1.15, t)
+  float saturation = 1.15; // cinematic saturation boost
   color = mix(vec3(luma), color, saturation);
 
-  // --- 4. Vignette --- (reduced for high-latency playability)
-  float vignetteRadius = mix(0.90, 0.70, t);
+  // --- 4. Vignette --- (subtle darkening at edges for cinematic feel)
+  float vignetteRadius = mix(0.85, 0.65, t);
   float vignetteSoft = 0.45;
   float vignette = smoothstep(vignetteRadius, vignetteRadius + vignetteSoft, edgeDist);
-  color *= 1.0 - vignette * mix(0.15, 0.35, t);
+  color *= 1.0 - vignette * mix(0.20, 0.40, t);
 
   // --- 5. Film grain --- (disabled for high-latency playability)
   // float grainStrength = mix(0.02, 0.06, t);
@@ -275,7 +253,7 @@ export function WebGLCanvas({ onBinaryFrame, onH264Frame, onCodecConfig, classNa
   steerRef.current = steer;
 
   const initGL = useCallback((canvas: HTMLCanvasElement): boolean => {
-    const gl = canvas.getContext('webgl2', { alpha: false, antialias: false, premultipliedAlpha: false });
+    const gl = canvas.getContext('webgl2', { alpha: false, antialias: false, premultipliedAlpha: false, preserveDrawingBuffer: true });
     if (!gl) return false;
 
     const prog = createProgram(gl);

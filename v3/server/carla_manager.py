@@ -96,6 +96,16 @@ class RaceManager:
         self._tc_stuck_time = 0.0  # Time spent stuck with TC active
         self._tc_recovery_time = 0.0  # Recovery period: TC fully disabled
 
+        # Auto-unstuck: respawn when car is stuck for too long
+        self._stuck_timer = 0.0  # Seconds car has been stuck (speed < 2 km/h)
+
+        # Reverse gear state machine
+        self._in_reverse = False
+        self._s_was_released = False  # Must release S before first reverse (prevents surprise reverse when braking)
+
+        # Respawn timestamp (consumed by race_server.py for frame throttle)
+        self._respawn_time = 0.0
+
         # Handbrake drift: tracks state to only apply physics changes on transitions
         self._handbrake_was_active = False
         self._original_rear_friction: Optional[List[float]] = None
@@ -752,6 +762,7 @@ class RaceManager:
             return
 
         self._ctrl_frame = getattr(self, '_ctrl_frame', 0) + 1
+        self._last_latency_ms = latency_ms  # Store for countersteer assist
 
         dt = 1.0 / 30.0  # Approximate frame delta
 
@@ -787,15 +798,14 @@ class RaceManager:
         steer_limit = 0.08 + 0.42 * math.exp(-speed_kmh / 70.0)
 
         # --- Feature 7: Latency-adaptive steering ---
-        # At high RTT (>80ms), reduce effective steering limit proportionally to
-        # prevent overcorrection from delayed input. At 280ms, the player sees
-        # frames from 280ms ago, so their steering decisions are always "late",
-        # causing wall-riding. Reducing steer_limit compensates by making each
-        # input smaller, giving more time to react.
-        # Factor: 1.0 at 80ms, linearly decays to 0.3 at 380ms+
+        # Two-pronged approach to high-latency handling:
+        # A) Mild limit reduction — preserves most steering range for tight corners
+        #    Factor: 1.0 at <=80ms, gently decays to 0.55 at 380ms+
+        # B) Increased ramp time (below) — prevents snap overcorrection
+        #    The real problem at high latency is jerky inputs, not raw limit
         latency_factor = 1.0
         if latency_ms is not None and latency_ms > 80:
-            latency_factor = max(0.3, 1.0 - (latency_ms - 80) / 300)
+            latency_factor = max(0.55, 1.0 - (latency_ms - 80) / 500)
         steer_limit *= latency_factor
 
         # --- Feature 5: Speed-dependent steering ramp time ---
@@ -804,9 +814,14 @@ class RaceManager:
         #   At   0 km/h: 40ms  (very snappy for parking/reversing)
         #   At 100 km/h: 70ms  (moderate, responsive but not twitchy)
         #   At 200 km/h: 100ms (weighty, deliberate high-speed steering)
+        # At high latency, increase ramp time to smooth out delayed inputs:
+        #   150ms RTT adds ~35ms ramp (total ~75-105ms at speed)
+        #   280ms RTT adds ~100ms ramp (total ~140-200ms at speed)
+        ramp_ms = 40.0 + speed_kmh * 0.3
+        if latency_ms is not None and latency_ms > 80:
+            ramp_ms += (latency_ms - 80) * 0.5
         # Convert ms to per-frame rate: to reach steer_limit in ramp_ms,
         # rate = steer_limit / (ramp_ms / 1000 * 30)  [at 30fps]
-        ramp_ms = 40.0 + speed_kmh * 0.3
         ramp_frames = (ramp_ms / 1000.0) * 30.0  # Number of frames for the ramp
         # Attack rate: how much steer changes per frame toward the target
         steer_attack = steer_limit / max(ramp_frames, 1.0)
@@ -863,22 +878,54 @@ class RaceManager:
         final_steer = self._current_steer + countersteer_correction
         final_steer = max(-1.0, min(1.0, final_steer))
 
-        # --- Reverse if braking while slow or stopped ---
-        # Only reverse when S is pressed WITHOUT W (W takes priority for forward).
-        # Use the ramped brake value as reverse throttle for smooth transition
-        # (the brake key has been ramping _current_brake, which we repurpose here).
-        if keys.get('s', False) and not keys.get('w', False) and speed_kmh < 15.0:
-            # Use brake ramp as reverse throttle (already 0.5-1.0 by the time we're slow)
-            reverse_throttle = max(0.5, self._current_brake)
+        # --- Off-road steering nudge ---
+        road_nudge = self._get_road_nudge()
+        if road_nudge != 0.0:
+            final_steer = max(-1.0, min(1.0, final_steer + road_nudge))
+
+        # --- Reverse gear state machine ---
+        # Tracks S key press/release to toggle reverse mode:
+        #   Enter reverse: S pressed + car stopped + S was released since last press
+        #   Stay in reverse: until W pressed or S released
+        #   No steering inversion (CARLA handles reverse steering natively)
+        s_pressed = keys.get('s', False)
+        w_pressed = keys.get('w', False)
+
+        if not s_pressed:
+            self._s_was_released = True
+
+        if self._in_reverse:
+            # Exit reverse when W is pressed or S is released
+            if w_pressed or not s_pressed:
+                self._in_reverse = False
+                if self._ctrl_frame % 30 == 0:
+                    print(f"[CTRL#{self._ctrl_frame}] EXIT REVERSE (w={w_pressed}, s={s_pressed})")
+        else:
+            # Enter reverse when S pressed, car stopped, and S was released since last time
+            if s_pressed and not w_pressed and speed_kmh < 3.0 and self._s_was_released:
+                self._in_reverse = True
+                self._s_was_released = False
+                if self._ctrl_frame % 30 == 0:
+                    print(f"[CTRL#{self._ctrl_frame}] ENTER REVERSE spd={speed_kmh:.1f}")
+
+        if self._in_reverse:
+            # Higher floor (0.7) so reverse feels responsive, cap at 0.85
+            # so it's fast but not as fast as forward (1.0)
+            reverse_throttle = min(0.85, max(0.7, self._current_brake))
+            # Invert steer for intuitive chase-cam feel:
+            # CARLA does NOT auto-invert steer in reverse. Without inversion,
+            # pressing D (right) makes the rear go LEFT on screen (front wheels
+            # point right, car pivots around them going backward).
+            # With inversion: D → rear goes right, A → rear goes left.
+            reverse_steer = -final_steer
             control = carla.VehicleControl(
                 throttle=reverse_throttle,
-                steer=final_steer,
+                steer=reverse_steer,
                 brake=0.0,
                 hand_brake=hand_brake,
                 reverse=True
             )
             self.player_car.apply_control(control)
-            # Log every 30th frame
             if self._ctrl_frame % 30 == 0:
                 active = [k for k, v in keys.items() if v]
                 print(f"[CTRL#{self._ctrl_frame}] REVERSE keys={active} spd={speed_kmh:.1f} "
@@ -897,10 +944,22 @@ class RaceManager:
             steer=final_steer,
             brake=effective_brake,
             hand_brake=hand_brake,
+            manual_gear_shift=False,  # Let CARLA handle automatic transmission
         )
         self.player_car.apply_control(control)
 
-        # Diagnostic: log every 30th frame with full control + assist details
+        # --- Auto-unstuck: respawn if car is stuck for >4 seconds ---
+        # Detects when car is stationary and facing wrong direction (e.g. after wall crash)
+        dt = 1.0 / 30.0
+        if speed_kmh < 2.0 and abs(self._drift_angle) > 45.0:
+            self._stuck_timer += dt
+            if self._stuck_timer > 4.0:
+                print(f"[UNSTUCK] Car stuck for {self._stuck_timer:.1f}s "
+                      f"(spd={speed_kmh:.1f}, drift={self._drift_angle:.1f}°) — auto-respawning")
+                self.respawn_player()
+                self._stuck_timer = 0.0
+        else:
+            self._stuck_timer = 0.0
         if self._ctrl_frame % 30 == 0:
             active = [k for k, v in keys.items() if v]
             rb = self.player_car.get_control()
@@ -971,6 +1030,11 @@ class RaceManager:
         t = t * t * (3.0 - 2.0 * t)
 
         max_correction = 0.35
+        # Boost countersteer at high latency — delayed player inputs need more assist
+        lat = getattr(self, '_last_latency_ms', None)
+        if lat and lat > 100:
+            latency_boost = min(0.15, (lat - 100) / 600)
+            max_correction += latency_boost
         correction_magnitude = max_correction * t
 
         # Also scale down at very high speed so the assist doesn't overcorrect
@@ -984,6 +1048,63 @@ class RaceManager:
             return -correction_magnitude
         else:
             return correction_magnitude
+
+    def _get_road_nudge(self) -> float:
+        """Compute a gentle steering nudge to push the car back onto the road.
+
+        Uses CARLA's waypoint system to detect when the player is off-road.
+        Returns a small steering correction (capped at 0.15) pointing toward
+        the nearest road center.
+
+        Returns:
+            Steering nudge in [-0.15, 0.15]. Positive = steer right.
+        """
+        if not self.player_car or not self.world:
+            return 0.0
+
+        try:
+            location = self.player_car.get_location()
+            carla_map = self.world.get_map()
+
+            # Get waypoint WITHOUT projecting to road — if None or far, we're off-road
+            wp = carla_map.get_waypoint(location, project_to_road=False)
+
+            if wp is not None:
+                # On a road lane — no nudge needed
+                return 0.0
+
+            # Off-road: find nearest road waypoint
+            road_wp = carla_map.get_waypoint(location, project_to_road=True)
+            if road_wp is None:
+                return 0.0
+
+            # Vector from car to road center
+            road_loc = road_wp.transform.location
+            dx = road_loc.x - location.x
+            dy = road_loc.y - location.y
+            dist = math.sqrt(dx * dx + dy * dy)
+
+            if dist < 0.5:
+                # Close enough to road, no nudge needed
+                return 0.0
+
+            # Car's forward direction
+            heading_yaw = self.player_car.get_transform().rotation.yaw
+            fwd_x = math.cos(math.radians(heading_yaw))
+            fwd_y = math.sin(math.radians(heading_yaw))
+
+            # Cross product: fwd x to_road = positive means road is to the right
+            cross = fwd_x * dy - fwd_y * dx
+            # Normalize and cap
+            nudge = max(-0.15, min(0.15, cross / max(dist, 1.0) * 0.3))
+
+            if self._ctrl_frame % 30 == 0:
+                print(f"[ROAD_NUDGE] off-road dist={dist:.1f}m nudge={nudge:.3f}")
+
+            return nudge
+
+        except Exception:
+            return 0.0
 
     def _compute_auto_brake(self, next_checkpoint: Tuple[float, float],
                             speed_kmh: float) -> float:
@@ -1472,6 +1593,11 @@ class RaceManager:
             self._drift_boost_multiplier = 1.0
             self._drift_boost_end_time = 0.0
 
+            # Reset reverse state
+            self._in_reverse = False
+            self._s_was_released = False  # Must release S after respawn
+            self._respawn_time = time.time()
+
             print("Player respawned at nearest waypoint")
         except Exception as e:
             print(f"Failed to respawn player: {e}")
@@ -1524,6 +1650,10 @@ class RaceManager:
             self._drift_boost_multiplier = 1.0
             self._drift_boost_end_time = 0.0
 
+            # Reset reverse state
+            self._in_reverse = False
+            self._s_was_released = False  # Must release S after reset
+
             # Reset AI blocking state
             self._ai_blocking_active = False
             self._ai_blocking_log_counter = 0
@@ -1549,7 +1679,8 @@ class RaceManager:
             'z': transform.location.z,
             'yaw': transform.rotation.yaw,
             'speed_kmh': speed,
-            'gear': control.gear,
+            'gear': (-1 if (vehicle is self.player_car and getattr(self, '_in_reverse', False))
+                     else (0 if speed < 1.0 else max(1, min(6, int(speed / 30) + 1)))),
             'throttle': control.throttle,
             'brake': control.brake,
             'steer': control.steer,

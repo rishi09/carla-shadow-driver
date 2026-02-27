@@ -303,6 +303,7 @@ class RaceServer:
         self._nvenc_encoder: Optional[NVENCEncoder] = None
         self._h264_enabled: bool = False  # True if client negotiated h264
         self._client_supports_h264: bool = False
+        self._client_supported_codecs: list = []  # Codecs the client can decode (from handshake)
         self._nvenc_consecutive_empty: int = 0  # Consecutive polls with no encoded frame
         self._nvenc_last_frame_sent: float = 0.0  # Time of last successfully sent NVENC frame
         self._nvenc_disabled_until: float = 0.0  # Temporarily disable H.264 until this time
@@ -314,10 +315,10 @@ class RaceServer:
         self._nvfbc_enabled: bool = False  # True if NvFBC is active for frame capture
 
         # --- Adaptive bitrate state ---
-        self._current_bitrate_mbps: float = 8.0  # Current bitrate in Mbps
+        self._current_bitrate_mbps: float = 20.0  # Current bitrate in Mbps
         self._last_bitrate_adjust_time: float = 0.0  # Rate-limit adaptation
-        self._bitrate_min_mbps: float = 2.0
-        self._bitrate_max_mbps: float = 12.0
+        self._bitrate_min_mbps: float = 8.0
+        self._bitrate_max_mbps: float = 30.0
 
     def _ping_activity(self):
         """Fire-and-forget HTTP POST to the activity ping endpoint.
@@ -442,10 +443,36 @@ class RaceServer:
                 msg_type = data.get('type')
 
                 if msg_type == 'handshake':
+                    # Extract client-supported codecs (new field, optional for backward compat)
+                    client_codecs = data.get('supported_codecs', [])
+                    self._client_supported_codecs = client_codecs
+
+                    # Determine what this server/GPU can encode
+                    server_codecs = ['jpeg']  # JPEG always available
+                    if self._nvenc_encoder and self._nvenc_encoder.is_running:
+                        server_codecs.append('h264')
+                    # AV1 NVENC encoding requires RTX 4090 (Ada Lovelace) — not yet implemented
+                    # When av1_encoder is added, check: if self._av1_encoder and self._av1_encoder.is_running:
+                    #     server_codecs.append('av1')
+
+                    # Pick the best codec both sides support
+                    # Priority order: av1 > h264 > jpeg
+                    preferred_codec = 'jpeg'
+                    codec_priority = ['av1', 'h264', 'jpeg']
+                    for codec in codec_priority:
+                        if codec in client_codecs and codec in server_codecs:
+                            preferred_codec = codec
+                            break
+
+                    if client_codecs:
+                        print(f"[codec] Client supports: {client_codecs}, server supports: {server_codecs}, preferred: {preferred_codec}")
+
                     await websocket.send(json.dumps({
                         'type': 'handshake_ack',
                         'server': 'shadow-driver-v3',
                         'models': ['carla_pilotnet', 'pilotnet', 'alpamayo'],
+                        'preferred_codec': preferred_codec,
+                        'server_codecs': server_codecs,
                     }))
 
                 elif msg_type == 'control':
@@ -740,8 +767,19 @@ class RaceServer:
             print(f"[DC] Error parsing control message: {e}")
 
     async def _handle_codec_negotiate(self, websocket, client_codecs: list):
-        """Handle codec negotiation: if client supports h264, send codec config."""
+        """Handle codec negotiation: if client supports h264, send codec config.
+
+        Also updates _client_supported_codecs for codecs reported via the legacy
+        codec_negotiate message (in case the handshake didn't include them).
+        """
         self._client_supports_h264 = 'h264' in client_codecs
+        # Merge with any codecs already known from the handshake
+        for codec in client_codecs:
+            if codec not in self._client_supported_codecs:
+                self._client_supported_codecs.append(codec)
+
+        if 'av1' in client_codecs:
+            print(f"[codec] Client supports AV1 decoding (encoder not yet available)")
 
         if self._client_supports_h264 and self._nvenc_encoder and self._nvenc_encoder.is_running:
             config = self._nvenc_encoder.codec_config
@@ -769,13 +807,17 @@ class RaceServer:
     def _handle_network_quality(self, data: dict):
         """Handle client network quality report and adapt NVENC bitrate.
 
-        Adjusts the H.264 encoder bitrate based on observed network conditions:
-        - Poor network (high jitter or drops): decrease bitrate by 20%
-        - Good network (low jitter, low drops, low RTT): increase bitrate by 10%
-        - Otherwise: maintain current bitrate
+        DISABLED: ABR restarts the NVENC encoder subprocess, which produces
+        new SPS/PPS codec headers. The server doesn't re-send these to the
+        client, causing the WebCodecs decoder to silently fail and freeze
+        the video feed. Additionally, the client's frame_drop_rate metric
+        confuses server-side frame skips with network drops, causing false
+        positive "poor network" signals that aggressively slash bitrate.
 
-        Only applies when H.264 NVENC encoding is active; ignored for JPEG fallback.
+        TODO: Fix by (1) re-sending codec_config after encoder restart, and
+        (2) computing drop rate from actual frames sent, not expected 30fps.
         """
+        return  # ABR disabled until encoder restart + codec re-send is fixed
         # Skip if NVENC is not active
         if not self._h264_enabled or not self._nvenc_encoder or not self._nvenc_encoder.is_running:
             return
@@ -791,11 +833,12 @@ class RaceServer:
 
         old_bitrate = self._current_bitrate_mbps
 
-        if jitter_ms > 50 or drop_rate > 0.1:
-            # Poor network: decrease by 20%
-            new_bitrate = self._current_bitrate_mbps * 0.8
+        if jitter_ms > 150 or drop_rate > 0.5:
+            # Poor network: decrease by 10% (conservative — frame_drop_rate
+            # includes server-side frame skips, not just network drops)
+            new_bitrate = self._current_bitrate_mbps * 0.9
             direction = 'decrease'
-        elif jitter_ms < 20 and drop_rate < 0.02 and rtt_ms < 100:
+        elif jitter_ms < 30 and drop_rate < 0.05 and rtt_ms < 100:
             # Good network: increase by 10%
             new_bitrate = self._current_bitrate_mbps * 1.1
             direction = 'increase'
@@ -828,7 +871,7 @@ class RaceServer:
         cam_cfg = self.config.get('camera', {}).get('chase', {})
         width = cam_cfg.get('width', 1920)
         height = cam_cfg.get('height', 1080)
-        encoder = NVENCEncoder(width=width, height=height, fps=30, bitrate='8M')
+        encoder = NVENCEncoder(width=width, height=height, fps=30, bitrate='20M')
 
         if encoder.start():
             self._nvenc_encoder = encoder
@@ -900,12 +943,10 @@ class RaceServer:
         """Log a single concise per-second stats line during an active race.
 
         Called from the FPS calculation block which fires every ~1 second.
-        Format: [stats] fps=18 lat=340ms q=50 res=1280x720 frame_kb=47.2 skip=3 encode_ms=5.2
+        Shows NVENC stats when H.264 is active, JPEG stats otherwise.
         """
         if not self.running or not self.race_state or self.race_state.status not in ("racing", "finishing"):
             return
-
-        perf = self.encoder.get_perf_stats()
 
         avg_lat = 0
         if self._stats_latencies:
@@ -914,9 +955,16 @@ class RaceServer:
         fps = int(round(self.fps))
         skip = self._stats_skip_count
 
-        print(f"[stats] fps={fps} lat={avg_lat}ms q={perf['quality']} "
-              f"res={perf['resolution']} frame_kb={perf['avg_frame_size_kb']:.1f} "
-              f"skip={skip} encode_ms={perf['avg_encode_ms']:.1f}")
+        if self._h264_enabled and self._nvenc_encoder and self._nvenc_encoder.is_running:
+            nvenc = self._nvenc_encoder.get_stats()
+            print(f"[stats] codec=h264 fps={fps} lat={avg_lat}ms "
+                  f"bitrate={nvenc['bitrate']} encoded={nvenc['frames_encoded']} "
+                  f"q_sz={nvenc['queue_size']} errors={nvenc['errors']} skip={skip}")
+        else:
+            perf = self.encoder.get_perf_stats()
+            print(f"[stats] codec=jpeg fps={fps} lat={avg_lat}ms q={perf['quality']} "
+                  f"res={perf['resolution']} frame_kb={perf['avg_frame_size_kb']:.1f} "
+                  f"skip={skip} encode_ms={perf['avg_encode_ms']:.1f}")
 
         # Reset per-second counters
         self._stats_frames_sent = 0
@@ -1046,6 +1094,7 @@ class RaceServer:
             self._nvenc_encoder = None
         self._h264_enabled = False
         self._client_supports_h264 = False
+        self._client_supported_codecs = []
         self._nvenc_consecutive_empty = 0
         self._nvenc_last_frame_sent = 0.0
         self._nvenc_disabled_until = 0.0
@@ -1054,7 +1103,7 @@ class RaceServer:
         self._stop_nvfbc_capture()
 
         # Reset adaptive bitrate state
-        self._current_bitrate_mbps = 8.0
+        self._current_bitrate_mbps = 20.0
         self._last_bitrate_adjust_time = 0.0
 
         # Stop training recorder if active
@@ -1910,6 +1959,16 @@ class RaceServer:
         # But only if the connection is actually established (not just negotiated)
         if self.pc is not None and self.pc.connectionState == "connected":
             return
+
+        # Respawn frame throttle: after respawn, only send every 5th frame for 500ms
+        # to prevent frame flood that crashes client FPS to 5
+        respawn_time = getattr(self.carla, '_respawn_time', 0.0)
+        if respawn_time > 0 and (time.time() - respawn_time) < 0.5:
+            self._respawn_frame_counter = getattr(self, '_respawn_frame_counter', 0) + 1
+            if self._respawn_frame_counter % 5 != 0:
+                return
+        else:
+            self._respawn_frame_counter = 0
 
         # Position-based frame skip: don't encode/send if camera hasn't moved
         if self._should_skip_frame():
