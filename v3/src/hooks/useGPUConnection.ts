@@ -418,7 +418,7 @@ export function useGPUConnection(): UseGPUConnectionReturn {
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
-      ws.onopen = () => {
+      ws.onopen = async () => {
         if (!isMountedRef.current) { ws.close(); return; }
         console.log('[v3] WebSocket connected');
         // Expose for E2E testing / browser console debugging
@@ -428,7 +428,32 @@ export function useGPUConnection(): UseGPUConnectionReturn {
         wsRetryCountRef.current = 0;
         // Persist successful WS URL for sub-3s cold start on return visits
         if (tunnelUrlRef.current) saveLastWsUrl(tunnelUrlRef.current);
-        ws.send(JSON.stringify({ type: 'handshake', client: 'shadow-driver-v3' }));
+        // Detect supported video codecs for codec negotiation
+        const supportedCodecs: string[] = ['jpeg']; // JPEG always supported as fallback
+        if (typeof VideoDecoder !== 'undefined') {
+          // H.264 Constrained Baseline (WebCodecs)
+          try {
+            const h264Result = await VideoDecoder.isConfigSupported({
+              codec: 'avc1.42C01E',
+              hardwareAcceleration: 'prefer-hardware',
+            });
+            if (h264Result.supported) supportedCodecs.push('h264');
+          } catch { /* H.264 not supported */ }
+          // AV1 Main Profile, Level 4.0, 8-bit (WebCodecs)
+          try {
+            const av1Result = await VideoDecoder.isConfigSupported({
+              codec: 'av01.0.04M.08',
+              hardwareAcceleration: 'prefer-hardware',
+            });
+            if (av1Result.supported) supportedCodecs.push('av1');
+          } catch { /* AV1 not supported */ }
+        }
+        console.log('[v3] Browser supported codecs:', supportedCodecs);
+        ws.send(JSON.stringify({
+          type: 'handshake',
+          client: 'shadow-driver-v3',
+          supported_codecs: supportedCodecs,
+        }));
         pingIntervalRef.current = setInterval(() => {
           if (ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: 'ping', timestamp: Date.now() }));
@@ -505,8 +530,13 @@ export function useGPUConnection(): UseGPUConnectionReturn {
           } else if (data.type === 'race_finished') {
             setRaceFinished(data as RaceFinished);
           } else if (data.type === 'handshake_ack') {
-            const ack = data as { models: string[] };
+            const ack = data as { models: string[]; preferred_codec?: string; server_codecs?: string[] };
             setAvailableModels(ack.models || []);
+
+            // Log server codec negotiation result
+            if (ack.preferred_codec) {
+              console.log(`[v3] Server preferred codec: ${ack.preferred_codec} (server supports: ${(ack.server_codecs || []).join(', ')})`);
+            }
 
             // WebRTC disabled: Cloudflare quick tunnels don't support UDP,
             // so WebRTC video can never connect through them. Use JPEG-over-WebSocket
@@ -515,10 +545,22 @@ export function useGPUConnection(): UseGPUConnectionReturn {
             console.log('[v3] Using JPEG-over-WebSocket for video (WebRTC disabled for tunnel compatibility)');
 
             // Codec negotiation: tell server we support H.264 WebCodecs decoding
+            // (This is the legacy codec_negotiate message; the handshake now also
+            // carries supported_codecs, but we keep this for backward compatibility
+            // with servers that haven't been updated yet.)
             if (typeof VideoDecoder !== 'undefined') {
               try {
-                ws.send(JSON.stringify({ type: 'codec_negotiate', codecs: ['h264'] }));
-                console.log('[v3] Sent codec_negotiate: h264 supported (WebCodecs available)');
+                const negotiateCodecs = ['h264'];
+                // Include AV1 if browser supports it
+                try {
+                  const av1Check = await VideoDecoder.isConfigSupported({
+                    codec: 'av01.0.04M.08',
+                    hardwareAcceleration: 'prefer-hardware',
+                  });
+                  if (av1Check.supported) negotiateCodecs.push('av1');
+                } catch { /* AV1 not supported */ }
+                ws.send(JSON.stringify({ type: 'codec_negotiate', codecs: negotiateCodecs }));
+                console.log(`[v3] Sent codec_negotiate: ${negotiateCodecs.join(', ')} (WebCodecs available)`);
               } catch (e) {
                 console.warn('[v3] Failed to send codec_negotiate:', e);
               }

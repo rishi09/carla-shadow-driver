@@ -23,8 +23,8 @@ interface VastOffer {
 }
 
 // Hosts with broken CDI/GPU device injection — skip these
-const BLOCKED_HOSTS = new Set([85323]);
-const BLOCKED_MACHINES = new Set([16146, 32581]);
+const BLOCKED_HOSTS = new Set([85323, 189245]);
+const BLOCKED_MACHINES = new Set([16146, 32581, 42700]);
 
 // v3 onstart: Vast.ai overrides Docker ENTRYPOINT, so we must launch our entrypoint from here.
 // This script is self-contained — it patches the entrypoint and installs missing deps

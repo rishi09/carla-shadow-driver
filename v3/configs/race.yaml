@@ -51,6 +51,6 @@ model:
     pilotnet: "models/pilotnet.pth"
 
 streaming:
-  jpeg_quality: 70
+  jpeg_quality: 80
   width: 1280
   height: 720

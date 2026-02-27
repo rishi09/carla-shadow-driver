@@ -150,6 +150,10 @@ export interface HandshakeAck {
   type: 'handshake_ack';
   server: string;
   models: string[];
+  /** Codec the server selected for video encoding (e.g. 'h264', 'av1', 'jpeg') */
+  preferred_codec?: string;
+  /** All codecs the server can encode with on this GPU */
+  server_codecs?: string[];
 }
 
 /** Performance stats from server (sent every ~3 seconds) */

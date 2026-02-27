@@ -20,13 +20,14 @@ interface SpeedEffectsProps {
  * Canvas speed lines are handled by SpeedLines.tsx (separate component).
  * All rapidly-changing values are stored in refs to avoid effect teardown (LEARNINGS.md pattern).
  */
-export function SpeedEffects({ speedKmh, collisions: _collisions, gear, className = '' }: SpeedEffectsProps) {
+export function SpeedEffects({ speedKmh, collisions, gear, className = '' }: SpeedEffectsProps) {
   const warpCanvasRef = useRef<HTMLCanvasElement>(null);
   const animRef = useRef<number>(0);
   const speedRef = useRef(speedKmh);
 
   // Collision pulse state (managed via refs for RAF loop)
   const collisionPulseRef = useRef(0); // 0..1, decays over time
+  const prevCollisionCountRef = useRef(0);
 
   // Gear shift flash state
   const gearFlashRef = useRef(0); // 0..1, decays
@@ -37,36 +38,37 @@ export function SpeedEffects({ speedKmh, collisions: _collisions, gear, classNam
   // Update refs on every render (no effect teardown needed)
   speedRef.current = speedKmh;
 
-  // Detect collision for pulse — disabled for high-latency playability
-  // const currentCollisionCount = collisions?.length ?? 0;
-  // if (currentCollisionCount > 0 && currentCollisionCount !== prevCollisionCountRef.current) {
-  //   const maxIntensity = Math.max(...(collisions ?? []).map(c => c.intensity));
-  //   collisionPulseRef.current = Math.min(1, maxIntensity / 800);
-  // }
-  // prevCollisionCountRef.current = currentCollisionCount;
+  // Detect collision for red edge flash
+  const currentCollisionCount = collisions?.length ?? 0;
+  if (currentCollisionCount > 0 && currentCollisionCount !== prevCollisionCountRef.current) {
+    const maxIntensity = Math.max(...(collisions ?? []).map(c => c.intensity));
+    collisionPulseRef.current = Math.min(1, maxIntensity / 800);
+  }
+  prevCollisionCountRef.current = currentCollisionCount;
 
-  // Detect gear change for flash — disabled for high-latency playability
-  // if (gear !== undefined && prevGearRef.current !== undefined && gear !== prevGearRef.current && prevGearRef.current !== 0) {
-  //   gearFlashRef.current = 0.6;
-  // }
+  // Detect gear change for brief white flash
+  if (gear !== undefined && prevGearRef.current !== undefined && gear !== prevGearRef.current && prevGearRef.current !== 0) {
+    gearFlashRef.current = 0.5;
+  }
   prevGearRef.current = gear;
 
   // --- CSS Vignette ---
   const vignetteStyle = useMemo(() => {
-    const t = Math.min(1, speedKmh / 200); // Tuned for high-latency playability
-    const baseOpacity = t * 0.7;
+    // Start vignette at ~30 km/h, full intensity at 160 km/h
+    const t = Math.min(1, speedKmh / 160);
+    const baseOpacity = t * 0.65;
 
-    if (baseOpacity < 0.03) return undefined;
+    if (baseOpacity < 0.02) return undefined;
 
-    // Red tint factor: 0 below 150 km/h, ramps to 1 at 250 km/h
-    const redFactor = Math.max(0, Math.min(1, (speedKmh - 150) / 100));
+    // Red tint factor: 0 below 120 km/h, ramps to 1 at 200 km/h
+    const redFactor = Math.max(0, Math.min(1, (speedKmh - 120) / 80));
 
-    // Blend between black vignette and red-tinted vignette
-    const r = Math.floor(redFactor * 100);
-    const opacity = Math.min(0.85, baseOpacity);
+    // Blend between dark vignette and red-tinted vignette
+    const r = Math.floor(redFactor * 80);
+    const opacity = Math.min(0.8, baseOpacity);
 
     return {
-      background: `radial-gradient(ellipse 70% 50% at 50% 50%, transparent 0%, rgba(${r},0,0,${(opacity * 0.3).toFixed(3)}) 55%, rgba(${r},0,0,${opacity.toFixed(3)}) 100%)`,
+      background: `radial-gradient(ellipse 75% 55% at 50% 50%, transparent 0%, rgba(${r},0,0,${(opacity * 0.25).toFixed(3)}) 50%, rgba(${r},0,0,${opacity.toFixed(3)}) 100%)`,
       transition: 'background 0.3s ease-out',
     };
   }, [speedKmh]);
@@ -119,14 +121,14 @@ export function SpeedEffects({ speedKmh, collisions: _collisions, gear, classNam
         setGearFlashOpacity(gearFlashRef.current);
       }
 
-      // Warp streaks only above 220 km/h // Tuned for high-latency playability
-      if (speed < 220) {
+      // Warp streaks above 150 km/h (screen-edge radial lines for speed feel)
+      if (speed < 150) {
         warpLines.length = 0;
         animRef.current = requestAnimationFrame(draw);
         return;
       }
 
-      const warpIntensity = Math.min(1, (speed - 220) / 120); // 0 at 220, 1 at 340
+      const warpIntensity = Math.min(1, (speed - 150) / 100); // 0 at 150, 1 at 250
       const centerX = w / 2;
       const centerY = h / 2;
       const maxRadius = Math.sqrt(centerX * centerX + centerY * centerY);

@@ -15,7 +15,7 @@ from typing import Optional, Tuple, Dict
 
 # Absolute bounds for adaptive quality (never go outside these)
 MIN_QUALITY = 25
-MAX_QUALITY = 75
+MAX_QUALITY = 90
 
 # Latency thresholds and target qualities
 # Format: (latency_threshold, target_quality, target_width, target_height)
@@ -318,7 +318,7 @@ class FrameEncoder:
     # ---------------------------------------------------------------
 
     def _check_auto_reduce(self):
-        """Auto-reduce quality if average encode time exceeds 15ms.
+        """Auto-reduce quality if average encode time exceeds 25ms.
 
         Only checks when we have enough samples (at least 10 frames).
         Reduces quality by 5 per check, down to MIN_QUALITY.
@@ -327,12 +327,12 @@ class FrameEncoder:
             return
 
         avg_encode = sum(self._encode_times) / len(self._encode_times)
-        if avg_encode > 15.0 and self.quality > MIN_QUALITY:
+        if avg_encode > 25.0 and self.quality > MIN_QUALITY:
             old_q = self.quality
             self.quality = max(MIN_QUALITY, self.quality - 5)
             self.encode_params = [cv2.IMWRITE_JPEG_QUALITY, self.quality]
             self._perf_auto_reduced = True
-            print(f"[perf-auto] avg encode {avg_encode:.1f}ms > 15ms, "
+            print(f"[perf-auto] avg encode {avg_encode:.1f}ms > 25ms, "
                   f"quality {old_q}->{self.quality}")
 
     def get_perf_stats(self) -> Dict:

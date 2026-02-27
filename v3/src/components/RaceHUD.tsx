@@ -332,8 +332,8 @@ function CountdownOverlay({ countdown }: { countdown: number }) {
         }
       `}</style>
 
-      {/* Dim background during countdown -- slightly darker */}
-      <div className="absolute inset-0 bg-black/40" />
+      {/* Subtle dim during countdown */}
+      <div className="absolute inset-0 bg-black/15" />
 
       {/* GO shake wrapper */}
       <div
@@ -359,23 +359,23 @@ function CountdownOverlay({ countdown }: { countdown: number }) {
           />
         </div>
 
-        {/* Radial gradient flash behind number */}
+        {/* Subtle radial glow behind number */}
         {animPhase === 1 && !isGo && (
           <div
-            className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] h-[400px] rounded-full pointer-events-none"
+            className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[300px] h-[300px] rounded-full pointer-events-none"
             style={{
-              background: `radial-gradient(circle, ${color}30 0%, ${color}10 40%, transparent 70%)`,
+              background: `radial-gradient(circle, ${color}15 0%, ${color}08 40%, transparent 70%)`,
               animation: 'flash-burst 0.7s ease-out forwards',
             }}
           />
         )}
 
-        {/* Bright flash on GO */}
+        {/* Subtle glow on GO */}
         {isGo && animPhase === 1 && (
           <div
-            className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] rounded-full pointer-events-none"
+            className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] h-[400px] rounded-full pointer-events-none"
             style={{
-              background: 'radial-gradient(circle, rgba(76,175,80,0.5) 0%, rgba(76,175,80,0.2) 30%, transparent 60%)',
+              background: 'radial-gradient(circle, rgba(76,175,80,0.15) 0%, rgba(76,175,80,0.05) 30%, transparent 60%)',
               animation: 'go-flash 0.6s ease-out forwards',
             }}
           />
@@ -388,7 +388,7 @@ function CountdownOverlay({ countdown }: { countdown: number }) {
             style={{
               fontSize: 'clamp(8rem, 20vw, 14rem)',
               color,
-              textShadow: `0 0 60px ${color}AA, 0 0 120px ${color}60, 0 4px 8px rgba(0,0,0,0.5)`,
+              textShadow: `0 0 30px ${color}60, 0 4px 8px rgba(0,0,0,0.5)`,
               animation: animPhase === 1 ? 'go-text 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards' : 'none',
               opacity: animPhase === 0 ? 0 : 1,
               letterSpacing: '0.05em',
@@ -402,7 +402,7 @@ function CountdownOverlay({ countdown }: { countdown: number }) {
             style={{
               fontSize: 'clamp(10rem, 25vw, 16rem)',
               color,
-              textShadow: `0 0 60px ${color}AA, 0 0 120px ${color}60, 0 4px 8px rgba(0,0,0,0.5)`,
+              textShadow: `0 0 30px ${color}60, 0 4px 8px rgba(0,0,0,0.5)`,
               animation: animPhase === 1 ? 'countdown-slam 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards' : 'none',
               opacity: animPhase === 0 ? 0 : 1,
             }}
