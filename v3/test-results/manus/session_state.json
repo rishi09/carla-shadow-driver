@@ -1,0 +1,28 @@
+{
+  "current_iteration": 2,
+  "started_at": "2026-02-27T05:43:00Z",
+  "manus_project_id": "Xfvq7icVRENVZVZRu2Bawb",
+  "last_manus_task_id": "7eCJ3DmWAHkhSgd8rqEjGn",
+  "last_manus_score": 6,
+  "last_test_scenario": "full",
+  "infrastructure": {
+    "vast_ai_host": "ssh3.vast.ai",
+    "vast_ai_port": 16740,
+    "ssh_tunnel_port": 8765,
+    "vite_port": 5173,
+    "cdp_port": 9222
+  },
+  "test_cases": {
+    "acceleration_130kmh": true,
+    "braking_works": true,
+    "reverse_entry": true,
+    "reverse_steer_right": true,
+    "reverse_steer_left": true,
+    "exit_reverse": true,
+    "auto_unstuck": false,
+    "no_weather_flash": false,
+    "all_hud_visible": true,
+    "fps_stable_25plus": true,
+    "countdown_works": true
+  }
+}

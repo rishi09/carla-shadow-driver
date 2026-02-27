@@ -13,12 +13,19 @@ Environment:
     GAME_URL       - Game URL (default: http://localhost:5173/race?ws=ws://localhost:8765)
 
 Architecture:
-    - Creates a Manus task with a detailed test prompt
-    - Manus controls the user's local Chrome via CDP (localhost URLs work)
+    - Creates a Manus task with a detailed test prompt via the Manus API
+    - Manus opens the localhost game URL in its browser environment
+    - ALWAYS use localhost URLs (http://localhost:5173/race?ws=ws://localhost:8765)
+    - Do NOT use Cloudflare tunnels for testing (too much latency, 800ms+)
+    - Manus can: hard refresh, use keyboard controls, take video at high FPS
     - Polls for task completion, parses structured JSON report
     - Saves results to v3/test-results/manus/
     - Compares against previous runs for regression detection
-    - Same Manus session ID is reused across loops for change tracking
+
+Prerequisites:
+    - SSH tunnel active: ssh -N -L 8765:localhost:8765 -p PORT root@HOST
+    - Vite dev server running: cd v3 && npx vite --host
+    - Game accessible at http://localhost:5173/race?ws=ws://localhost:8765
 """
 
 import argparse

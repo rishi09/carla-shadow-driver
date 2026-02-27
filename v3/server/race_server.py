@@ -1391,7 +1391,11 @@ class RaceServer:
 
         self.race_director = RaceDirector(difficulty=self.difficulty)
         self.mistake_generator = AIMistakeGenerator(difficulty=self.difficulty)
-        self.weather_manager = WeatherTransitionManager(weather, total_laps=laps)
+        # WeatherTransitionManager DISABLED — it overrides sun_altitude to -5° at race
+        # start (hardcoded sunrise arc), causing a dark flash at t=0.5-2.5s when the
+        # race begins at noon (75°). The event-driven WeatherManager provides sufficient
+        # dynamic weather without fighting the initial time-of-day settings.
+        self.weather_manager = None
         self.weather_mood = WeatherMoodManager(total_laps=laps)
         self.trash_talk = TrashTalkManager()
         self.ai_personality = AIPersonality()

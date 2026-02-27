@@ -1,0 +1,96 @@
+{
+  "bugs": [
+    {
+      "id": "wall_crash_no_recovery",
+      "description": "Car crashes into walls/fences and gets stuck for 11-19s",
+      "severity": "critical",
+      "first_seen": "2026-02-27T05:15:00Z",
+      "last_seen": "2026-02-27T06:30:00Z",
+      "status": "fixing",
+      "fix_attempts": 2,
+      "fix_description": "Iter 1: threshold 4s→3s, drift 45°→30°. Iter 2: disabled unstuck during reverse, but forward stuck still slow",
+      "source": "manus_test_7eCJ3DmWAHkhSgd8rqEjGn"
+    },
+    {
+      "id": "weather_flash",
+      "description": "Sudden brightness flash. Was daytime→nighttime from WeatherTransitionManager sun path. Now: black screen 0-3.25s from stream init.",
+      "severity": "major",
+      "first_seen": "2026-02-27T05:15:00Z",
+      "last_seen": "2026-02-27T06:30:00Z",
+      "status": "partially_fixed",
+      "fix_attempts": 1,
+      "fix_description": "Disabled WeatherTransitionManager (was overriding sun_altitude to -5° at start). Remaining: 3.25s black screen from cloud stream initialization.",
+      "source": "manus_test_7eCJ3DmWAHkhSgd8rqEjGn"
+    },
+    {
+      "id": "steering_weak_cornering",
+      "description": "CDP test script steering alternates too fast during cornering, car crashes every turn",
+      "severity": "major",
+      "first_seen": "2026-02-27T05:15:00Z",
+      "last_seen": "2026-02-27T05:15:00Z",
+      "status": "fixed",
+      "fix_attempts": 1,
+      "fix_description": "Increased steering hold duration from 600ms to 2s per direction",
+      "source": "manus_test_gMJzJB5J5zLYjocqJTiTwx"
+    },
+    {
+      "id": "latency_spike_160ms",
+      "description": "Network latency 162-198ms throughout test (SSH tunnel overhead)",
+      "severity": "minor",
+      "first_seen": "2026-02-27T05:15:00Z",
+      "last_seen": "2026-02-27T06:30:00Z",
+      "status": "monitoring",
+      "fix_attempts": 0,
+      "fix_description": null,
+      "source": "manus_test_7eCJ3DmWAHkhSgd8rqEjGn"
+    },
+    {
+      "id": "reverse_stuck_on_fence",
+      "description": "Car enters reverse correctly (gear -1, 23-39 km/h) but crashes into nearby fence/wall within 3s and gets stuck",
+      "severity": "major",
+      "first_seen": "2026-02-27T06:30:00Z",
+      "last_seen": "2026-02-27T06:30:00Z",
+      "status": "investigating",
+      "fix_attempts": 0,
+      "fix_description": null,
+      "source": "manus_test_7eCJ3DmWAHkhSgd8rqEjGn"
+    },
+    {
+      "id": "stream_init_black_screen",
+      "description": "Screen is completely black for first 3.25s while cloud video stream initializes",
+      "severity": "major",
+      "first_seen": "2026-02-27T06:30:00Z",
+      "last_seen": "2026-02-27T06:30:00Z",
+      "status": "investigating",
+      "fix_attempts": 0,
+      "fix_description": null,
+      "source": "manus_test_7eCJ3DmWAHkhSgd8rqEjGn"
+    }
+  ],
+  "test_history": [
+    {
+      "iteration": 0,
+      "date": "2026-02-27T05:15:00Z",
+      "manus_task_id": "gMJzJB5J5zLYjocqJTiTwx",
+      "scenario": "speed",
+      "overall_score": 4,
+      "bug_count": 8,
+      "fps_avg": 30,
+      "max_speed": 123,
+      "working": ["all_hud_visible", "fps_stable", "countdown", "acceleration_basic", "gear_shifts"],
+      "broken": ["wall_crashes", "steering_cornering", "weather_flash", "auto_unstuck"]
+    },
+    {
+      "iteration": 1,
+      "date": "2026-02-27T06:30:00Z",
+      "manus_task_id": "7eCJ3DmWAHkhSgd8rqEjGn",
+      "scenario": "full",
+      "overall_score": 6,
+      "bug_count": 5,
+      "fps_avg": 25,
+      "max_speed": 144,
+      "working": ["acceleration_130kmh", "braking", "reverse_entry", "exit_reverse", "all_hud", "fps_stable", "countdown", "gear_indicator"],
+      "broken": ["auto_unstuck_slow", "stream_init_black_screen", "reverse_stuck_fence"]
+    }
+  ]
+}
