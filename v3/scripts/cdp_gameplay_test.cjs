@@ -354,12 +354,14 @@ const SCENARIOS = {
 // Video Recording (screencast frames → mp4 via ffmpeg)
 // ---------------------------------------------------------------------------
 class ScreencastRecorder {
-  constructor(cdp, outputDir) {
+  constructor(cdp, outputDir, duration = 75) {
     this.cdp = cdp;
     this.outputDir = outputDir;
     this.framesDir = path.join(outputDir, '_frames');
     this.frameCount = 0;
     this.recording = false;
+    // For long tests (>120s), reduce capture rate to avoid OOM
+    this.everyNthFrame = duration > 120 ? 3 : 1;
   }
 
   async start() {
@@ -379,13 +381,13 @@ class ScreencastRecorder {
       } catch { /* ignore ack errors */ }
     });
 
-    // Start screencast: JPEG format, every frame for smooth video
+    // Start screencast: JPEG format
     await this.cdp.send('Page.startScreencast', {
       format: 'jpeg',
       quality: 75,
       maxWidth: 1280,
       maxHeight: 720,
-      everyNthFrame: 1, // Capture every frame for accurate FPS measurement
+      everyNthFrame: this.everyNthFrame,
     });
 
     console.log('Video recording started');
@@ -534,7 +536,7 @@ async function runTest(scenario, options = {}) {
   console.log('\n--- Starting gameplay ---');
 
   // Start video recording
-  const recorder = new ScreencastRecorder(cdp, screenshotDir);
+  const recorder = new ScreencastRecorder(cdp, screenshotDir, duration);
   await recorder.start();
 
   while (true) {
