@@ -296,12 +296,18 @@ async function setLocalStoragePlayed(cdp) {
 const SCENARIOS = {
   full: {
     name: 'Full Gameplay Test',
-    duration: 60,
+    duration: 75,
     phases: [
-      { name: 'forward_driving', start: 0, end: 30, keys: ['w'], description: 'Drive forward, steer around obstacles' },
-      { name: 'braking', start: 30, end: 40, keys: ['s'], description: 'Test braking from speed' },
-      { name: 'reverse', start: 40, end: 50, keys: ['s'], description: 'Test reverse after stopping' },
-      { name: 'exit_reverse', start: 50, end: 60, keys: ['w'], description: 'Exit reverse, drive forward again' },
+      { name: 'forward_driving', start: 0, end: 25, keys: ['w'], description: 'Drive forward, steer around obstacles' },
+      { name: 'coast_down', start: 25, end: 28, keys: [], description: 'Release throttle to coast down' },
+      { name: 'braking', start: 28, end: 35, keys: ['s'], description: 'Brake from lower speed' },
+      { name: 'respawn_before_reverse', start: 35, end: 37, keys: ['r'], description: 'Respawn to clear road for reverse test' },
+      { name: 'wait_after_respawn', start: 37, end: 39, keys: [], description: 'Wait for respawn to settle' },
+      { name: 'reverse_straight', start: 39, end: 46, keys: ['s'], description: 'Reverse straight back' },
+      { name: 'reverse_steer_right', start: 46, end: 50, keys: ['s', 'd'], description: 'Reverse + steer right' },
+      { name: 'reverse_steer_left', start: 50, end: 54, keys: ['s', 'a'], description: 'Reverse + steer left' },
+      { name: 'exit_reverse', start: 54, end: 60, keys: ['w'], description: 'Exit reverse, drive forward' },
+      { name: 'forward_resume', start: 60, end: 75, keys: ['w'], description: 'Drive forward to confirm recovery' },
     ],
   },
   reverse: {
@@ -541,11 +547,19 @@ async function runTest(scenario, options = {}) {
       // Hold each direction longer (2s each = 10 ticks at 200ms) for actual cornering
       if (steerToggle % 20 < 10) targetKeys.add('a');
       else targetKeys.add('d');
-    } else if (phase && phase.name === 'forward_driving') {
+    } else if (phase && (phase.name === 'forward_driving' || phase.name === 'forward_resume')) {
       // Periodically steer to avoid walls — hold direction longer
       steerToggle++;
       if (steerToggle % 30 < 5) targetKeys.add('a');
       else if (steerToggle % 30 < 10) targetKeys.add('d');
+    }
+
+    // Handle respawn as a single tap (not a hold)
+    if (phase && phase.name === 'respawn_before_reverse' && !phase._respawnDone) {
+      targetKeys.delete('r'); // Don't hold R, just tap it
+      await pressKey(cdp, 'r', 100);
+      phase._respawnDone = true;
+      console.log('[RESPAWN] Sent R key tap for clean reverse test');
     }
 
     // Release keys no longer needed
