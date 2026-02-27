@@ -341,6 +341,13 @@ const SCENARIOS = {
       { name: 'fast_drive', start: 15, end: 20, keys: ['w'], description: 'Fast drive - check all HUD' },
     ],
   },
+  twolap: {
+    name: 'Two Lap Full Game Test',
+    duration: 600,
+    phases: [
+      { name: 'forward_driving', start: 0, end: 600, keys: ['w'], description: 'Drive 2 full laps with auto-steering' },
+    ],
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -372,13 +379,13 @@ class ScreencastRecorder {
       } catch { /* ignore ack errors */ }
     });
 
-    // Start screencast: JPEG format, reasonable quality, at ~10fps
+    // Start screencast: JPEG format, every frame for smooth video
     await this.cdp.send('Page.startScreencast', {
       format: 'jpeg',
-      quality: 80,
+      quality: 75,
       maxWidth: 1280,
       maxHeight: 720,
-      everyNthFrame: 3, // ~10fps from Chrome's paint cycle
+      everyNthFrame: 1, // Capture every frame for accurate FPS measurement
     });
 
     console.log('Video recording started');
@@ -418,7 +425,7 @@ class ScreencastRecorder {
         const sshOpts = '-o StrictHostKeyChecking=no -o ConnectTimeout=10';
         execSync(`ssh ${sshOpts} -p 16740 root@ssh3.vast.ai "rm -rf /tmp/video_frames; mkdir -p /tmp/video_frames"`, { timeout: 15000, stdio: 'ignore' });
         execSync(`scp ${sshOpts} -P 16740 "${tarFile}" root@ssh3.vast.ai:/tmp/video_frames.tar.gz`, { timeout: 300000 });
-        execSync(`ssh ${sshOpts} -p 16740 root@ssh3.vast.ai 'rm -rf /tmp/video_frames; mkdir -p /tmp/video_frames && cd /tmp/video_frames && tar xzf /tmp/video_frames.tar.gz && ffmpeg -y -framerate 19 -i "frame_%05d.jpg" -c:v libx264 -pix_fmt yuv420p -preset fast -crf 23 /tmp/test_video.mp4 2>/dev/null'`, { timeout: 120000 });
+        execSync(`ssh ${sshOpts} -p 16740 root@ssh3.vast.ai 'rm -rf /tmp/video_frames; mkdir -p /tmp/video_frames && cd /tmp/video_frames && tar xzf /tmp/video_frames.tar.gz && ffmpeg -y -framerate 30 -i "frame_%05d.jpg" -c:v libx264 -pix_fmt yuv420p -preset fast -crf 23 /tmp/test_video.mp4 2>/dev/null'`, { timeout: 120000 });
         execSync(`scp ${sshOpts} -P 16740 root@ssh3.vast.ai:/tmp/test_video.mp4 "${outputFile}"`, { timeout: 120000 });
         execSync(`ssh ${sshOpts} -p 16740 root@ssh3.vast.ai 'rm -rf /tmp/video_frames /tmp/video_frames.tar.gz /tmp/test_video.mp4'`, { timeout: 10000, stdio: 'ignore' });
         console.log(`Video saved (via remote ffmpeg): ${outputFile} (${this.frameCount} frames)`);
