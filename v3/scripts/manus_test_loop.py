@@ -47,7 +47,7 @@ BUG_TRACKER_PATH = RESULTS_DIR / "bug_tracker.json"
 SESSION_STATE_PATH = RESULTS_DIR / "session_state.json"
 
 # How long to wait for Manus to complete a test (seconds)
-MANUS_TIMEOUT = 600  # 10 minutes
+MANUS_TIMEOUT = 900  # 15 minutes (Manus browser tasks take 5-10 minutes)
 MANUS_POLL_INTERVAL = 10  # seconds between status checks
 
 # ---------------------------------------------------------------------------

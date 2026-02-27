@@ -135,18 +135,18 @@ class RaceManager:
         # Per-preset camera attribute configurations
         self._postprocess_presets = {
             'cinematic': {
-                # Motion blur: subtle but visible at speed
-                'motion_blur_intensity': '0.25',
+                # Motion blur: visible at speed, helps H.264 with temporal aliasing
+                'motion_blur_intensity': '0.30',
                 'motion_blur_max_distortion': '0.25',
-                'motion_blur_min_object_screen_size': '0.1',
-                # Bloom: warm cinematic glow
-                'bloom_intensity': '0.5',
-                # Lens flare: subtle
-                'lens_flare_intensity': '0.05',
-                # Depth of field: focus 10m ahead, shallow aperture
-                'focal_distance': '1000.0',   # cm (10 meters)
-                'fstop': '2.8',               # shallow DoF
-                'blade_count': '5',           # bokeh shape
+                'motion_blur_min_object_screen_size': '0.05',
+                # Bloom: dramatic glow on sun, headlights, brake lights
+                'bloom_intensity': '0.85',
+                # Lens flare: visible hexagonal aperture flare at sunset
+                'lens_flare_intensity': '0.20',
+                # Depth of field: focus 8m ahead, shallow aperture for GT7-style bokeh
+                'focal_distance': '800.0',    # cm (8 meters — car hood to near road)
+                'fstop': '2.5',               # shallow DoF — sharp car, soft background
+                'blade_count': '5',           # pentagonal bokeh (cinematic, not circular)
                 # Tone mapping: S-curve for cinematic contrast
                 'slope': '0.88',              # S-curve steepness
                 'toe': '0.55',                # Dark crush
@@ -388,6 +388,7 @@ class RaceManager:
             'rain': carla.WeatherParameters.MidRainyNoon,
             'storm': carla.WeatherParameters.HardRainNoon,
             'sunset': carla.WeatherParameters.ClearSunset,
+            'golden_hour': carla.WeatherParameters.ClearSunset,
             'night': carla.WeatherParameters.ClearNight,
         }
         weather_params = presets.get(weather, carla.WeatherParameters.ClearNoon)
@@ -399,7 +400,7 @@ class RaceManager:
     def _apply_atmospheric_effects(self):
         """Apply cinematic atmospheric effects to the current weather.
 
-        Adds subtle depth haze, sun glare/godrays, and wet road reflections
+        Adds depth haze, sun glare/godrays, and wet road reflections
         to improve visual quality in every weather condition. These effects
         are additive -- they enhance the existing weather preset without
         overriding its core parameters (sun position, cloudiness, rain, etc.).
@@ -408,15 +409,15 @@ class RaceManager:
             return
         try:
             weather = self.world.get_weather()
-            # Atmospheric haze: adds depth/distance effect
-            weather.scattering_intensity = 0.5
+            # Atmospheric haze: visible depth layers for cinematic separation
+            weather.scattering_intensity = 0.8
             # Sun glare / godrays through atmosphere
-            weather.mie_scattering_scale = 0.03
+            weather.mie_scattering_scale = 0.06
             # Wet road reflections (even in clear weather for realism)
             # Only boost if the preset hasn't already set a higher value
-            weather.precipitation_deposits = max(weather.precipitation_deposits, 30.0)
-            # Subtle road sheen
-            weather.wetness = max(weather.wetness, 20.0)
+            weather.precipitation_deposits = max(weather.precipitation_deposits, 60.0)
+            # Road sheen for reflections
+            weather.wetness = max(weather.wetness, 40.0)
             self.world.set_weather(weather)
         except Exception as e:
             print(f"Failed to apply atmospheric effects: {e}")
@@ -548,6 +549,18 @@ class RaceManager:
                 'fog_density': 5.0,
                 'wind_intensity': 30.0,
                 'wetness': 80.0,
+            },
+            'golden_hour': {
+                # Dramatic low-angle sun creates long shadows + lens flare + atmospheric haze.
+                # Wet road reflects the orange sky — the "GT7 photomode" look.
+                'sun_altitude_angle': 8.0,      # Very low sun for long shadows
+                'sun_azimuth_angle': 250.0,     # West — car lit from the side (dramatic)
+                'cloudiness': 55.0,             # Clouds catch the orange color
+                'precipitation': 0.0,
+                'precipitation_deposits': 75.0, # Wet road for sky reflections
+                'fog_density': 3.0,             # Slight haze for depth separation
+                'wind_intensity': 0.0,
+                'wetness': 50.0,                # Road sheen
             },
         }
 
@@ -880,6 +893,7 @@ class RaceManager:
 
         # --- Off-road steering nudge ---
         road_nudge = self._get_road_nudge()
+        self._last_nudge_active = road_nudge != 0.0
         if road_nudge != 0.0:
             final_steer = max(-1.0, min(1.0, final_steer + road_nudge))
 
@@ -950,14 +964,25 @@ class RaceManager:
 
         # --- Auto-unstuck: respawn if car is stuck for >4 seconds ---
         # Detects when car is stationary and facing wrong direction (e.g. after wall crash)
+        # Also detects when car is grinding along a wall (moving but not progressing)
         dt = 1.0 / 30.0
-        if speed_kmh < 2.0 and abs(self._drift_angle) > 45.0:
+        stuck_stationary = speed_kmh < 2.0 and abs(self._drift_angle) > 45.0
+        # Wall grind detection: car is moving but hasn't progressed toward
+        # the next checkpoint in >8 seconds (road nudge is active + speed > 5)
+        off_road = hasattr(self, '_last_nudge_active') and self._last_nudge_active
+        wall_grind = speed_kmh > 5.0 and off_road and self._stuck_timer > 8.0
+        if stuck_stationary or (off_road and speed_kmh < 5.0):
             self._stuck_timer += dt
             if self._stuck_timer > 4.0:
                 print(f"[UNSTUCK] Car stuck for {self._stuck_timer:.1f}s "
                       f"(spd={speed_kmh:.1f}, drift={self._drift_angle:.1f}°) — auto-respawning")
                 self.respawn_player()
                 self._stuck_timer = 0.0
+        elif wall_grind:
+            print(f"[UNSTUCK] Wall grind for {self._stuck_timer:.1f}s "
+                  f"(spd={speed_kmh:.1f}, off-road) — auto-respawning")
+            self.respawn_player()
+            self._stuck_timer = 0.0
         else:
             self._stuck_timer = 0.0
         if self._ctrl_frame % 30 == 0:

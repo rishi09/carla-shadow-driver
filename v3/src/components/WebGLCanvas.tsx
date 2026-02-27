@@ -126,7 +126,7 @@ void main() {
   vec3 color = blurredColor;
   float edgeDist = length(uv - 0.5) * 2.0; // used by vignette below
 
-  // --- 3. Color grading --- subtle cinematic warmth
+  // --- 3b. Color grading --- subtle cinematic warmth
   // Lift (shadows): very slight warm push
   vec3 lift = vec3(0.01, 0.005, -0.005);
   // Gain (highlights): slight warm/cool split
@@ -145,16 +145,35 @@ void main() {
   float saturation = 1.15; // cinematic saturation boost
   color = mix(vec3(luma), color, saturation);
 
-  // --- 4. Vignette --- (subtle darkening at edges for cinematic feel)
+  // --- 4. ACES Filmic Tone Mapping (Narkowicz 2016 approximation) ---
+  // Produces the signature filmic color response used by UE4/GT7/Forza:
+  // compresses highlights, crushes blacks, adds cinematic S-curve
+  color *= 1.05; // slight exposure bump before tone mapping
+  float a = 2.51;
+  float b = 0.03;
+  float c = 2.43;
+  float d = 0.59;
+  float e = 0.14;
+  color = clamp((color * (a * color + b)) / (color * (c * color + d) + e), 0.0, 1.0);
+
+  // --- 5. Contrast-Adaptive Sharpening (counteracts H.264 softness) ---
+  vec2 pixelSize = 1.0 / vec2(textureSize(u_frame, 0));
+  vec3 n = texture(u_frame, uv + vec2(0.0, pixelSize.y)).rgb;
+  vec3 s = texture(u_frame, uv - vec2(0.0, pixelSize.y)).rgb;
+  vec3 ee = texture(u_frame, uv + vec2(pixelSize.x, 0.0)).rgb;
+  vec3 w = texture(u_frame, uv - vec2(pixelSize.x, 0.0)).rgb;
+  vec3 minVal = min(min(n, s), min(ee, w));
+  vec3 maxVal = max(max(n, s), max(ee, w));
+  vec3 amp = clamp((maxVal - minVal) * 0.5, 0.0, 1.0);
+  float sharpness = 0.25; // conservative to avoid amplifying compression noise
+  color += amp * sharpness * (color - (n + s + ee + w) * 0.25);
+  color = clamp(color, 0.0, 1.0);
+
+  // --- 6. Vignette --- (subtle darkening at edges for cinematic feel)
   float vignetteRadius = mix(0.85, 0.65, t);
   float vignetteSoft = 0.45;
   float vignette = smoothstep(vignetteRadius, vignetteRadius + vignetteSoft, edgeDist);
   color *= 1.0 - vignette * mix(0.20, 0.40, t);
-
-  // --- 5. Film grain --- (disabled for high-latency playability)
-  // float grainStrength = mix(0.02, 0.06, t);
-  // float grain = hash(uv * 1000.0 + u_time * 60.0) - 0.5;
-  // color += grain * grainStrength;
 
   // Final clamp
   color = clamp(color, 0.0, 1.0);
@@ -369,12 +388,18 @@ export function WebGLCanvas({ onBinaryFrame, onH264Frame, onCodecConfig, classNa
 
         const { width, height } = getFrameSize(pending);
 
-        // Resize canvas to match frame if needed
+        // Resize canvas to match its CSS display size (not the frame size).
+        // This ensures the WebGL viewport fills the entire visible area.
+        // The texture will be stretched by the shader to fill the viewport.
         const canvas2 = canvasRef.current;
-        if (canvas2 && (canvas2.width !== width || canvas2.height !== height)) {
-          canvas2.width = width;
-          canvas2.height = height;
-          gl.viewport(0, 0, width, height);
+        if (canvas2) {
+          const displayWidth = canvas2.clientWidth || canvas2.offsetWidth || 1280;
+          const displayHeight = canvas2.clientHeight || canvas2.offsetHeight || 720;
+          if (canvas2.width !== displayWidth || canvas2.height !== displayHeight) {
+            canvas2.width = displayWidth;
+            canvas2.height = displayHeight;
+            gl.viewport(0, 0, displayWidth, displayHeight);
+          }
         }
 
         // Copy current texture -> previous texture before uploading new frame

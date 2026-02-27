@@ -69,10 +69,11 @@ class NVENCEncoder:
         self._restart_lock = threading.Lock()  # serialize restart operations
 
     def _compute_bufsize(self) -> str:
-        """Compute minimum VBV buffer size = bitrate / fps.
+        """Compute VBV buffer size = 2 * bitrate / fps.
 
-        This gives the smallest possible buffer for lowest latency.
-        E.g., 8M at 30fps -> 266666 -> '266k'
+        Two-frame buffer gives the encoder room to burst on complex frames
+        (fast camera pans, turns) while keeping latency under 67ms at 30fps.
+        E.g., 20M at 30fps -> 1333333 -> '1333k'
         """
         # Parse bitrate string like '8M', '2M', '12M', '500k'
         br = self.bitrate.strip()
@@ -82,7 +83,7 @@ class NVENCEncoder:
             bits = float(br[:-1]) * 1_000
         else:
             bits = float(br)
-        buf = int(bits / max(self.fps, 1))
+        buf = int(bits * 2 / max(self.fps, 1))
         if buf >= 1_000_000:
             return f'{buf // 1_000_000}M'
         elif buf >= 1_000:
@@ -142,7 +143,8 @@ class NVENCEncoder:
             '-bf', '0',              # No B-frames (latency)
             '-rc-lookahead', '0',    # No lookahead (latency)
             '-zerolatency', '1',     # Zero-latency mode
-            '-g', '60',              # Keyframe every 2 seconds at 30fps
+            '-flags', '+cgop',       # Closed GOP: each GOP independently decodable
+            '-g', '15',              # Keyframe every 0.5s at 30fps (2x faster error recovery)
             '-f', 'h264',            # Raw H.264 bitstream output
             'pipe:1',
         ]
@@ -322,7 +324,8 @@ class NVENCEncoder:
                 '-bf', '0',
                 '-rc-lookahead', '0',
                 '-zerolatency', '1',
-                '-g', '60',
+                '-g', '15',
+                '-flags', '+cgop',
                 '-f', 'h264',
                 'pipe:1',
             ]
