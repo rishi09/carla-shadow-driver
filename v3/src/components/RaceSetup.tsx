@@ -17,9 +17,9 @@ interface TrackOption {
 }
 
 const TRACKS: TrackOption[] = [
+  { id: 'Town04', name: 'Town04', description: 'Highway circuit - long straights with a small town section' },
   { id: 'Town05', name: 'Town05', description: 'Urban grid - wide multilane roads, many intersections' },
   { id: 'Town03', name: 'Town03', description: 'Mixed town - suburban streets and highway' },
-  { id: 'Town04', name: 'Town04', description: 'Highway circuit - long straights with a small town section' },
   { id: 'Town01', name: 'Town01', description: 'Small town - river crossings, bridges, moderate intersections' },
   { id: 'Town02', name: 'Town02', description: 'Residential - narrow winding streets, tight corners (Hard)' },
   { id: 'Town10HD', name: 'Town10HD', description: 'Downtown city - dense skyscraper blocks, tight turns (Hard)' },
@@ -99,7 +99,7 @@ const VISUAL_STYLE_OPTIONS: VisualStyleOption[] = [
 ];
 
 // Sensible defaults for the best first impression
-const DEFAULT_TRACK = 'Town05';
+const DEFAULT_TRACK = 'Town04';
 const DEFAULT_LAPS = 2;
 const DEFAULT_WEATHER = 'clear';
 const DEFAULT_MODEL = 'carla_pilotnet';
@@ -170,7 +170,7 @@ export function RaceSetup({ onStartRace, onBack, quickstart, isConnected, urlSet
         <div className="flex flex-col items-center gap-4">
           <div className="w-12 h-12 rounded-full border-2 border-white/20 border-t-green-400" style={{ animation: 'spin 0.8s linear infinite' }} />
           <span className="text-white text-xl font-bold">Starting race...</span>
-          <span className="text-white/40 text-sm">Loading Town05 with defaults</span>
+          <span className="text-white/40 text-sm">Loading Town04 with defaults</span>
           <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
         </div>
       </div>
