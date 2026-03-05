@@ -206,10 +206,13 @@ export function WebGLCanvas({ onBinaryFrame, onH264Frame, onCodecConfig, classNa
   const startTimeRef = useRef<number>(performance.now());
   const speedRef = useRef<number>(0);
   const [hasFirstFrame, setHasFirstFrame] = useState(false);
+  const [decoderReady, setDecoderReady] = useState(false);
+  const [startupElapsedMs, setStartupElapsedMs] = useState(0);
   const firstFrameReceivedRef = useRef(false);
   const textureInitializedRef = useRef(false);
   const prevTexInitRef = useRef(false);
   const hasUploadedAnyFrameRef = useRef(false);
+  const startupBeginRef = useRef<number>(Date.now());
 
   // WebCodecs H.264 decoder state
   const decoderRef = useRef<VideoDecoder | null>(null);
@@ -219,6 +222,23 @@ export function WebGLCanvas({ onBinaryFrame, onH264Frame, onCodecConfig, classNa
   // Keep speed/steer refs in sync without triggering effect re-runs
   speedRef.current = speedKmh;
   void steer;
+
+  useEffect(() => {
+    startupBeginRef.current = Date.now();
+    setStartupElapsedMs(0);
+
+    if (hasFirstFrame) return;
+
+    const interval = setInterval(() => {
+      if (firstFrameReceivedRef.current) {
+        clearInterval(interval);
+        return;
+      }
+      setStartupElapsedMs(Date.now() - startupBeginRef.current);
+    }, 250);
+
+    return () => clearInterval(interval);
+  }, [hasFirstFrame]);
 
   const initGL = useCallback((canvas: HTMLCanvasElement): boolean => {
     const gl = canvas.getContext('webgl2', { alpha: false, antialias: false, premultipliedAlpha: false, preserveDrawingBuffer: true });
@@ -482,6 +502,7 @@ export function WebGLCanvas({ onBinaryFrame, onH264Frame, onCodecConfig, classNa
             console.error('[WebGLCanvas] VideoDecoder error:', err.message);
             // Fall back to JPEG
             usingH264Ref.current = false;
+            setDecoderReady(false);
             if (decoderRef.current && decoderRef.current.state !== 'closed') {
               try { decoderRef.current.close(); } catch { /* ignore */ }
             }
@@ -496,11 +517,13 @@ export function WebGLCanvas({ onBinaryFrame, onH264Frame, onCodecConfig, classNa
 
         decoderRef.current = decoder;
         usingH264Ref.current = true;
+        setDecoderReady(true);
         h264TimestampRef.current = 0;
         console.log(`[WebGLCanvas] VideoDecoder configured: ${config.codec} (H.264 hardware decode active)`);
       } catch (err) {
         console.warn('[WebGLCanvas] Failed to create VideoDecoder, using JPEG fallback:', err);
         usingH264Ref.current = false;
+        setDecoderReady(false);
       }
     };
 
@@ -563,10 +586,26 @@ export function WebGLCanvas({ onBinaryFrame, onH264Frame, onCodecConfig, classNa
       prevTextureRef.current = null;
       textureInitializedRef.current = false;
       prevTexInitRef.current = false;
-      blendFrameRef.current = false;
       hasUploadedAnyFrameRef.current = false;
+      setDecoderReady(false);
+      setStartupElapsedMs(0);
     };
   }, [onBinaryFrame, onH264Frame, onCodecConfig, initGL]);
+
+  const startupSeconds = Math.floor(startupElapsedMs / 1000);
+  let startupTitle = 'Connecting to race server...';
+  let startupHint = 'Initializing stream. This usually takes a second.';
+
+  if (decoderReady) {
+    startupTitle = 'Video decoder ready — waiting for first keyframe...';
+    startupHint = 'Connection is alive. First frame should appear shortly.';
+  } else if (startupSeconds >= 8) {
+    startupTitle = 'Still waiting for first frame...';
+    startupHint = 'If this takes over 15s, verify your ws URL or tunnel.';
+  } else if (startupSeconds >= 3) {
+    startupTitle = 'Starting video stream...';
+    startupHint = 'Server is warming up. Please keep this tab open.';
+  }
 
   return (
     <div className={`relative ${className}`}>
@@ -578,10 +617,12 @@ export function WebGLCanvas({ onBinaryFrame, onH264Frame, onCodecConfig, classNa
         style={{ objectFit: 'cover' }}
       />
       {!hasFirstFrame && (
-        <div className="absolute inset-0 flex items-center justify-center bg-dark-500">
-          <span className="text-white/40 text-lg font-mono animate-pulse">
-            Waiting for video feed...
-          </span>
+        <div className="absolute inset-0 flex items-center justify-center bg-dark-500/95 backdrop-blur-sm">
+          <div className="text-center px-6">
+            <p className="text-white/90 text-base md:text-lg font-semibold animate-pulse">{startupTitle}</p>
+            <p className="mt-2 text-white/55 text-sm">{startupHint}</p>
+            <p className="mt-3 text-white/35 text-xs font-mono">startup {startupSeconds}s</p>
+          </div>
         </div>
       )}
     </div>
