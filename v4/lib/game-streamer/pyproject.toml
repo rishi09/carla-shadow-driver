@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "game-streamer"
+version = "0.1.0"
+description = "Low-latency game frame streaming over WebSocket with H.264 encoding"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.9"
+authors = [
+    {name = "Shadow Driver Contributors"}
+]
+keywords = ["game-streaming", "h264", "nvenc", "gstreamer", "websocket", "webcodecs"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Topic :: Multimedia :: Video",
+    "Topic :: Games/Entertainment",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    "websockets>=12.0",
+    "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+gstreamer = [
+    "PyGObject>=3.42",
+]
+benchmark = [
+    "psutil>=5.9",
+]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+]
+
+[project.urls]
+Homepage = "https://github.com/rishi09/carla-shadow-driver"
+Issues = "https://github.com/rishi09/carla-shadow-driver/issues"

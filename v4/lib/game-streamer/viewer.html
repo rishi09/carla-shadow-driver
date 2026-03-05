@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>game-streamer viewer</title>
+<style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+        background: #111;
+        color: #eee;
+        font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 16px;
+    }
+    h1 { font-size: 18px; margin-bottom: 12px; color: #8f8; }
+
+    .controls {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 12px;
+        align-items: center;
+    }
+    input, button {
+        font-family: inherit;
+        font-size: 13px;
+        padding: 6px 10px;
+        border: 1px solid #444;
+        background: #222;
+        color: #eee;
+        border-radius: 4px;
+    }
+    button { cursor: pointer; }
+    button:hover { background: #333; }
+    button.connected { border-color: #4c4; color: #4c4; }
+    button.error { border-color: #c44; color: #c44; }
+
+    canvas {
+        border: 1px solid #333;
+        max-width: 100%;
+        background: #000;
+    }
+
+    .stats {
+        margin-top: 12px;
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 8px;
+        width: 100%;
+        max-width: 800px;
+    }
+    .stat {
+        background: #1a1a1a;
+        border: 1px solid #333;
+        border-radius: 4px;
+        padding: 8px;
+        text-align: center;
+    }
+    .stat-label { font-size: 10px; color: #888; text-transform: uppercase; }
+    .stat-value { font-size: 20px; font-weight: bold; margin-top: 4px; }
+    .stat-value.good { color: #4c4; }
+    .stat-value.warn { color: #cc4; }
+    .stat-value.bad { color: #c44; }
+
+    .log {
+        margin-top: 12px;
+        width: 100%;
+        max-width: 800px;
+        max-height: 200px;
+        overflow-y: auto;
+        background: #0a0a0a;
+        border: 1px solid #333;
+        border-radius: 4px;
+        padding: 8px;
+        font-size: 11px;
+        line-height: 1.4;
+    }
+    .log-entry { color: #888; }
+    .log-entry.info { color: #8cf; }
+    .log-entry.error { color: #f88; }
+</style>
+</head>
+<body>
+
+<h1>game-streamer viewer</h1>
+
+<div class="controls">
+    <label>WS URL:</label>
+    <input type="text" id="wsUrl" value="ws://localhost:8765" size="30">
+    <button id="connectBtn" onclick="toggleConnection()">Connect</button>
+</div>
+
+<canvas id="display" width="1280" height="720"></canvas>
+
+<div class="stats">
+    <div class="stat">
+        <div class="stat-label">FPS</div>
+        <div class="stat-value" id="statFps">--</div>
+    </div>
+    <div class="stat">
+        <div class="stat-label">Latency (ms)</div>
+        <div class="stat-value" id="statLatency">--</div>
+    </div>
+    <div class="stat">
+        <div class="stat-label">Bitrate (kbps)</div>
+        <div class="stat-value" id="statBitrate">--</div>
+    </div>
+    <div class="stat">
+        <div class="stat-label">Frames Decoded</div>
+        <div class="stat-value" id="statFrames">0</div>
+    </div>
+</div>
+
+<div class="log" id="logContainer"></div>
+
+<script>
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+let ws = null;
+let decoder = null;
+let canvas, ctx;
+let codecConfig = null;
+let connected = false;
+
+// Metrics
+let framesDecoded = 0;
+let frameTimes = [];
+let bytesReceived = [];
+let latencies = [];
+let pingInterval = null;
+
+// ---------------------------------------------------------------------------
+// Logging
+// ---------------------------------------------------------------------------
+function log(msg, level = '') {
+    const el = document.getElementById('logContainer');
+    const entry = document.createElement('div');
+    entry.className = `log-entry ${level}`;
+    entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+    el.appendChild(entry);
+    el.scrollTop = el.scrollHeight;
+    console.log(msg);
+}
+
+// ---------------------------------------------------------------------------
+// WebCodecs H.264 Decoder
+// ---------------------------------------------------------------------------
+function initDecoder(codecStr, width, height) {
+    if (decoder && decoder.state !== 'closed') {
+        decoder.close();
+    }
+
+    decoder = new VideoDecoder({
+        output: (frame) => {
+            // Draw decoded frame to canvas
+            ctx.drawImage(frame, 0, 0, canvas.width, canvas.height);
+            frame.close();
+            framesDecoded++;
+        },
+        error: (e) => {
+            log(`Decoder error: ${e.message}`, 'error');
+        }
+    });
+
+    decoder.configure({
+        codec: codecStr,
+        codedWidth: width,
+        codedHeight: height,
+        optimizeForLatency: true,
+    });
+
+    canvas.width = width;
+    canvas.height = height;
+
+    log(`Decoder configured: ${codecStr} ${width}x${height}`, 'info');
+}
+
+// ---------------------------------------------------------------------------
+// Frame Protocol
+// ---------------------------------------------------------------------------
+// Binary message format:
+//   Byte 0:    Frame type (0x01=key, 0x02=delta, 0x10=config)
+//   Bytes 1-8: Timestamp (uint64 BE, microseconds)
+//   Bytes 9+:  H.264 data
+
+function handleBinaryMessage(data) {
+    const view = new DataView(data);
+    const frameType = view.getUint8(0);
+
+    // Read timestamp (uint64 big-endian)
+    const tsHigh = view.getUint32(1, false);
+    const tsLow = view.getUint32(5, false);
+    const tsUs = tsHigh * 0x100000000 + tsLow;
+
+    const h264Data = new Uint8Array(data, 9);
+
+    // Compute latency
+    const nowUs = Date.now() * 1000;
+    const latencyMs = (nowUs - tsUs) / 1000;
+    if (latencyMs > 0 && latencyMs < 10000) {
+        latencies.push(latencyMs);
+        if (latencies.length > 30) latencies.shift();
+    }
+
+    // Track bytes for bitrate
+    const now = performance.now();
+    bytesReceived.push({ t: now, bytes: data.byteLength });
+    bytesReceived = bytesReceived.filter(e => now - e.t < 2000);
+
+    // Track frame times for FPS
+    frameTimes.push(now);
+    frameTimes = frameTimes.filter(t => now - t < 2000);
+
+    if (!decoder || decoder.state === 'closed') {
+        // Try to initialize from keyframe if we got codec config
+        if (codecConfig && frameType === 0x01) {
+            initDecoder(codecConfig.codec, codecConfig.width, codecConfig.height);
+        } else {
+            return; // Wait for codec config + keyframe
+        }
+    }
+
+    const isKey = frameType === 0x01;
+    const chunk = new EncodedVideoChunk({
+        type: isKey ? 'key' : 'delta',
+        timestamp: tsUs,
+        data: h264Data,
+    });
+
+    try {
+        decoder.decode(chunk);
+    } catch (e) {
+        log(`Decode error: ${e.message}`, 'error');
+    }
+}
+
+function handleTextMessage(text) {
+    try {
+        const msg = JSON.parse(text);
+
+        if (msg.type === 'codec_config') {
+            codecConfig = msg;
+            log(`Codec config: ${msg.codec} ${msg.width}x${msg.height}`, 'info');
+            // Decoder will be initialized when first keyframe arrives
+        } else if (msg.type === 'pong') {
+            const rtt = Date.now() - msg.t;
+            latencies.push(rtt / 2);
+            if (latencies.length > 30) latencies.shift();
+        }
+    } catch (e) {
+        log(`JSON parse error: ${e.message}`, 'error');
+    }
+}
+
+// ---------------------------------------------------------------------------
+// WebSocket Connection
+// ---------------------------------------------------------------------------
+function toggleConnection() {
+    if (connected) {
+        disconnect();
+    } else {
+        connect();
+    }
+}
+
+function connect() {
+    const url = document.getElementById('wsUrl').value.trim();
+    if (!url) return;
+
+    log(`Connecting to ${url}...`);
+    const btn = document.getElementById('connectBtn');
+    btn.textContent = 'Connecting...';
+
+    ws = new WebSocket(url);
+    ws.binaryType = 'arraybuffer';
+
+    ws.onopen = () => {
+        connected = true;
+        btn.textContent = 'Disconnect';
+        btn.className = 'connected';
+        log('Connected', 'info');
+
+        // Start ping interval for latency measurement
+        pingInterval = setInterval(() => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'ping', t: Date.now() }));
+            }
+        }, 2000);
+    };
+
+    ws.onmessage = (event) => {
+        if (event.data instanceof ArrayBuffer) {
+            handleBinaryMessage(event.data);
+        } else {
+            handleTextMessage(event.data);
+        }
+    };
+
+    ws.onclose = () => {
+        connected = false;
+        btn.textContent = 'Connect';
+        btn.className = '';
+        log('Disconnected');
+        if (pingInterval) clearInterval(pingInterval);
+    };
+
+    ws.onerror = (e) => {
+        btn.textContent = 'Connect';
+        btn.className = 'error';
+        log(`WebSocket error`, 'error');
+    };
+}
+
+function disconnect() {
+    if (ws) {
+        ws.close();
+        ws = null;
+    }
+    if (pingInterval) {
+        clearInterval(pingInterval);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Stats Update Loop
+// ---------------------------------------------------------------------------
+function updateStats() {
+    const now = performance.now();
+
+    // FPS
+    const recentFrames = frameTimes.filter(t => now - t < 1000);
+    const fps = recentFrames.length;
+    const fpsEl = document.getElementById('statFps');
+    fpsEl.textContent = fps;
+    fpsEl.className = 'stat-value ' + (fps >= 25 ? 'good' : fps >= 15 ? 'warn' : 'bad');
+
+    // Latency
+    const latencyEl = document.getElementById('statLatency');
+    if (latencies.length > 0) {
+        const avgLat = latencies.reduce((a, b) => a + b, 0) / latencies.length;
+        latencyEl.textContent = Math.round(avgLat);
+        latencyEl.className = 'stat-value ' + (avgLat < 50 ? 'good' : avgLat < 150 ? 'warn' : 'bad');
+    }
+
+    // Bitrate
+    const bitrateEl = document.getElementById('statBitrate');
+    const recentBytes = bytesReceived.filter(e => now - e.t < 2000);
+    if (recentBytes.length > 1) {
+        const totalBytes = recentBytes.reduce((s, e) => s + e.bytes, 0);
+        const windowSec = (now - recentBytes[0].t) / 1000;
+        const kbps = Math.round(totalBytes * 8 / 1000 / Math.max(windowSec, 0.001));
+        bitrateEl.textContent = kbps;
+    }
+
+    // Frames
+    document.getElementById('statFrames').textContent = framesDecoded;
+
+    // Tab title
+    document.title = `game-streamer | ${fps}fps`;
+}
+
+// ---------------------------------------------------------------------------
+// Init
+// ---------------------------------------------------------------------------
+window.addEventListener('load', () => {
+    canvas = document.getElementById('display');
+    ctx = canvas.getContext('2d');
+
+    // Update stats 2x per second
+    setInterval(updateStats, 500);
+
+    // Check for WebCodecs
+    if (typeof VideoDecoder === 'undefined') {
+        log('ERROR: WebCodecs not supported. Use Chrome 94+ or Edge 94+.', 'error');
+        return;
+    }
+
+    log('Ready. Click Connect to start receiving video.');
+
+    // Auto-connect if URL has ?ws= param
+    const params = new URLSearchParams(window.location.search);
+    const wsParam = params.get('ws');
+    if (wsParam) {
+        document.getElementById('wsUrl').value = wsParam;
+        connect();
+    }
+});
+</script>
+
+</body>
+</html>

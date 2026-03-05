@@ -1,0 +1,682 @@
+import { useState, useEffect, useRef } from 'react';
+import type { RaceState, KeyState } from '../types/index.ts';
+import { RaceProgressBar } from './RaceProgressBar.tsx';
+import { ArcSpeedometer } from './ArcSpeedometer.tsx';
+
+interface RaceHUDProps {
+  raceState: RaceState | null;
+  latencyMs?: number | null;
+  gamepadConnected?: boolean;
+  className?: string;
+  localKeys?: React.RefObject<KeyState>;
+}
+
+export function RaceHUD({ raceState, latencyMs, gamepadConnected = false, className = '', localKeys }: RaceHUDProps) {
+  // Track HUD visibility for fade-in on GO
+  const [hudVisible, setHudVisible] = useState(false);
+  const prevStatusRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const status = raceState?.race_status ?? null;
+    // When transitioning from countdown to racing, fade in HUD
+    if (status === 'racing' && prevStatusRef.current === 'countdown') {
+      // Stagger the fade-in slightly
+      const timer = setTimeout(() => setHudVisible(true), 100);
+      return () => clearTimeout(timer);
+    }
+    // If already racing (e.g., reconnect, or any non-countdown -> racing transition), show immediately
+    if (status === 'racing' || status === 'finishing') {
+      setHudVisible(true);
+    }
+    // Hide during countdown
+    if (status === 'countdown') {
+      setHudVisible(false);
+    }
+    prevStatusRef.current = status;
+  }, [raceState?.race_status]);
+
+  if (!raceState) return null;
+
+  const { player, ai, model, race_status, fps, countdown } = raceState;
+
+  // During countdown, hide most HUD elements for a cinematic look
+  const isCountdown = race_status === 'countdown';
+  // HUD elements transition class: hidden during countdown, staggered fade-in on GO
+  const hudOpacityClass = isCountdown
+    ? 'opacity-0'
+    : hudVisible
+      ? 'opacity-100'
+      : 'opacity-0';
+
+  return (
+    <div className={`absolute inset-0 pointer-events-none ${className}`} style={{ textShadow: '0 1px 3px rgba(0,0,0,0.8)' }}>
+      {/* Cinematic countdown overlay */}
+      {race_status === 'countdown' && countdown !== null && countdown !== undefined && (
+        <CountdownOverlay countdown={countdown} />
+      )}
+
+      {/* Top bar: position + lap -- hidden during countdown, fades in on GO */}
+      <div
+        className={`absolute top-4 left-0 right-0 flex justify-center gap-8 z-10 transition-opacity duration-500 ease-out ${hudOpacityClass}`}
+        style={{ transitionDelay: hudVisible ? '0ms' : '0ms' }}
+      >
+        {/* Player info */}
+        <div className="bg-black/60 backdrop-blur-sm rounded-lg px-4 py-2 border border-player/40 shadow-lg shadow-black/30">
+          <div className="text-player text-xs font-mono uppercase tracking-wider">You</div>
+          <div className="flex items-baseline gap-3">
+            <span className="text-white text-2xl font-bold font-mono">
+              P{player.position}
+            </span>
+            <span className="text-white/70 text-sm font-mono">
+              Lap {Math.min(player.lap, player.total_laps)}/{player.total_laps}
+            </span>
+          </div>
+        </div>
+
+        {/* Gap timer */}
+        {(race_status === 'racing' || race_status === 'finishing') && player.gap_seconds != null && (
+          <div className="bg-black/60 backdrop-blur-sm rounded-lg px-4 py-2 border border-white/20 flex items-center gap-3">
+            <GapTimer gap={player.gap_seconds} />
+          </div>
+        )}
+
+        {/* AI info */}
+        <div className="bg-black/60 backdrop-blur-sm rounded-lg px-4 py-2 border border-ai/40 shadow-lg shadow-black/30">
+          <div className="text-ai text-xs font-mono uppercase tracking-wider">AI ({model})</div>
+          <div className="flex items-baseline gap-3">
+            <span className="text-white text-2xl font-bold font-mono">
+              P{ai.position}
+            </span>
+            <span className="text-white/70 text-sm font-mono">
+              Lap {Math.min(ai.lap, ai.total_laps)}/{ai.total_laps}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Race progress bar - shown during racing only, with fade-in */}
+      {(race_status === 'racing' || race_status === 'finishing') && (
+        <div
+          className={`absolute top-[72px] left-1/2 -translate-x-1/2 z-10 w-[480px] max-w-[90vw] transition-opacity duration-500 ease-out ${hudOpacityClass}`}
+          style={{ transitionDelay: hudVisible ? '100ms' : '0ms' }}
+        >
+          <RaceProgressBar
+            playerLap={player.lap}
+            playerCheckpoint={player.checkpoint}
+            aiLap={ai.lap}
+            aiCheckpoint={ai.checkpoint}
+            totalLaps={player.total_laps}
+            totalCheckpoints={player.total_checkpoints ?? raceState.checkpoints?.length ?? 10}
+          />
+        </div>
+      )}
+
+      {/* Next checkpoint indicator -- hidden during countdown */}
+      {(race_status === 'racing' || race_status === 'finishing') && player.next_checkpoint_x != null && player.x != null && (
+        <div
+          className={`transition-opacity duration-500 ease-out ${hudOpacityClass}`}
+          style={{ transitionDelay: hudVisible ? '150ms' : '0ms' }}
+        >
+          <CheckpointArrow
+            playerX={player.x}
+            playerY={player.y ?? 0}
+            playerYaw={player.yaw}
+            targetX={player.next_checkpoint_x}
+            targetY={player.next_checkpoint_y ?? 0}
+            checkpoint={player.checkpoint}
+            totalCheckpoints={player.total_checkpoints ?? raceState.checkpoints?.length ?? 10}
+          />
+        </div>
+      )}
+
+      {/* Bottom left: arc speedometer + gear + inputs -- hidden during countdown */}
+      <div
+        className={`absolute bottom-4 left-4 z-10 transition-opacity duration-500 ease-out ${hudOpacityClass}`}
+        style={{ transitionDelay: hudVisible ? '200ms' : '0ms' }}
+      >
+        <div className="bg-black/70 backdrop-blur-md rounded-lg px-3 py-3 border border-white/20 flex flex-col items-center shadow-lg shadow-black/50">
+          <ArcSpeedometer speedKmh={player.speed_kmh} gear={player.gear} />
+          {player.gear !== undefined && (
+            <div className="text-white/50 text-xs font-mono -mt-1">
+              Gear {player.gear}
+            </div>
+          )}
+          {/* Input visualization: steering wheel + bars — always show */}
+          <div className="mt-2 flex items-center gap-2">
+            {/* Mini steering wheel that rotates with input */}
+            <SteeringWheelIcon steer={player.steer ?? 0} />
+            <div className="space-y-1">
+              <InputBar label="THR" value={player.throttle ?? 0} color="#4CAF50" localValue={localKeys?.current?.w ? 1 : undefined} />
+              <InputBar label="BRK" value={player.brake ?? 0} color="#f44336" localValue={localKeys?.current?.s || localKeys?.current?.space ? 1 : undefined} />
+              <InputBar label="STR" value={(player.steer ?? 0) * 0.5 + 0.5} color="#2196F3" centered localValue={localKeys ? (localKeys.current.a ? 0 : localKeys.current.d ? 1 : 0.5) : undefined} />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Bottom center: lap timer -- hidden during countdown */}
+      <div
+        className={`absolute bottom-4 left-1/2 -translate-x-1/2 z-10 transition-opacity duration-500 ease-out ${hudOpacityClass}`}
+        style={{ transitionDelay: hudVisible ? '300ms' : '0ms' }}
+      >
+        <div className="bg-black/70 backdrop-blur-md rounded-lg px-6 py-3 border border-white/20 shadow-lg shadow-black/50">
+          <div className="flex gap-6">
+            <div>
+              <div className="text-white/50 text-xs font-mono uppercase">Current</div>
+              <div className="text-white text-xl font-bold font-mono">
+                {formatTime(player.lap_time)}
+              </div>
+            </div>
+            <div className="border-l border-white/10" />
+            <div>
+              <div className="text-accent text-xs font-mono uppercase">Best</div>
+              <div className="text-accent text-xl font-bold font-mono">
+                {player.best_lap ? formatTime(player.best_lap) : '--:--.--'}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Bottom right: FPS + latency + connection quality + controls hint -- hidden during countdown */}
+      <div
+        className={`absolute bottom-4 right-4 z-10 transition-opacity duration-500 ease-out ${hudOpacityClass}`}
+        style={{ transitionDelay: hudVisible ? '350ms' : '0ms' }}
+      >
+        <div className="bg-black/60 backdrop-blur-sm rounded-lg px-3 py-2 border border-white/10">
+          <div className="text-white/30 text-xs font-mono">{fps} FPS</div>
+          {latencyMs != null && (
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <ConnectionDot latencyMs={latencyMs} />
+              <span className={`text-xs font-mono ${latencyMs < 80 ? 'text-player/50' : latencyMs <= 150 ? 'text-accent/50' : 'text-warning/50'}`}>
+                {latencyMs}ms
+              </span>
+            </div>
+          )}
+          {raceState.weather_mood && raceState.weather_mood.mood !== 'CALM' && (
+            <WeatherIndicator mood={raceState.weather_mood.mood} intensity={raceState.weather_mood.intensity} />
+          )}
+          <div className="text-white/20 text-xs font-mono mt-1">WASD + Space | R=Respawn | C=Camera | G=GIF | B=AI Brain</div>
+          {gamepadConnected && (
+            <div className="flex items-center gap-1.5 mt-1">
+              <GamepadIcon />
+              <span className="text-green-400/60 text-[10px] font-mono">Gamepad</span>
+            </div>
+          )}
+        </div>
+      </div>
+
+    </div>
+  );
+}
+
+/** Enhanced cinematic 3-2-1-GO countdown with slam animations and screen effects */
+function CountdownOverlay({ countdown }: { countdown: number }) {
+  const [animPhase, setAnimPhase] = useState(0);
+  const prevCountdownRef = useRef(countdown);
+
+  useEffect(() => {
+    // Reset animation on each new countdown value
+    setAnimPhase(0);
+    const timer = setTimeout(() => setAnimPhase(1), 30);
+    prevCountdownRef.current = countdown;
+
+    return () => clearTimeout(timer);
+  }, [countdown]);
+
+  const isGo = countdown === 0;
+  const color = isGo ? '#4CAF50' : '#f44336';
+  const text = isGo ? 'GO!' : String(countdown);
+
+  return (
+    <div className="absolute inset-0 flex items-center justify-center z-30">
+      {/* Keyframe animations */}
+      <style>{`
+        @keyframes countdown-slam {
+          0% {
+            transform: scale(2.5);
+            opacity: 0;
+          }
+          30% {
+            transform: scale(0.9);
+            opacity: 1;
+          }
+          50% {
+            transform: scale(1.05);
+          }
+          100% {
+            transform: scale(1.0);
+            opacity: 1;
+          }
+        }
+        @keyframes go-explode {
+          0% {
+            transform: scale(0.8);
+            opacity: 0;
+          }
+          20% {
+            transform: scale(1.0);
+            opacity: 1;
+          }
+          60% {
+            transform: scale(1.3);
+            opacity: 1;
+          }
+          100% {
+            transform: scale(2.0);
+            opacity: 0;
+          }
+        }
+        @keyframes go-text {
+          0% {
+            transform: scale(0.5);
+            opacity: 0;
+          }
+          30% {
+            transform: scale(1.1);
+            opacity: 1;
+          }
+          50% {
+            transform: scale(1.0);
+          }
+          100% {
+            transform: scale(1.0);
+            opacity: 1;
+          }
+        }
+        @keyframes flash-burst {
+          0% {
+            opacity: 0;
+            transform: scale(0.5);
+          }
+          20% {
+            opacity: 0.6;
+            transform: scale(1.0);
+          }
+          100% {
+            opacity: 0;
+            transform: scale(1.5);
+          }
+        }
+        @keyframes go-flash {
+          0% {
+            opacity: 0;
+            transform: scale(0.3);
+          }
+          15% {
+            opacity: 0.8;
+            transform: scale(1.2);
+          }
+          100% {
+            opacity: 0;
+            transform: scale(2.5);
+          }
+        }
+        @keyframes go-shake {
+          0% { transform: translate(0, 0); }
+          10% { transform: translate(-3px, 2px); }
+          20% { transform: translate(3px, -2px); }
+          30% { transform: translate(-2px, -1px); }
+          40% { transform: translate(2px, 1px); }
+          50% { transform: translate(-1px, 2px); }
+          60% { transform: translate(1px, -1px); }
+          70% { transform: translate(-2px, 0px); }
+          80% { transform: translate(1px, 1px); }
+          90% { transform: translate(-1px, -1px); }
+          100% { transform: translate(0, 0); }
+        }
+        @keyframes traffic-light-pulse {
+          0% { transform: scale(1); }
+          50% { transform: scale(1.3); }
+          100% { transform: scale(1); }
+        }
+      `}</style>
+
+      {/* Subtle dim during countdown */}
+      <div className="absolute inset-0 bg-black/15" />
+
+      {/* GO shake wrapper */}
+      <div
+        className="relative flex flex-col items-center gap-4"
+        style={isGo && animPhase === 1 ? { animation: 'go-shake 0.4s ease-out' } : undefined}
+      >
+        {/* Traffic light - vertical stack: Red / Yellow / Green */}
+        <div className="flex flex-col gap-2 mb-6 bg-gray-900/80 rounded-xl p-2.5 border border-white/10">
+          {/* Red light: on at countdown 3, 2, 1 — green on GO */}
+          <div
+            className={`w-7 h-7 rounded-full transition-all duration-300 ${isGo ? 'bg-green-500 shadow-[0_0_20px_rgba(76,175,80,0.9)]' : countdown >= 1 ? 'bg-red-500 shadow-[0_0_20px_rgba(244,67,54,0.9)]' : 'bg-white/10'}`}
+            style={(countdown === 3 || isGo) && animPhase === 1 ? { animation: 'traffic-light-pulse 0.4s ease-out' } : undefined}
+          />
+          {/* Yellow light: on at countdown 2, 1 — green on GO */}
+          <div
+            className={`w-7 h-7 rounded-full transition-all duration-300 ${isGo ? 'bg-green-500 shadow-[0_0_20px_rgba(76,175,80,0.9)]' : countdown >= 1 && countdown <= 2 ? 'bg-yellow-500 shadow-[0_0_20px_rgba(234,179,8,0.9)]' : 'bg-white/10'}`}
+            style={(countdown === 2 || isGo) && animPhase === 1 ? { animation: 'traffic-light-pulse 0.4s ease-out' } : undefined}
+          />
+          {/* Green light: on at countdown 1 — green on GO */}
+          <div
+            className={`w-7 h-7 rounded-full transition-all duration-300 ${isGo ? 'bg-green-500 shadow-[0_0_20px_rgba(76,175,80,0.9)]' : countdown === 1 ? 'bg-green-500 shadow-[0_0_20px_rgba(76,175,80,0.9)]' : 'bg-white/10'}`}
+            style={(countdown === 1 || isGo) && animPhase === 1 ? { animation: 'traffic-light-pulse 0.4s ease-out' } : undefined}
+          />
+        </div>
+
+        {/* Subtle radial glow behind number */}
+        {animPhase === 1 && !isGo && (
+          <div
+            className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[300px] h-[300px] rounded-full pointer-events-none"
+            style={{
+              background: `radial-gradient(circle, ${color}15 0%, ${color}08 40%, transparent 70%)`,
+              animation: 'flash-burst 0.7s ease-out forwards',
+            }}
+          />
+        )}
+
+        {/* Subtle glow on GO */}
+        {isGo && animPhase === 1 && (
+          <div
+            className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] h-[400px] rounded-full pointer-events-none"
+            style={{
+              background: 'radial-gradient(circle, rgba(76,175,80,0.15) 0%, rgba(76,175,80,0.05) 30%, transparent 60%)',
+              animation: 'go-flash 0.6s ease-out forwards',
+            }}
+          />
+        )}
+
+        {/* Number / GO text */}
+        {isGo ? (
+          <div
+            className="font-black leading-none select-none"
+            style={{
+              fontSize: 'clamp(8rem, 20vw, 14rem)',
+              color,
+              textShadow: `0 0 30px ${color}60, 0 4px 8px rgba(0,0,0,0.5)`,
+              animation: animPhase === 1 ? 'go-text 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards' : 'none',
+              opacity: animPhase === 0 ? 0 : 1,
+              letterSpacing: '0.05em',
+            }}
+          >
+            {text}
+          </div>
+        ) : (
+          <div
+            className="font-black leading-none select-none"
+            style={{
+              fontSize: 'clamp(10rem, 25vw, 16rem)',
+              color,
+              textShadow: `0 0 30px ${color}60, 0 4px 8px rgba(0,0,0,0.5)`,
+              animation: animPhase === 1 ? 'countdown-slam 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards' : 'none',
+              opacity: animPhase === 0 ? 0 : 1,
+            }}
+          >
+            {text}
+          </div>
+        )}
+
+        {/* "Rev your engine!" hint during countdown (not on GO) */}
+        {!isGo && (
+          <div className="mt-4 text-white/40 text-sm font-mono uppercase tracking-widest animate-pulse">
+            Hold W to rev
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Gap timer: shows +/- seconds vs opponent with warning pulse */
+function GapTimer({ gap }: { gap: number }) {
+  const isAhead = gap > 0;
+  const absGap = Math.abs(gap);
+  const color = isAhead ? 'text-player' : 'text-warning';
+  const sign = isAhead ? '+' : '-';
+
+  // Close-gap warning: pulse when AI is catching up (gap < 2s and player behind)
+  const showPulse = !isAhead && absGap < 2.0;
+  const pulseColor = absGap < 1.0 ? 'rgba(239,68,68,0.5)' : 'rgba(245,158,11,0.3)';
+
+  return (
+    <div
+      className={`${color} font-mono font-bold text-lg`}
+      style={{
+        textShadow: showPulse
+          ? `0 0 8px ${pulseColor}, 0 1px 4px rgba(0,0,0,0.8)`
+          : '0 1px 4px rgba(0,0,0,0.8)',
+        animation: showPulse ? 'gapPulse 1s ease-in-out infinite' : 'none',
+      }}
+    >
+      {sign}{absGap.toFixed(1)}s
+      {showPulse && (
+        <style>{`
+          @keyframes gapPulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+          }
+        `}</style>
+      )}
+    </div>
+  );
+}
+
+/** Mini steering wheel icon that rotates with steer input */
+function SteeringWheelIcon({ steer }: { steer: number }) {
+  // steer: -1 (full left) to +1 (full right)
+  // Rotate up to ±90 degrees for visual clarity
+  const rotation = steer * 90;
+  return (
+    <div
+      className="w-8 h-8 shrink-0"
+      style={{ transform: `rotate(${rotation}deg)`, transition: 'transform 80ms ease-out' }}
+    >
+      <svg viewBox="0 0 32 32" width="32" height="32" fill="none" xmlns="http://www.w3.org/2000/svg">
+        {/* Outer ring */}
+        <circle cx="16" cy="16" r="13" stroke="white" strokeOpacity="0.4" strokeWidth="2" />
+        {/* Three spokes */}
+        <line x1="16" y1="16" x2="16" y2="3" stroke="white" strokeOpacity="0.3" strokeWidth="1.5" />
+        <line x1="16" y1="16" x2="5" y2="23" stroke="white" strokeOpacity="0.3" strokeWidth="1.5" />
+        <line x1="16" y1="16" x2="27" y2="23" stroke="white" strokeOpacity="0.3" strokeWidth="1.5" />
+        {/* Center dot */}
+        <circle cx="16" cy="16" r="2" fill="white" fillOpacity="0.3" />
+        {/* Top marker for orientation */}
+        <circle cx="16" cy="3" r="2" fill="#2196F3" fillOpacity="0.7" />
+      </svg>
+    </div>
+  );
+}
+
+/** Thin horizontal bar for throttle/brake/steer visualization with optional local input layer */
+function InputBar({ label, value, color, centered, localValue }: { label: string; value: number; color: string; centered?: boolean; localValue?: number }) {
+  const pct = Math.max(0, Math.min(1, value)) * 100;
+  const localPct = localValue != null ? Math.max(0, Math.min(1, localValue)) * 100 : undefined;
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="text-white/40 text-[11px] font-mono w-7 font-bold">{label}</span>
+      <div className="w-20 h-2.5 bg-white/15 rounded-full overflow-hidden relative">
+        {centered ? (
+          <>
+            {/* Background bar: local input (instant) */}
+            {localPct != null && (
+              <div
+                className="absolute top-0 h-full rounded-full"
+                style={{
+                  backgroundColor: color,
+                  left: localPct < 50 ? `${localPct}%` : '50%',
+                  width: `${Math.abs(localPct - 50)}%`,
+                  opacity: 0.25,
+                }}
+              />
+            )}
+            {/* Foreground bar: server-confirmed input */}
+            <div
+              className="absolute top-0 h-full rounded-full"
+              style={{
+                backgroundColor: color,
+                left: pct < 50 ? `${pct}%` : '50%',
+                width: `${Math.abs(pct - 50)}%`,
+                opacity: 0.8,
+              }}
+            />
+          </>
+        ) : (
+          <>
+            {/* Background bar: local input (instant) */}
+            {localPct != null && (
+              <div
+                className="absolute top-0 h-full rounded-full"
+                style={{ backgroundColor: color, width: `${localPct}%`, opacity: 0.25 }}
+              />
+            )}
+            {/* Foreground bar: server-confirmed input */}
+            <div
+              className="absolute top-0 h-full rounded-full"
+              style={{ backgroundColor: color, width: `${pct}%`, opacity: 0.8 }}
+            />
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Pulsing connection quality dot: green < 80ms, yellow 80-150ms, red > 150ms */
+function ConnectionDot({ latencyMs }: { latencyMs: number }) {
+  const color = latencyMs < 80 ? 'bg-green-500' : latencyMs <= 150 ? 'bg-yellow-500' : 'bg-red-500';
+  const shadow = latencyMs < 80
+    ? 'shadow-[0_0_6px_rgba(34,197,94,0.8)]'
+    : latencyMs <= 150
+      ? 'shadow-[0_0_6px_rgba(234,179,8,0.8)]'
+      : 'shadow-[0_0_6px_rgba(239,68,68,0.8)]';
+
+  return (
+    <span className={`inline-block w-2 h-2 rounded-full animate-pulse ${color} ${shadow}`} />
+  );
+}
+
+function formatTime(seconds: number): string {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins}:${secs.toFixed(1).padStart(4, '0')}`;
+}
+
+/** Large directional arrow pointing toward the next checkpoint */
+function CheckpointArrow({ playerX, playerY, playerYaw, targetX, targetY, checkpoint, totalCheckpoints }: {
+  playerX: number; playerY: number; playerYaw?: number; targetX: number; targetY: number;
+  checkpoint?: number; totalCheckpoints?: number;
+}) {
+  const dx = targetX - playerX;
+  const dy = targetY - playerY;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+
+  // Calculate relative angle from player heading to checkpoint
+  const angleToTarget = Math.atan2(dy, dx) * (180 / Math.PI);
+  const yaw = playerYaw ?? 0;
+  let relativeAngle = angleToTarget - yaw;
+  while (relativeAngle > 180) relativeAngle -= 360;
+  while (relativeAngle < -180) relativeAngle += 360;
+
+  // Turn direction hint based on relative angle
+  let hint: string;
+  let hintColor: string;
+  if (Math.abs(relativeAngle) < 20) {
+    hint = 'STRAIGHT';
+    hintColor = 'text-green-400';
+  } else if (Math.abs(relativeAngle) < 60) {
+    hint = relativeAngle > 0 ? 'SLIGHT RIGHT' : 'SLIGHT LEFT';
+    hintColor = 'text-accent';
+  } else if (Math.abs(relativeAngle) < 120) {
+    hint = relativeAngle > 0 ? 'TURN RIGHT' : 'TURN LEFT';
+    hintColor = 'text-amber-400';
+  } else {
+    hint = relativeAngle > 0 ? 'HARD RIGHT' : 'HARD LEFT';
+    hintColor = 'text-red-400';
+  }
+
+  // Color: green when close, accent when far
+  const isClose = dist < 30;
+
+  // Format distance
+  const distText = dist >= 1000 ? `${(dist / 1000).toFixed(1)}km` : `${Math.round(dist)}m`;
+
+  // Checkpoint counter
+  const cpNum = (checkpoint ?? 0) + 1; // checkpoint is 0-indexed, display 1-indexed
+  const cpTotal = totalCheckpoints ?? 10;
+
+  return (
+    <div className="absolute top-[108px] left-1/2 -translate-x-1/2 z-10 flex flex-col items-center gap-1">
+      {/* Checkpoint counter */}
+      <div className="bg-black/60 backdrop-blur-sm rounded-md px-2.5 py-0.5 border border-white/15 mb-0.5">
+        <span className="text-cyan-400 text-xs font-mono font-bold">CP {cpNum}/{cpTotal}</span>
+      </div>
+
+      {/* Rotating compass arrow - larger and more prominent */}
+      <div className={`rounded-full w-20 h-20 flex items-center justify-center ${isClose ? 'bg-green-500/30 border-2 border-green-400 shadow-[0_0_20px_rgba(34,197,94,0.5)]' : 'bg-black/70 border-2 border-cyan-500/50 shadow-[0_0_15px_rgba(0,210,255,0.3)]'}`}>
+        <svg width="48" height="48" viewBox="0 0 32 32"
+          className={isClose ? 'text-green-400' : 'text-cyan-400'}
+          style={{ transform: `rotate(${relativeAngle}deg)`, transition: 'transform 0.15s ease-out', filter: `drop-shadow(0 0 6px currentColor)` }}>
+          <path d="M16 2L24 16H19V28H13V16H8L16 2Z" fill="currentColor" />
+        </svg>
+      </div>
+
+      {/* Distance */}
+      <div
+        className={`text-sm font-mono font-bold px-2.5 py-0.5 rounded ${isClose ? 'text-green-400 bg-green-500/20' : 'text-white bg-black/50'}`}
+        style={{ textShadow: '0 1px 3px rgba(0,0,0,0.9)' }}
+      >
+        {isClose ? 'CHECKPOINT!' : distText}
+      </div>
+
+      {/* Turn direction hint */}
+      {!isClose && (
+        <div
+          className={`${hintColor} text-xs font-mono font-bold px-2 py-0.5 rounded bg-black/40`}
+          style={{ textShadow: '0 1px 3px rgba(0,0,0,0.9)' }}
+        >
+          {hint}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** SVG gamepad icon for the HUD */
+function GamepadIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-green-400/60">
+      {/* Controller body */}
+      <path d="M6 11h4M8 9v4" />
+      <circle cx="15" cy="10" r="1" fill="currentColor" stroke="none" />
+      <circle cx="17" cy="12" r="1" fill="currentColor" stroke="none" />
+      <path d="M2 14.5A4 4 0 0 0 6.53 18L8 18a2 2 0 0 0 2-2V14h4v2a2 2 0 0 0 2 2h1.47A4 4 0 0 0 22 14.5v-2A4 4 0 0 0 18 8.5H6A4 4 0 0 0 2 12.5v2z" />
+    </svg>
+  );
+}
+
+/** Weather mood indicator: small icon + label showing the current weather mood in the HUD corner */
+function WeatherIndicator({ mood, intensity }: { mood: string; intensity: number }) {
+  // Map mood to icon, label, and color
+  const config: Record<string, { icon: string; label: string; color: string }> = {
+    BUILDING: { icon: '\u2601', label: 'CLOUDY', color: '#90a4ae' },     // cloud
+    TENSE:    { icon: '\u26C8', label: 'TENSE', color: '#78909c' },      // thunder cloud
+    DRAMATIC: { icon: '\u26C8', label: 'STORM', color: '#546e7a' },      // thunder cloud
+    EPIC:     { icon: '\u26A1', label: 'EPIC', color: '#ffd54f' },       // lightning
+    FINALE:   { icon: '\u2600', label: 'GOLDEN', color: '#ffb74d' },     // sun
+    NIGHT_TENSE: { icon: '\u263D', label: 'NIGHT', color: '#7986cb' },   // crescent moon
+  };
+
+  const c = config[mood] ?? { icon: '\u2601', label: mood, color: '#90a4ae' };
+
+  return (
+    <div className="flex items-center gap-1.5 mt-1">
+      <span
+        className="text-sm leading-none"
+        style={{ color: c.color, opacity: 0.5 + intensity * 0.5 }}
+      >
+        {c.icon}
+      </span>
+      <span
+        className="text-[10px] font-mono uppercase tracking-wider leading-none"
+        style={{ color: c.color, opacity: 0.4 + intensity * 0.4 }}
+      >
+        {c.label}
+      </span>
+    </div>
+  );
+}

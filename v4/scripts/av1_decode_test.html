@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>AV1/H.264/HEVC WebCodecs Decode Test - Shadow Driver v3</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}body{font-family:system-ui,monospace;background:#111;color:#eee;padding:20px}
+h1{font-size:16px;margin-bottom:12px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}
+.card{background:#1a1a2e;border-radius:6px;padding:12px}.card h2{font-size:13px;margin-bottom:6px}
+.s{font-size:12px;padding:3px 6px;border-radius:3px;display:inline-block;margin:4px 0}
+.pass{background:#1b4332;color:#95d5b2}.fail{background:#6b2c2c;color:#f4a0a0}.wait{background:#333;color:#aaa}
+.d{font-size:11px;color:#888;margin-top:6px}#sum{margin-top:16px;padding:12px;background:#1a1a2e;border-radius:6px}
+table{width:100%;border-collapse:collapse;margin-top:10px}th,td{text-align:left;padding:4px 6px;border-bottom:1px solid #333;font-size:12px}
+</style>
+</head>
+<body>
+<h1>WebCodecs Decode Test -- Shadow Driver v3</h1>
+<div class="grid" id="c"></div><div id="sum"></div>
+<script>
+const C=[
+  {id:'h264_bl',name:'H.264 Baseline',f:'h264',c:'avc1.42E01E'},
+  {id:'h264_hi',name:'H.264 High',f:'h264',c:'avc1.640028'},
+  {id:'av1_1080',name:'AV1 Main 1080p',f:'av1',c:'av01.0.08M.08'},
+  {id:'av1_720',name:'AV1 Main 720p',f:'av1',c:'av01.0.05M.08'},
+  {id:'av1_10b',name:'AV1 10-bit',f:'av1',c:'av01.0.08M.10'},
+  {id:'hevc',name:'HEVC Main',f:'hevc',c:'hvc1.1.6.L93.B0'},
+  {id:'hevc10',name:'HEVC Main10',f:'hevc',c:'hev1.1.6.L93.B0'},
+];
+const el=id=>document.getElementById(id);
+C.forEach(c=>{const d=document.createElement('div');d.className='card';d.id='c-'+c.id;
+  d.innerHTML=`<h2>${c.name}</h2><span class="s wait">Testing...</span><div class="d">${c.c}</div>`;
+  el('c').appendChild(d)});
+
+async function test(c){
+  const card=el('c-'+c.id),s=card.querySelector('.s'),d=card.querySelector('.d');
+  if(typeof VideoDecoder==='undefined'){s.className='s fail';s.textContent='No WebCodecs';return{...c,ok:false}}
+  try{
+    const sup=await VideoDecoder.isConfigSupported({codec:c.c,codedWidth:1920,codedHeight:1080,optimizeForLatency:true});
+    if(!sup.supported){s.className='s fail';s.textContent='Not supported';return{...c,ok:false}}
+    const hw=sup.config?.hardwareAcceleration||'unknown';
+    let ok=false;try{const dec=new VideoDecoder({output:()=>{},error:()=>{}});
+      dec.configure({codec:c.c,codedWidth:1920,codedHeight:1080,optimizeForLatency:true});
+      await new Promise(r=>setTimeout(r,80));ok=dec.state==='configured';dec.close()}catch{}
+    s.className=ok?'s pass':'s fail';s.textContent=ok?'Supported':'Rejected';
+    d.textContent=`${c.c} | HW: ${hw}`;return{...c,ok,hw}
+  }catch(e){s.className='s fail';s.textContent='Error';return{...c,ok:false}}
+}
+
+(async()=>{
+  const R=[];for(const c of C)R.push(await test(c));
+  const best=R.find(r=>r.f==='av1'&&r.ok)?'AV1':R.find(r=>r.f==='hevc'&&r.ok)?'HEVC':'H.264';
+  const msg={AV1:'AV1 supported. 30-50% bitrate savings on RTX 4090.',
+    HEVC:'HEVC only (no AV1). ~20% savings. Firefox excluded.',
+    'H.264':'H.264 only. Current codec is optimal.'}[best];
+  let rows='';R.forEach(r=>{rows+=`<tr><td>${r.name}</td><td><code>${r.c}</code></td>`+
+    `<td><span class="s ${r.ok?'pass':'fail'}">${r.ok?'YES':'NO'}</span></td>`+
+    `<td>${r.hw||'--'}</td></tr>`});
+  el('sum').innerHTML=`<b>Recommendation: ${best}</b> -- ${msg}<table><tr><th>Codec</th>`+
+    `<th>String</th><th>OK</th><th>HW</th></tr>${rows}</table>`+
+    `<div class="d">${navigator.userAgent}<br>${new Date().toISOString()}</div>`
+})();
+</script>
+</body>
+</html>

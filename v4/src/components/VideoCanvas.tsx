@@ -1,0 +1,165 @@
+import { useRef, useEffect, useCallback, useState, type RefObject } from 'react';
+
+interface VideoCanvasProps {
+  onBinaryFrame: (handler: ((data: Blob) => void) | null) => void;
+  className?: string;
+  /** Optional external ref to access the underlying canvas element (e.g. for replay recording) */
+  externalCanvasRef?: RefObject<HTMLCanvasElement | null>;
+}
+
+export function VideoCanvas({ onBinaryFrame, className = '', externalCanvasRef }: VideoCanvasProps) {
+  const frontCanvasRef = useRef<HTMLCanvasElement>(null);
+  const backCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const backCtxRef = useRef<CanvasRenderingContext2D | null>(null);
+  const pendingFrameRef = useRef<boolean>(false);
+  const rafIdRef = useRef<number>(0);
+  const frameCountRef = useRef<number>(0);
+  const fpsIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [hasFirstFrame, setHasFirstFrame] = useState(false);
+  const firstFrameReceivedRef = useRef(false);
+
+  // Sync external canvas ref with internal ref
+  useEffect(() => {
+    if (externalCanvasRef && 'current' in externalCanvasRef) {
+      (externalCanvasRef as React.MutableRefObject<HTMLCanvasElement | null>).current = frontCanvasRef.current;
+    }
+    return () => {
+      if (externalCanvasRef && 'current' in externalCanvasRef) {
+        (externalCanvasRef as React.MutableRefObject<HTMLCanvasElement | null>).current = null;
+      }
+    };
+  }, [externalCanvasRef]);
+
+  // Lazily initialize the off-screen back buffer canvas
+  const getBackBuffer = useCallback(() => {
+    if (!backCanvasRef.current) {
+      backCanvasRef.current = document.createElement('canvas');
+      backCanvasRef.current.width = 1280;
+      backCanvasRef.current.height = 720;
+      backCtxRef.current = backCanvasRef.current.getContext('2d');
+    }
+    return { canvas: backCanvasRef.current, ctx: backCtxRef.current };
+  }, []);
+
+  useEffect(() => {
+    const frontCanvas = frontCanvasRef.current;
+    if (!frontCanvas) return;
+    const frontCtx = frontCanvas.getContext('2d');
+    if (!frontCtx) return;
+
+    // Draw initial "waiting" state on the front buffer
+    frontCtx.fillStyle = '#0f0f1f';
+    frontCtx.fillRect(0, 0, frontCanvas.width, frontCanvas.height);
+    frontCtx.fillStyle = '#ffffff44';
+    frontCtx.font = '24px sans-serif';
+    frontCtx.textAlign = 'center';
+    frontCtx.fillText('Waiting for video feed...', frontCanvas.width / 2, frontCanvas.height / 2);
+
+    // Start FPS logging: count frames presented per second
+    frameCountRef.current = 0;
+    fpsIntervalRef.current = setInterval(() => {
+      if (frameCountRef.current > 0) {
+        console.log(`[VideoCanvas] FPS: ${frameCountRef.current}`);
+      }
+      frameCountRef.current = 0;
+    }, 1000);
+
+    // rAF loop: when a new frame has been decoded into the back buffer,
+    // blit it to the front buffer on the next animation frame.
+    const presentLoop = () => {
+      if (pendingFrameRef.current) {
+        const { canvas: backCanvas } = getBackBuffer();
+        const front = frontCanvasRef.current;
+        if (front) {
+          // Resize front buffer to match back buffer dimensions if needed
+          if (front.width !== backCanvas.width || front.height !== backCanvas.height) {
+            front.width = backCanvas.width;
+            front.height = backCanvas.height;
+          }
+          const ctx = front.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(backCanvas, 0, 0);
+            frameCountRef.current++;
+          }
+        }
+        pendingFrameRef.current = false;
+      }
+      rafIdRef.current = requestAnimationFrame(presentLoop);
+    };
+    rafIdRef.current = requestAnimationFrame(presentLoop);
+
+    // Handler called by the WebSocket layer for each incoming JPEG blob.
+    // Decodes asynchronously into the back buffer; the rAF loop will
+    // pick it up and present it on the next vsync.
+    let decoding = false;
+
+    const handler = (blob: Blob) => {
+      // Drop frame if we are still decoding the previous one to avoid
+      // unbounded decode queue buildup.
+      if (decoding) return;
+      decoding = true;
+
+      createImageBitmap(blob)
+        .then((bitmap) => {
+          const { canvas: backCanvas, ctx: backCtx } = getBackBuffer();
+          if (!backCtx) {
+            bitmap.close();
+            decoding = false;
+            return;
+          }
+
+          // Resize back buffer to match the incoming frame dimensions
+          if (backCanvas.width !== bitmap.width || backCanvas.height !== bitmap.height) {
+            backCanvas.width = bitmap.width;
+            backCanvas.height = bitmap.height;
+          }
+
+          backCtx.drawImage(bitmap, 0, 0);
+          bitmap.close();
+          pendingFrameRef.current = true;
+          decoding = false;
+
+          // Signal first frame received
+          if (!firstFrameReceivedRef.current) {
+            firstFrameReceivedRef.current = true;
+            setHasFirstFrame(true);
+          }
+        })
+        .catch((err) => {
+          // Failed to decode JPEG - skip frame
+          console.warn('[VideoCanvas] createImageBitmap failed:', err, 'blob size:', blob.size, 'type:', blob.type);
+          decoding = false;
+        });
+    };
+
+    onBinaryFrame(handler);
+
+    return () => {
+      onBinaryFrame(null);
+      cancelAnimationFrame(rafIdRef.current);
+      if (fpsIntervalRef.current) {
+        clearInterval(fpsIntervalRef.current);
+        fpsIntervalRef.current = null;
+      }
+    };
+  }, [onBinaryFrame, getBackBuffer]);
+
+  return (
+    <div className={`relative ${className}`}>
+      <canvas
+        ref={frontCanvasRef}
+        width={1280}
+        height={720}
+        className="bg-dark-500 w-full h-full"
+        style={{ objectFit: 'cover' }}
+      />
+      {!hasFirstFrame && (
+        <div className="absolute inset-0 flex items-center justify-center bg-dark-500">
+          <span className="text-white/40 text-lg font-mono animate-pulse">
+            Waiting for video feed...
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}

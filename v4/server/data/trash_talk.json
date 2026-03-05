@@ -1,0 +1,122 @@
+{
+  "ai_overtakes": [
+    "Later, slowpoke.",
+    "That's MY lead now.",
+    "Eat my exhaust!",
+    "See ya in the mirrors!",
+    "Too slow, too late.",
+    "You blinked. I passed.",
+    "Move over, rookie.",
+    "This lane's mine now.",
+    "Better luck next lap.",
+    "Was that your best?"
+  ],
+  "player_overtakes": [
+    "Lucky move. Won't last.",
+    "Enjoy it while you can.",
+    "I'll be back. Count on it.",
+    "Okay, not bad. NOT BAD.",
+    "Fine. You earned that one.",
+    "Don't get comfortable up there.",
+    "I let you have that.",
+    "Respect. But I'm coming.",
+    "Nice pass... for now.",
+    "That won't happen again."
+  ],
+  "player_crashes": [
+    "Smooth driving there, champ.",
+    "The wall isn't a checkpoint.",
+    "Need a driving lesson?",
+    "That's gotta hurt!",
+    "Ouch. I felt that from here.",
+    "Try using the road next time.",
+    "Are you even trying?",
+    "My grandma drives better.",
+    "Brakes exist, you know.",
+    "That's not a shortcut!"
+  ],
+  "ai_crashes": [
+    "That... didn't happen.",
+    "Road was wet. Obviously.",
+    "Don't you dare clip that.",
+    "I meant to do that.",
+    "Just testing the barriers.",
+    "Ignore that. Focus on losing.",
+    "A minor tactical detour.",
+    "The wall jumped out at me.",
+    "Still faster than you.",
+    "I was checking the scenery."
+  ],
+  "close_gap": [
+    "Getting close! Scared yet?",
+    "I can smell your fear.",
+    "Right on your tail...",
+    "Drafting off you. Thanks!",
+    "Bumper to bumper. Let's GO.",
+    "This is where it gets fun.",
+    "You can't shake me!",
+    "I'm breathing down your neck.",
+    "Close enough to touch!",
+    "The gap is closing..."
+  ],
+  "big_lead": [
+    "Can you even see me?",
+    "I'm lapping you mentally.",
+    "This is too easy.",
+    "Wake me when you catch up.",
+    "Lonely up here at the top.",
+    "Send a postcard from back there.",
+    "Are you even in this race?",
+    "I could drive blindfolded.",
+    "Yawn. Where's the challenge?",
+    "Maybe try go-karts first."
+  ],
+  "final_lap": [
+    "Final lap. All or nothing!",
+    "Last chance to beat me!",
+    "Home stretch. Bring it!",
+    "One lap left. I'm all in.",
+    "No mercy this lap!",
+    "Now it gets serious.",
+    "Everything on the line!",
+    "Last lap, last chance!",
+    "The finish line is calling.",
+    "End game. Let's settle this."
+  ],
+  "race_start": [
+    "Try to keep up!",
+    "Hope you're ready for this.",
+    "Let's see what you've got.",
+    "Green light. My time to shine.",
+    "Don't blink!",
+    "Race time. Prepare to lose.",
+    "Show me what you've got!",
+    "Let's gooo!",
+    "Buckle up, rookie.",
+    "Game on!"
+  ],
+  "race_finish_win": [
+    "Too easy. GG.",
+    "Called it. I'm the best.",
+    "Better luck next time!",
+    "That's how it's done.",
+    "SHADOW wins. As expected.",
+    "You never stood a chance.",
+    "Victory is my middle name.",
+    "Thanks for the warm-up.",
+    "Rematch? I dare you.",
+    "First place feels good."
+  ],
+  "race_finish_lose": [
+    "You got lucky. Rematch NOW.",
+    "Okay... respect. This time.",
+    "I wasn't even trying.",
+    "Lag. Definitely lag.",
+    "Fine. You win this one.",
+    "I'll remember this...",
+    "Not bad, human. Not bad.",
+    "Enjoy your moment.",
+    "Next race, I'm going all out.",
+    "You won the battle, not the war."
+  ]
+}

@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>WebTransport PoC - Shadow Driver v3</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: monospace; background: #111; color: #eee; padding: 20px; }
+  h1 { margin-bottom: 10px; font-size: 18px; }
+  .status { padding: 8px 12px; border-radius: 4px; margin: 8px 0; font-size: 14px; }
+  .status.connected { background: #1a3a1a; border: 1px solid #2d5a2d; }
+  .status.disconnected { background: #3a1a1a; border: 1px solid #5a2d2d; }
+  .status.fallback { background: #3a3a1a; border: 1px solid #5a5a2d; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
+  .panel { background: #1a1a1a; border: 1px solid #333; border-radius: 6px; padding: 16px; }
+  .panel h2 { font-size: 14px; color: #888; margin-bottom: 12px; text-transform: uppercase; }
+  .stat { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid #222; }
+  .stat .label { color: #888; }
+  .stat .value { color: #4fc3f7; font-weight: bold; }
+  .stat .value.warn { color: #ffb74d; }
+  .stat .value.bad { color: #ef5350; }
+  .log { margin-top: 16px; background: #0a0a0a; border: 1px solid #333; border-radius: 6px;
+         padding: 12px; height: 200px; overflow-y: auto; font-size: 12px; line-height: 1.6; }
+  .log .entry { border-bottom: 1px solid #1a1a1a; padding: 2px 0; }
+  .log .ts { color: #666; }
+  .log .msg { color: #aaa; }
+  .log .err { color: #ef5350; }
+  .bar-container { height: 20px; background: #222; border-radius: 3px; margin: 4px 0; overflow: hidden; }
+  .bar { height: 100%; background: #4fc3f7; transition: width 0.1s; border-radius: 3px; }
+  button { background: #333; color: #eee; border: 1px solid #555; padding: 8px 16px;
+           border-radius: 4px; cursor: pointer; margin: 4px; font-family: monospace; }
+  button:hover { background: #444; }
+  button.active { background: #1a5a1a; border-color: #2d8a2d; }
+  .controls { margin: 12px 0; }
+  .note { color: #888; font-size: 12px; margin-top: 8px; }
+</style>
+</head>
+<body>
+
+<h1>WebTransport PoC -- Shadow Driver v3</h1>
+<div id="statusBar" class="status disconnected">Disconnected</div>
+
+<div class="controls">
+  <button id="btnConnect" onclick="connect()">Connect WebTransport</button>
+  <button id="btnWsFallback" onclick="connectWsFallback()">Connect WebSocket (fallback)</button>
+  <button id="btnDisconnect" onclick="disconnect()" disabled>Disconnect</button>
+</div>
+
+<div class="grid">
+  <div class="panel">
+    <h2>Video Datagrams (unreliable)</h2>
+    <div class="stat"><span class="label">Frames received</span><span id="vFrames" class="value">0</span></div>
+    <div class="stat"><span class="label">Frames dropped</span><span id="vDropped" class="value">0</span></div>
+    <div class="stat"><span class="label">Current FPS</span><span id="vFps" class="value">0</span></div>
+    <div class="stat"><span class="label">Avg inter-frame (ms)</span><span id="vInterframe" class="value">--</span></div>
+    <div class="stat"><span class="label">Jitter (ms)</span><span id="vJitter" class="value">--</span></div>
+    <div class="stat"><span class="label">Delivery latency (ms)</span><span id="vLatency" class="value">--</span></div>
+    <div class="stat"><span class="label">Frame size (KB)</span><span id="vSize" class="value">--</span></div>
+    <div class="stat"><span class="label">Chunks/frame</span><span id="vChunks" class="value">--</span></div>
+    <div class="stat"><span class="label">Chunk loss rate</span><span id="vChunkLoss" class="value">--</span></div>
+    <div class="stat"><span class="label">FPS</span><span class="value" style="width:100%">
+      <div class="bar-container"><div id="vFpsBar" class="bar" style="width:0%"></div></div>
+    </span></div>
+  </div>
+
+  <div class="panel">
+    <h2>Telemetry Stream (reliable)</h2>
+    <div class="stat"><span class="label">Messages received</span><span id="tCount" class="value">0</span></div>
+    <div class="stat"><span class="label">Current rate (Hz)</span><span id="tRate" class="value">0</span></div>
+    <div class="stat"><span class="label">Delivery latency (ms)</span><span id="tLatency" class="value">--</span></div>
+    <div class="stat"><span class="label">Seq gaps (missing)</span><span id="tGaps" class="value">0</span></div>
+    <div class="stat"><span class="label">Last speed</span><span id="tSpeed" class="value">--</span></div>
+    <div class="stat"><span class="label">Last RPM</span><span id="tRpm" class="value">--</span></div>
+    <div class="stat"><span class="label">Transport</span><span id="tTransport" class="value">--</span></div>
+  </div>
+</div>
+
+<div class="log" id="logPanel"></div>
+<div class="note">
+  NOTE: For self-signed certs, open chrome://flags/#allow-insecure-localhost or visit
+  https://localhost:4433/ directly and accept the certificate first.
+  Safari does NOT support WebTransport (as of Safari 18.x, Feb 2026) -- use WebSocket fallback.
+</div>
+
+<script>
+// --- State ---
+let transport = null;
+let ws = null;
+let mode = null; // 'webtransport' | 'websocket'
+
+// Video stats
+const vStats = {
+  frames: 0, dropped: 0, lastFrameTime: 0, interframeTimes: [],
+  fpsWindow: [], lastFrameId: 0, totalChunks: 0, receivedChunks: 0,
+  partialFrames: new Map(), // frameId -> { chunks: Map<idx, data>, total, timestamp }
+};
+
+// Telemetry stats
+const tStats = { count: 0, rateWindow: [], lastSeq: -1, gaps: 0 };
+
+// --- Logging ---
+function log(msg, isError = false) {
+  const el = document.getElementById('logPanel');
+  const ts = new Date().toISOString().slice(11, 23);
+  const cls = isError ? 'err' : 'msg';
+  el.innerHTML += `<div class="entry"><span class="ts">${ts}</span> <span class="${cls}">${msg}</span></div>`;
+  el.scrollTop = el.scrollHeight;
+}
+
+// --- UI update ---
+function updateUI() {
+  const now = performance.now();
+
+  // Video
+  document.getElementById('vFrames').textContent = vStats.frames;
+  document.getElementById('vDropped').textContent = vStats.dropped;
+
+  // FPS (frames in last 1s)
+  vStats.fpsWindow = vStats.fpsWindow.filter(t => now - t < 1000);
+  const fps = vStats.fpsWindow.length;
+  document.getElementById('vFps').textContent = fps;
+  document.getElementById('vFpsBar').style.width = Math.min(fps / 30 * 100, 100) + '%';
+
+  // Interframe
+  if (vStats.interframeTimes.length > 1) {
+    const recent = vStats.interframeTimes.slice(-30);
+    const avg = recent.reduce((a, b) => a + b, 0) / recent.length;
+    document.getElementById('vInterframe').textContent = avg.toFixed(1);
+
+    // Jitter = stddev of interframe times
+    const variance = recent.reduce((s, v) => s + (v - avg) ** 2, 0) / recent.length;
+    document.getElementById('vJitter').textContent = Math.sqrt(variance).toFixed(1);
+  }
+
+  // Chunk stats
+  if (vStats.totalChunks > 0) {
+    const loss = 1 - (vStats.receivedChunks / vStats.totalChunks);
+    const el = document.getElementById('vChunkLoss');
+    el.textContent = (loss * 100).toFixed(1) + '%';
+    el.className = 'value' + (loss > 0.1 ? ' bad' : loss > 0.02 ? ' warn' : '');
+  }
+
+  // Telemetry
+  document.getElementById('tCount').textContent = tStats.count;
+  tStats.rateWindow = tStats.rateWindow.filter(t => now - t < 1000);
+  document.getElementById('tRate').textContent = tStats.rateWindow.length;
+  document.getElementById('tGaps').textContent = tStats.gaps;
+  document.getElementById('tTransport').textContent = mode || '--';
+}
+
+setInterval(updateUI, 200);
+
+// --- WebTransport connect ---
+async function connect() {
+  const port = location.port || '4433';
+  const url = `https://${location.hostname}:${port}/wt`;
+  log(`Connecting via WebTransport to ${url}...`);
+
+  if (typeof WebTransport === 'undefined') {
+    log('WebTransport API not available in this browser. Use WebSocket fallback.', true);
+    return;
+  }
+
+  try {
+    transport = new WebTransport(url);
+    transport.closed.then(() => {
+      log('WebTransport connection closed');
+      setStatus('disconnected');
+    }).catch(e => {
+      log(`WebTransport closed with error: ${e.message}`, true);
+      setStatus('disconnected');
+    });
+
+    await transport.ready;
+    mode = 'webtransport';
+    setStatus('connected');
+    log(`Connected! maxDatagramSize=${transport.datagrams.maxDatagramSize}`);
+    document.getElementById('btnDisconnect').disabled = false;
+
+    // Read datagrams (video frames)
+    readDatagrams(transport.datagrams.readable);
+
+    // Read incoming unidirectional streams (telemetry)
+    readIncomingStreams(transport.incomingUnidirectionalStreams);
+
+  } catch (e) {
+    log(`WebTransport connection failed: ${e.message}`, true);
+    setStatus('disconnected');
+  }
+}
+
+async function readDatagrams(readable) {
+  const reader = readable.getReader();
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      handleVideoDatagram(value);
+    }
+  } catch (e) {
+    log(`Datagram reader error: ${e.message}`, true);
+  }
+}
+
+function handleVideoDatagram(data) {
+  const now = performance.now();
+  if (data.byteLength < 16) return; // too small for header
+
+  const view = new DataView(data.buffer, data.byteOffset);
+  const frameId = view.getUint32(0);
+  const chunkIdx = view.getUint16(4);
+  const totalChunks = view.getUint16(6);
+  const timestampUs = Number(view.getBigUint64(8));
+  const chunkData = data.slice(16);
+
+  vStats.receivedChunks++;
+  vStats.totalChunks += (chunkIdx === 0 ? totalChunks : 0); // count total only on first chunk
+
+  // Reassemble frame
+  let frame = vStats.partialFrames.get(frameId);
+  if (!frame) {
+    frame = { chunks: new Map(), total: totalChunks, timestamp: timestampUs, firstChunkTime: now };
+    vStats.partialFrames.set(frameId, frame);
+  }
+  frame.chunks.set(chunkIdx, chunkData);
+
+  // Drop old partial frames (> 200ms old or 5+ frames behind)
+  if (vStats.partialFrames.size > 5) {
+    const oldIds = [...vStats.partialFrames.keys()].filter(id => id < frameId - 3);
+    for (const id of oldIds) {
+      vStats.partialFrames.delete(id);
+      vStats.dropped++;
+    }
+  }
+
+  // Check if frame is complete
+  if (frame.chunks.size === frame.total) {
+    // Frame assembled
+    let totalSize = 0;
+    for (const c of frame.chunks.values()) totalSize += c.byteLength;
+
+    vStats.frames++;
+    vStats.fpsWindow.push(now);
+    vStats.lastFrameId = frameId;
+
+    // Interframe timing
+    if (vStats.lastFrameTime > 0) {
+      vStats.interframeTimes.push(now - vStats.lastFrameTime);
+      if (vStats.interframeTimes.length > 100) vStats.interframeTimes.shift();
+    }
+    vStats.lastFrameTime = now;
+
+    // Latency (assembly time for this frame)
+    const assemblyMs = now - frame.firstChunkTime;
+    document.getElementById('vLatency').textContent = assemblyMs.toFixed(1);
+    document.getElementById('vSize').textContent = (totalSize / 1024).toFixed(1);
+    document.getElementById('vChunks').textContent = frame.total;
+
+    vStats.partialFrames.delete(frameId);
+  }
+}
+
+async function readIncomingStreams(readable) {
+  const reader = readable.getReader();
+  try {
+    while (true) {
+      const { value: stream, done } = await reader.read();
+      if (done) break;
+      readTelemetryStream(stream);
+    }
+  } catch (e) {
+    log(`Stream reader error: ${e.message}`, true);
+  }
+}
+
+async function readTelemetryStream(stream) {
+  const reader = stream.getReader();
+  let buffer = '';
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += new TextDecoder().decode(value);
+      // Process newline-delimited JSON
+      const lines = buffer.split('\n');
+      buffer = lines.pop(); // keep incomplete line
+      for (const line of lines) {
+        if (line.trim()) handleTelemetry(JSON.parse(line));
+      }
+    }
+  } catch (e) {
+    log(`Telemetry stream error: ${e.message}`, true);
+  }
+}
+
+function handleTelemetry(data) {
+  const now = performance.now();
+  tStats.count++;
+  tStats.rateWindow.push(now);
+
+  // Seq gap detection
+  if (tStats.lastSeq >= 0 && data.seq !== tStats.lastSeq + 1) {
+    tStats.gaps += data.seq - tStats.lastSeq - 1;
+  }
+  tStats.lastSeq = data.seq;
+
+  document.getElementById('tSpeed').textContent = data.speed?.toFixed(1) || '--';
+  document.getElementById('tRpm').textContent = data.rpm || '--';
+
+  // Rough latency estimate (server timestamp in us)
+  if (data.ts) {
+    document.getElementById('tLatency').textContent = '~stream';
+  }
+}
+
+// --- WebSocket fallback ---
+function connectWsFallback() {
+  const port = location.port || '8765';
+  const wsUrl = `ws://${location.hostname}:${port}`;
+  log(`Connecting via WebSocket fallback to ${wsUrl}...`);
+
+  try {
+    ws = new WebSocket(wsUrl);
+    ws.binaryType = 'arraybuffer';
+
+    ws.onopen = () => {
+      mode = 'websocket';
+      setStatus('fallback');
+      log('WebSocket connected (TCP fallback - head-of-line blocking active)');
+      document.getElementById('btnDisconnect').disabled = false;
+    };
+
+    ws.onmessage = (event) => {
+      if (typeof event.data === 'string') {
+        try { handleTelemetry(JSON.parse(event.data)); } catch(e) {}
+      } else {
+        // Binary = video frame (no fragmentation needed over TCP)
+        const arr = new Uint8Array(event.data);
+        if (arr.byteLength >= 16) {
+          // Simulate the same stats tracking
+          const view = new DataView(arr.buffer);
+          const frameId = view.getUint32(0);
+          const now = performance.now();
+          vStats.frames++;
+          vStats.fpsWindow.push(now);
+          if (vStats.lastFrameTime > 0) {
+            vStats.interframeTimes.push(now - vStats.lastFrameTime);
+            if (vStats.interframeTimes.length > 100) vStats.interframeTimes.shift();
+          }
+          vStats.lastFrameTime = now;
+          document.getElementById('vSize').textContent = (arr.byteLength / 1024).toFixed(1);
+          document.getElementById('vChunks').textContent = '1 (TCP)';
+          document.getElementById('vLatency').textContent = 'N/A (TCP)';
+        }
+      }
+    };
+
+    ws.onclose = () => { log('WebSocket closed'); setStatus('disconnected'); };
+    ws.onerror = (e) => { log('WebSocket error', true); };
+  } catch (e) {
+    log(`WebSocket connection failed: ${e.message}`, true);
+  }
+}
+
+// --- Disconnect ---
+function disconnect() {
+  if (transport) { transport.close(); transport = null; }
+  if (ws) { ws.close(); ws = null; }
+  mode = null;
+  document.getElementById('btnDisconnect').disabled = true;
+  setStatus('disconnected');
+  log('Disconnected');
+}
+
+function setStatus(s) {
+  const el = document.getElementById('statusBar');
+  el.className = 'status ' + s;
+  el.textContent = s === 'connected' ? 'Connected (WebTransport/QUIC - unreliable datagrams)'
+    : s === 'fallback' ? 'Connected (WebSocket/TCP - head-of-line blocking)'
+    : 'Disconnected';
+}
+</script>
+</body>
+</html>
