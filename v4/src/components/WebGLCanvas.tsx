@@ -123,57 +123,8 @@ void main() {
   }
 
   // --- 3. Chromatic aberration --- DISABLED for clean video
+  // Baseline rendering: stylization disabled (no color grading, ACES, sharpening, vignette).
   vec3 color = blurredColor;
-  float edgeDist = length(uv - 0.5) * 2.0; // used by vignette below
-
-  // --- 3b. Color grading --- subtle cinematic warmth
-  // Lift (shadows): very slight warm push
-  vec3 lift = vec3(0.01, 0.005, -0.005);
-  // Gain (highlights): slight warm/cool split
-  vec3 gain = vec3(0.99, 1.0, 1.02);
-  // Gamma (midtones): subtle warmth
-  vec3 gamma = vec3(0.99, 1.0, 1.01);
-
-  color = pow(max(color, 0.0), gamma) * gain + lift;
-
-  // Contrast: moderate enhancement for punchier image
-  float contrast = 1.12; // cinematic contrast boost
-  color = (color - 0.5) * contrast + 0.5;
-
-  // Saturation: moderate enhancement for richer colors
-  float luma = dot(color, vec3(0.2126, 0.7152, 0.0722));
-  float saturation = 1.15; // cinematic saturation boost
-  color = mix(vec3(luma), color, saturation);
-
-  // --- 4. ACES Filmic Tone Mapping (Narkowicz 2016 approximation) ---
-  // Produces the signature filmic color response used by UE4/GT7/Forza:
-  // compresses highlights, crushes blacks, adds cinematic S-curve
-  color *= 1.05; // slight exposure bump before tone mapping
-  float a = 2.51;
-  float b = 0.03;
-  float c = 2.43;
-  float d = 0.59;
-  float e = 0.14;
-  color = clamp((color * (a * color + b)) / (color * (c * color + d) + e), 0.0, 1.0);
-
-  // --- 5. Contrast-Adaptive Sharpening (counteracts H.264 softness) ---
-  vec2 pixelSize = 1.0 / vec2(textureSize(u_frame, 0));
-  vec3 n = texture(u_frame, uv + vec2(0.0, pixelSize.y)).rgb;
-  vec3 s = texture(u_frame, uv - vec2(0.0, pixelSize.y)).rgb;
-  vec3 ee = texture(u_frame, uv + vec2(pixelSize.x, 0.0)).rgb;
-  vec3 w = texture(u_frame, uv - vec2(pixelSize.x, 0.0)).rgb;
-  vec3 minVal = min(min(n, s), min(ee, w));
-  vec3 maxVal = max(max(n, s), max(ee, w));
-  vec3 amp = clamp((maxVal - minVal) * 0.5, 0.0, 1.0);
-  float sharpness = 0.25; // conservative to avoid amplifying compression noise
-  color += amp * sharpness * (color - (n + s + ee + w) * 0.25);
-  color = clamp(color, 0.0, 1.0);
-
-  // --- 6. Vignette --- (subtle darkening at edges for cinematic feel)
-  float vignetteRadius = mix(0.85, 0.65, t);
-  float vignetteSoft = 0.45;
-  float vignette = smoothstep(vignetteRadius, vignetteRadius + vignetteSoft, edgeDist);
-  color *= 1.0 - vignette * mix(0.20, 0.40, t);
 
   // Final clamp
   color = clamp(color, 0.0, 1.0);
@@ -254,12 +205,10 @@ export function WebGLCanvas({ onBinaryFrame, onH264Frame, onCodecConfig, classNa
   const fpsIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startTimeRef = useRef<number>(performance.now());
   const speedRef = useRef<number>(0);
-  const steerRef = useRef<number>(0);
   const [hasFirstFrame, setHasFirstFrame] = useState(false);
   const firstFrameReceivedRef = useRef(false);
   const textureInitializedRef = useRef(false);
   const prevTexInitRef = useRef(false);
-  const blendFrameRef = useRef(false);
   const hasUploadedAnyFrameRef = useRef(false);
 
   // WebCodecs H.264 decoder state
@@ -269,7 +218,7 @@ export function WebGLCanvas({ onBinaryFrame, onH264Frame, onCodecConfig, classNa
 
   // Keep speed/steer refs in sync without triggering effect re-runs
   speedRef.current = speedKmh;
-  steerRef.current = steer;
+  void steer;
 
   const initGL = useCallback((canvas: HTMLCanvasElement): boolean => {
     const gl = canvas.getContext('webgl2', { alpha: false, antialias: false, premultipliedAlpha: false, preserveDrawingBuffer: true });
@@ -449,8 +398,6 @@ export function WebGLCanvas({ onBinaryFrame, onH264Frame, onCodecConfig, classNa
         closePending(pending);
         hasUploadedAnyFrameRef.current = true;
 
-        // Set blend flag: next render tick will show 50/50 crossfade
-        blendFrameRef.current = true;
       }
 
       // Only render if we have at least one frame uploaded
@@ -472,18 +419,9 @@ export function WebGLCanvas({ onBinaryFrame, onH264Frame, onCodecConfig, classNa
         // Re-enable when latency <100ms: Math.min(1.0, Math.max(0.0, speed / 200))
         gl.uniform1f(uniformsRef.current.radialBlur, 0.0);
 
-        // Crossfade blend: 0.5 on first tick after new frame, 1.0 otherwise
-        // Motion vector: velocity-based pixel shift for motion-compensated interpolation
-        if (blendFrameRef.current) {
-          gl.uniform1f(uniformsRef.current.blend, 0.5);
-          const motionX = -steerRef.current * 0.005 * (speed / 100);
-          const motionY = speed * 0.00003;
-          gl.uniform2f(uniformsRef.current.motionVector, motionX, motionY);
-          blendFrameRef.current = false;
-        } else {
-          gl.uniform1f(uniformsRef.current.blend, 1.0);
-          gl.uniform2f(uniformsRef.current.motionVector, 0.0, 0.0);
-        }
+        // Ghosting disabled: always render current frame only, no motion-compensated shift.
+        gl.uniform1f(uniformsRef.current.blend, 1.0);
+        gl.uniform2f(uniformsRef.current.motionVector, 0.0, 0.0);
 
         // Draw
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
