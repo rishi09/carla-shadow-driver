@@ -96,8 +96,11 @@ class RaceManager:
         self._tc_stuck_time = 0.0  # Time spent stuck with TC active
         self._tc_recovery_time = 0.0  # Recovery period: TC fully disabled
 
-        # Auto-unstuck: respawn when car is stuck for too long
-        self._stuck_timer = 0.0  # Seconds car has been stuck (speed < 2 km/h)
+        # Auto-unstuck: split forward/reverse timers to avoid mode cross-talk.
+        # Using separate timers avoids false triggers when switching gears.
+        self._stuck_timer = 0.0  # Forward stuck timer (seconds)
+        self._reverse_stuck_timer = 0.0  # Reverse stuck timer (seconds)
+        self._wall_grind_timer = 0.0  # Off-road wall-grind timer (seconds)
 
         # Reverse gear state machine
         self._in_reverse = False
@@ -914,6 +917,7 @@ class RaceManager:
             if w_pressed or not s_pressed:
                 self._in_reverse = False
                 self._reverse_frames = 0
+                self._reverse_stuck_timer = 0.0
                 if self._ctrl_frame % 30 == 0:
                     print(f"[CTRL#{self._ctrl_frame}] EXIT REVERSE (w={w_pressed}, s={s_pressed})")
         else:
@@ -921,6 +925,7 @@ class RaceManager:
             if s_pressed and not w_pressed and speed_kmh < 1.0 and self._s_was_released:
                 self._in_reverse = True
                 self._reverse_frames = 0
+                self._reverse_stuck_timer = 0.0
                 self._s_was_released = False
                 print(f"[CTRL#{self._ctrl_frame}] ENTER REVERSE spd={speed_kmh:.1f}")
 
@@ -932,9 +937,11 @@ class RaceManager:
             # point right, car pivots around them going backward).
             # With inversion: D → rear goes right, A → rear goes left.
             reverse_steer = -final_steer
-            # First 5 frames (~167ms): full brake to ensure car fully stops
-            # before engaging reverse gear. CARLA's physics need a clean stop.
-            if self._reverse_frames <= 5:
+            # Brake-stop phase before engaging reverse gear.
+            # Keep this short when the car is already almost stationary, but
+            # allow one extra frame at low forward roll to avoid drivetrain jerk.
+            reverse_brake_frames = 4 if speed_kmh < 0.5 else 5
+            if self._reverse_frames <= reverse_brake_frames:
                 control = carla.VehicleControl(
                     throttle=0.0,
                     steer=0.0,
@@ -949,8 +956,9 @@ class RaceManager:
                     print(f"[CTRL#{self._ctrl_frame}] REVERSE BRAKE-STOP frame={self._reverse_frames}")
                 return
             # After braking phase: apply reverse with manual gear=-1
-            # Higher floor (0.7) so reverse feels responsive, cap at 0.85
-            reverse_throttle = min(0.85, max(0.7, self._current_brake))
+            # Lower floor reduces over-aggressive reverse launches while keeping
+            # responsive ramp-up when the player holds S.
+            reverse_throttle = min(0.82, max(0.42, self._current_brake))
             control = carla.VehicleControl(
                 throttle=reverse_throttle,
                 steer=reverse_steer,
@@ -961,18 +969,19 @@ class RaceManager:
                 gear=-1,  # Explicitly set reverse gear
             )
             self.player_car.apply_control(control)
-            # Reverse-stuck timeout: if stuck in reverse for 5+ seconds, auto-respawn
-            # This prevents the car being trapped against a wall indefinitely
-            if speed_kmh < 2.0 and self._reverse_frames > 5:  # Skip brake-stop phase
-                self._stuck_timer += (1.0 / 30.0)
-                if self._stuck_timer > 5.0:
-                    print(f"[UNSTUCK] Stuck in reverse for {self._stuck_timer:.1f}s "
+            # Reverse-stuck timeout: if reverse input is active but speed stays
+            # near zero for multiple seconds, auto-respawn.
+            reverse_has_drive_intent = s_pressed and not w_pressed
+            if speed_kmh < 1.6 and reverse_has_drive_intent and self._reverse_frames > reverse_brake_frames:
+                self._reverse_stuck_timer += dt
+                if self._reverse_stuck_timer > 3.5:
+                    print(f"[UNSTUCK] Stuck in reverse for {self._reverse_stuck_timer:.1f}s "
                           f"(spd={speed_kmh:.1f}) — auto-respawning")
                     self.respawn_player()
-                    self._stuck_timer = 0.0
+                    self._reverse_stuck_timer = 0.0
                     return
-            elif speed_kmh >= 2.0:
-                self._stuck_timer = 0.0  # Car is moving in reverse, reset timer
+            else:
+                self._reverse_stuck_timer = 0.0
             if self._ctrl_frame % 30 == 0:
                 active = [k for k, v in keys.items() if v]
                 print(f"[CTRL#{self._ctrl_frame}] REVERSE keys={active} spd={speed_kmh:.1f} "
@@ -1002,29 +1011,37 @@ class RaceManager:
         # SKIP: when player is intentionally reversing (don't respawn during reverse)
         dt = 1.0 / 30.0
         if self._in_reverse:
-            self._stuck_timer = 0.0  # Reset stuck timer during reverse
+            self._stuck_timer = 0.0
+            self._wall_grind_timer = 0.0
         else:
             has_throttle = keys.get('w', False) or keys.get('s', False)
-            # Raised threshold from 2.0 to 5.0 km/h — car bouncing against a fence
-            # can fluctuate 0-5 km/h, which was resetting the timer and causing
-            # 11-19s delays before unstuck triggered
-            stuck_stationary = speed_kmh < 5.0 and (abs(self._drift_angle) > 30.0 or has_throttle)
-            # Wall grind detection: car is moving but hasn't progressed toward
-            # the next checkpoint in >6 seconds (road nudge is active + speed > 5)
+            # Stationary-stuck: low speed with active input intent. Require a
+            # small speed floor + intent to avoid respawning while idling at start.
+            stuck_stationary = speed_kmh < 3.8 and has_throttle and (
+                abs(self._drift_angle) > 22.0 or speed_kmh < 1.2
+            )
+            # Wall grind detection: road nudge active while speed stays low.
             off_road = hasattr(self, '_last_nudge_active') and self._last_nudge_active
-            wall_grind = speed_kmh > 5.0 and off_road and self._stuck_timer > 6.0
-            if stuck_stationary or (off_road and speed_kmh < 5.0):
+            if off_road and has_throttle and speed_kmh < 8.0:
+                self._wall_grind_timer += dt
+            else:
+                self._wall_grind_timer = 0.0
+            wall_grind = self._wall_grind_timer > 2.2
+
+            if stuck_stationary or (off_road and has_throttle and speed_kmh < 3.8):
                 self._stuck_timer += dt
-                if self._stuck_timer > 3.0:
+                if self._stuck_timer > 2.0:
                     print(f"[UNSTUCK] Car stuck for {self._stuck_timer:.1f}s "
                           f"(spd={speed_kmh:.1f}, drift={self._drift_angle:.1f}°) — auto-respawning")
                     self.respawn_player()
                     self._stuck_timer = 0.0
+                    self._wall_grind_timer = 0.0
             elif wall_grind:
-                print(f"[UNSTUCK] Wall grind for {self._stuck_timer:.1f}s "
+                print(f"[UNSTUCK] Wall grind for {self._wall_grind_timer:.1f}s "
                       f"(spd={speed_kmh:.1f}, off-road) — auto-respawning")
                 self.respawn_player()
                 self._stuck_timer = 0.0
+                self._wall_grind_timer = 0.0
             else:
                 self._stuck_timer = 0.0
         if self._ctrl_frame % 30 == 0:
